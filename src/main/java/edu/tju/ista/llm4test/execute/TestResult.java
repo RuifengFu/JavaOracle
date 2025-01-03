@@ -8,19 +8,22 @@ import java.util.stream.Collectors;
 public class TestResult {
 
     private TestResultKind kind;
-    private TestOutput compileResult;
+    private final TestOutput compileResult;
     private HashMap<String, TestOutput> execResults = new HashMap<>();
 
     public TestResult() {
         this.kind = TestResultKind.UNKNOWN;
+        this.compileResult = null;
     }
 
     public TestResult(TestResultKind kind) {
         this.kind = kind;
+        this.compileResult = null;
+        this.execResults = null;
     }
 
     public TestResult(TestOutput compileResult) {
-        this();
+        this.kind = TestResultKind.UNKNOWN;
         this.compileResult = compileResult;
         if (compileResult.exitValue != 0) {
             if (compileResult.exitValue == 124) {
@@ -31,6 +34,9 @@ public class TestResult {
         }
     }
 
+    public boolean isDiff() {
+        return kind == TestResultKind.DIFF;
+    }
     public boolean isTestFail() {
         return kind == TestResultKind.TEST_FAIL;
     }
@@ -39,6 +45,16 @@ public class TestResult {
     }
     public boolean isCompileTimeout() {
         return compileResult.exitValue == 124;
+    }
+
+    /*
+     * Returns true if the test case is a failure
+     */
+    public boolean isFail() {
+        return switch (kind) {
+            case COMPILE_FAIL, TEST_FAIL, DIFF, MAYBE_TEST_FAIL -> true;
+            default -> false;
+        };
     }
 
     public boolean isSuccess() {
@@ -53,6 +69,8 @@ public class TestResult {
             } else {
                 kind = TestResultKind.TEST_FAIL;
             }
+        } else {
+            kind = TestResultKind.SUCCESS;
         }
     }
 
@@ -73,6 +91,9 @@ public class TestResult {
         }
     }
 
+    public void setKind(TestResultKind kind) {
+        this.kind = kind;
+    }
     public TestResultKind getKind() {
         return kind;
     }
@@ -85,7 +106,12 @@ public class TestResult {
         return execResults;
     }
 
-
+    public String toString() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Compile Result: ").append(compileResult).append("\n");
+        sb.append("Execution Results: ").append(execResults).append("\n");
+        return sb.toString();
+    }
 
 }
 

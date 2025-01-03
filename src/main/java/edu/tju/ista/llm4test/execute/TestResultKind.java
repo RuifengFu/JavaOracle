@@ -4,12 +4,13 @@ public enum TestResultKind {
     SUCCESS,
     COMPILE_FAIL,
     TEST_FAIL,
-    UNKNOWN,
+    UNKNOWN, // 未初始化
     DIFF,
     COMPILE_TIMEOUT,
     EXECUTE_TIMEOUT,
-    PASS,
-    CRASH; // 我没有判断Crash的Oracle
+    VERIFIED_BUG,
+    MAYBE_TEST_FAIL,
+    PASS;
 
 
     public boolean isSuccess() {

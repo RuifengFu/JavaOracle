@@ -31,6 +31,7 @@ public class FileProcessor {
                 });
     }
 
+    @Deprecated
     public void writeTestFile(String className, String content) throws IOException {
         File outputFile = new File(resultDir, className + ".java");
         Files.writeString(outputFile.toPath(), content);

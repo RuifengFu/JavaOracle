@@ -14,7 +14,7 @@ public class TestExecutor {
     private final String jarPath;
     private final File resultDir;
 
-    private static final String[] execFlags = {"-Xint", "-Xcomp", "-Xmixed"};
+    private static final String[] execFlags = {"", "-Xcomp", "-Xmixed"};
 
     public TestExecutor(String jarPath, File resultDir) {
         this.jarPath = jarPath;
@@ -28,7 +28,7 @@ public class TestExecutor {
                 return result;
             }
             TestOutput output = runTest(file);
-            result.setResult("", output);
+            result.setResult("-Xint", output);
             if (output.exitValue != 0) {
                 return result;
             }
@@ -87,7 +87,7 @@ public class TestExecutor {
             String execCommand = "java -ea " + execflag + " -cp " + resultDir.getPath() +  File.pathSeparator + jarPath +  " " + className;
             System.out.println("execCommand: " + execCommand);
             Process process = Runtime.getRuntime().exec(execCommand);
-            boolean flag = process.waitFor(120, TimeUnit.SECONDS);
+            boolean flag = process.waitFor(60, TimeUnit.SECONDS);
             if (!flag) {
                 if (process.isAlive()) {
                     process.destroyForcibly();

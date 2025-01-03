@@ -23,6 +23,8 @@ public class OpenAI {
 
     private static final String MODEL = "deepseek-chat";
 
+    private static final double TEMPERATURE = 0.0;
+
     private static final int MAX_TOKENS = 8096;
 
     public static String messageCompletion(String prompt) {
@@ -45,7 +47,7 @@ public class OpenAI {
                 Map.of("role", "user", "content", prompt)
         ));
         requestBody.put("max_tokens", MAX_TOKENS); // Limit the response length
-        requestBody.put("temperature", 0); // Set the randomness of the output
+        requestBody.put("temperature", TEMPERATURE); // Set the randomness of the output
         return requestBody;
     }
 
@@ -67,7 +69,9 @@ public class OpenAI {
 
         // Send the request and receive the response
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
+        if (response.statusCode() != 200) {
+            throw new RuntimeException("HTTP error: " + response.statusCode() + "\n" + response.body());
+        }
         // Parse the response body
         Map<String, Object> responseBody = mapper.readValue(response.body(), Map.class);
         return responseBody;
@@ -90,6 +94,7 @@ public class OpenAI {
                 }
             }
         } catch (Exception e) {
+            LoggerUtil.logExec(Level.SEVERE, "OpenAI message completion failed: " + e.getMessage());
             e.printStackTrace(System.err);
         }
 

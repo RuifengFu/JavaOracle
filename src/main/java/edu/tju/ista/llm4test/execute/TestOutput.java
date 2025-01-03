@@ -1,9 +1,9 @@
 package edu.tju.ista.llm4test.execute;
 
 public class TestOutput {
-    public String stdout;
-    public String stderr;
-    public int exitValue;
+    public final String stdout;
+    public final String stderr;
+    public final int exitValue;
     public TestResultKind kind;
 
     public TestOutput(String stdout, String stderr, int exitValue) {
@@ -18,25 +18,18 @@ public class TestOutput {
         return stdout;
     }
 
-    public void setStdout(String stdout) {
-        this.stdout = stdout;
-    }
+
 
     public String getStderr() {
         return stderr;
     }
 
-    public void setStderr(String stderr) {
-        this.stderr = stderr;
-    }
+
 
     public int getExitValue() {
         return exitValue;
     }
 
-    public void setExitValue(int exitValue) {
-        this.exitValue = exitValue;
-    }
 
     public TestResultKind getKind() {
         return kind;

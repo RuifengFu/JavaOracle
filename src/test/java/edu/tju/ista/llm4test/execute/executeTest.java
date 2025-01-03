@@ -13,7 +13,7 @@ public class executeTest {
         String jarPath = String.join(File.pathSeparator, jars);
         File ResultDir = new File("Results");
         TestExecutor executor = new TestExecutor(jarPath, ResultDir);
-        File file = new File("Results\\SetFromMap.java");
+        File file = new File("Results\\NCopies.java");
         TestResult result = executor.executeTest(file);
         System.out.println(result.getKind());
     }

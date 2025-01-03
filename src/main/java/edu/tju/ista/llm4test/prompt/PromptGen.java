@@ -674,7 +674,12 @@ public class PromptGen {
                 
                 <Task>
                 Please analyze why testcase failed and provide a root cause analysis.
-                Return in function calling style.
+                </Task>
+                
+                <Requirement>
+                1. return only one function call, you can merge al info in to one function call
+                </Requirement>
+                
                 """);
 
     }

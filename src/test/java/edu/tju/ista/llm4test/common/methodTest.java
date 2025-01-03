@@ -1,5 +1,6 @@
 package edu.tju.ista.llm4test.common;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thoughtworks.qdox.model.JavaClass;
 import com.thoughtworks.qdox.model.JavaMethod;
 import edu.tju.ista.llm4test.execute.TestExecutor;
@@ -140,8 +141,10 @@ public class methodTest {
         String prompt = PromptGen.generatePrompt("RootCause", dataModel);
         ArrayList<FuncTool> tools = new ArrayList<>();
         tools.add(FuncToolFactory.createRootCauseOutputFuncTool());
-        var map = OpenAI.funcCall(prompt, "", tools);
+        var arguments = OpenAI.funcCall(prompt, "", tools).get("root_cause_analysis");
+        var map = new ObjectMapper().readValue(arguments, Map.class);
         System.out.println(map);
+        System.out.println(map.get("report_bug"));
         return ;
     }
 

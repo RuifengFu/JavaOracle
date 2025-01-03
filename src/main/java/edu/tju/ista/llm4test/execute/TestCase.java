@@ -1,20 +1,143 @@
 package edu.tju.ista.llm4test.execute;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.javaparser.utils.Log;
+import edu.tju.ista.llm4test.llm.OpenAI;
+import edu.tju.ista.llm4test.llm.functionCalling.FuncTool;
+import edu.tju.ista.llm4test.llm.functionCalling.FuncToolFactory;
+import edu.tju.ista.llm4test.prompt.PromptGen;
+import edu.tju.ista.llm4test.utils.CodeExtractor;
+import edu.tju.ista.llm4test.utils.LoggerUtil;
+
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.logging.Level;
+
 public class TestCase {
 
-    public String originFile;
 
-    public String file;
+
+    public File originFile;
+    public String apiDocs;
+
+    public File file;
     public TestResult result;
 
-    public TestCase(String file){
+    public TestCase(File file){
         this.file = file;
         this.result = new TestResult(TestResultKind.UNKNOWN);
     }
 
-    public void verifyTestFail() {
-
+    public TestCase(File file, TestResult result){
+        this.file = file;
+        this.result = result;
     }
+
+    public File getOriginFile() {
+        return originFile;
+    }
+
+    public void setOriginFile(File originFile) {
+        this.originFile = originFile;
+    }
+
+    public File getFile() {
+        return file;
+    }
+
+    public void setFile(File file) {
+        this.file = file;
+    }
+
+    public TestResult getResult() {
+        return result;
+    }
+
+    public void setResult(TestResult result) {
+        this.result = result;
+        verifyTestFail();
+    }
+
+    public void setApiDocs(String apiDocs) {
+        this.apiDocs = apiDocs;
+    }
+
+    public void verifyTestFail() {
+        if (!result.isFail()) {
+            return;
+        }
+        try {
+            String testcase = getTestcase();
+
+            Map<String, Object> dataModel = new HashMap<>();
+            dataModel.put("testcase", testcase);
+            dataModel.put("testOutput", result.toString());
+
+            String prompt = PromptGen.generatePrompt("RootCause", dataModel);
+            ArrayList<FuncTool> tools = new ArrayList<>();
+            tools.add(FuncToolFactory.createRootCauseOutputFuncTool());
+            var arguments = OpenAI.funcCall(prompt, "", tools).get("root_cause_analysis");
+            var map = new ObjectMapper().readValue(arguments, Map.class);
+            var reportBug = map.get("report_bug").equals("true");
+            if (reportBug) {
+                this.result.setKind(TestResultKind.VERIFIED_BUG);
+            } else {
+                this.result.setKind(TestResultKind.MAYBE_TEST_FAIL);
+            }
+        } catch(Exception e) {
+            LoggerUtil.logExec(Level.WARNING, "Verifying test case failed: " + file + "\n" + e.getMessage());
+            this.result.setKind(TestResultKind.MAYBE_TEST_FAIL);
+        }
+    }
+
+
+    /**
+     * Get the content of the testcase file
+     * @return the content of the testcase file
+     */
+    public String getTestcase() {
+        // read file into String
+        String testcase = "";
+        try {
+            testcase = Files.readString(file.toPath());
+        } catch (IOException e) {
+            LoggerUtil.logExec(Level.SEVERE, "Writing test case to file failed: " + file + "\n" + e.getMessage());
+            e.printStackTrace();
+        }
+        return testcase;
+    }
+
+    public void writeTestCaseToFile(String content) {
+        try {
+            Files.writeString(file.toPath(), content);
+        } catch (IOException e) {
+            LoggerUtil.logExec(Level.SEVERE, "Writing test case to file failed: " + file + "\n" + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    public void fix() {
+        try {
+            Map<String, Object> dataModel = new HashMap<>();
+            dataModel.put("testcase", getTestcase());
+            dataModel.put("testOutput", result.toString());
+            dataModel.put("apiDocs", apiDocs);
+            String prompt = PromptGen.generatePrompt("FixTestCase", dataModel);
+            String text = OpenAI.messageCompletion(prompt);
+            ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
+            String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
+            writeTestCaseToFile(generatedCode);
+        } catch (Exception e) {
+            LoggerUtil.logExec(Level.WARNING, "Fixing test case failed: " + file + "\n" + e.getMessage());
+        }
+    }
+
+
+
 
 
 
