@@ -3,6 +3,8 @@ package edu.tju.ista.llm4test.llm;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.ProxySelector;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -25,7 +27,7 @@ public class OpenAI {
 
     private static final double TEMPERATURE = 0.0;
 
-    private static final int MAX_TOKENS = 8096;
+    private static final int MAX_TOKENS = 4096;
 
     public static String messageCompletion(String prompt) {
         return messageCompletion("You are a helpful assistant", prompt);
@@ -58,6 +60,12 @@ public class OpenAI {
 
         // Initialize HttpClient
         HttpClient httpClient = HttpClient.newHttpClient();
+        if (System.getProperty("os.name").toLowerCase().contains("linux")) {
+            httpClient = HttpClient.newBuilder()
+                    .proxy(ProxySelector.of(new InetSocketAddress("172.19.135.130",5000)))
+                    .build();
+        }
+
 
         // Build the HTTP request
         HttpRequest request = HttpRequest.newBuilder()
