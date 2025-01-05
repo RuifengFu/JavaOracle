@@ -34,6 +34,9 @@ public class LoggerUtil {
         } catch (IOException e) {
             e.printStackTrace();
         }
+
+        System.setProperty("java.util.logging.SimpleFormatter.format",
+                "%1$tF %1$tT %4$s: %5$s%n"); // compact log style
     }
 
     public static void logOpenAI(Level level, String message) {
@@ -45,5 +48,6 @@ public class LoggerUtil {
 
     public static void logResult(Level level, String message) {
         resultLogger.log(level, message);
+        execLogger.log(level, message); // exec.log contains result information
     }
 }
