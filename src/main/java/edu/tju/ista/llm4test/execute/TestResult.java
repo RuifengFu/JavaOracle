@@ -47,6 +47,10 @@ public class TestResult {
         return compileResult.exitValue == 124;
     }
 
+    public boolean isBug() {
+        return kind == TestResultKind.VERIFIED_BUG;
+    }
+
     /*
      * Returns true if the test case is a failure
      */

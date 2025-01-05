@@ -53,8 +53,10 @@ class Main {
     private static final String [] jars;
 
     static {
-        jars = new String[]{"C:\\Users\\Administrator\\.m2\\repository\\junit\\junit\\4.13.1\\junit-4.13.1.jar",
-                "C:\\Users\\Administrator\\.m2\\repository\\org\\testng\\testng\\6.7\\testng-6.7.jar"};
+        jars = new String[]{"Dependency/junit-4.13.1.jar",
+                "Dependency/testng-7.10.2.jar",
+                "Dependency/junit-jupiter-api-5.11.4.jar",
+                "Dependency/junit-jupiter-engine-5.11.4.jar",   };
     }
 
     public static void main(String[] args) {
@@ -63,7 +65,7 @@ class Main {
         if (!ResultDir.exists()) {
             ResultDir.mkdirs();
         }
-        String baseDocPath = "H:\\research\\JavaOracle\\JavaDoc\\docs\\api\\java.base";
+        String baseDocPath = "JavaDoc/docs/api/java.base";
         Main instance = new Main(jarPath, ResultDir, baseDocPath);
 //        instance.runTestSuiteMultiThread(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\lang\\String"));
 //        instance.runTestSuiteMultiThread(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\lang\\StringBuffer"));
@@ -84,11 +86,11 @@ class Main {
 //        instance.runTestSuiteMultiThread(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\util\\ArrayList"));
 //        instance.runTestSuiteMultiThread(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\util\\Arrays"));
 //        instance.runTestSuiteMultiThread(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\util\\Collection"));
-        instance.runTestSuiteParallel(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\util\\Collections"));
+//        instance.runTestSuiteParallel(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\util\\Collections"));
+//        instance.runTestSuiteParallel(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\util\\BitSet"));
 //        instance.runTestSuiteMultiThread(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\util\\Currency"));
 
-//        instance.runTestSuiteParallel(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\util"));
-
+        instance.runTestSuiteParallel(Path.of("JavaTest/jdk/java/util/ArrayList"));
     }
     public Main(String jarPath, File resultDir, String baseDocPath) {
         this.testExecutor = new TestExecutor(jarPath, resultDir);
@@ -121,6 +123,10 @@ class Main {
                 testcase.setOriginFile(file);
                 TestResult result = processTestFile(testcase);
                 LoggerUtil.logResult(Level.INFO, file + " " + result.getKind());
+                if (result.isFail() || result.isBug())
+                    LoggerUtil.logResult(Level.INFO, testcase.verifyMessage);
+
+
             }
         } catch (Exception e) {
             LoggerUtil.logExec(Level.WARNING, "Processing test file failed: " + file + "\n" + e.getMessage());
@@ -130,7 +136,7 @@ class Main {
     public void runTestSuiteParallel(Path rootPath) {
         fileProcessor.copyTestFiles(rootPath);
         List<File> files = traverseDir(rootPath.toFile()).stream().filter(file -> file.getName().endsWith(".java")).collect(Collectors.toList());
-        int threadCount = Math.min(Runtime.getRuntime().availableProcessors() * 4, files.size());
+        int threadCount = Math.min(Runtime.getRuntime().availableProcessors(), files.size());
         ExecutorService executor = Executors.newFixedThreadPool(threadCount);
         CountDownLatch latch = new CountDownLatch(files.size());
         
@@ -140,7 +146,8 @@ class Main {
                 latch.countDown();
             });
         });
-
+        waitForCompletion(executor, latch);
+        statistics.logStatistics();
     }
 
 
@@ -186,7 +193,7 @@ class Main {
             testCase.writeTestCaseToFile(generatedCode);
 
             result = testExecutor.executeTest(file);
-            testCase.setResult(result); // setResult implicitly verify whether the testcase find a bug
+            testCase.setResult(result);
 
             for (int i = 0; i < 3; i++) {
                 if (!result.isFail()) {
@@ -194,8 +201,8 @@ class Main {
                 }
                 testCase.fix();
                 testCase.setResult(testExecutor.executeTest(file));
+                result = testCase.getResult();
             }
-
             statistics.recordResult(result.getKind());
             return result;
         } catch (Exception e) {

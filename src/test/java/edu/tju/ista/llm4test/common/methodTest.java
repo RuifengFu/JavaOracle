@@ -86,7 +86,7 @@ public class methodTest {
 
     @Test
     public void testApiParser() {
-        Path arrayListTest = Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\util\\ArrayList\\AddAll.java");
+        Path arrayListTest = Path.of("JavaOracle\\JavaTest\\jdk\\java\\util\\ArrayList\\AddAll.java");
         APISignatureExtractor extractor = new APISignatureExtractor();
         extractor.extractSignatures(String.valueOf(arrayListTest)).forEach(signature -> {
 //            System.out.println(signature.getPackageName() + " " + signature.getClassName() + " " + signature.getMethodName());
@@ -98,10 +98,10 @@ public class methodTest {
 
     @Test
     public void testDocument() {
-        Path arrayListTest = Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\util\\ArrayList\\AddAll.java");
+        Path arrayListTest = Path.of("JavaOracle\\JavaTest\\jdk\\java\\util\\ArrayList\\AddAll.java");
         APISignatureExtractor extractor = new APISignatureExtractor();
 
-        String base = "H:\\research\\JavaOracle\\JavaDoc\\docs\\api\\java.base";
+        String base = "JavaOracle\\JavaDoc\\docs\\api\\java.base";
 
         extractor.extractSignatures(String.valueOf(arrayListTest)).forEach(signature -> {
             System.out.println(signature.getPackageName() + " " + signature.getClassName() + " " + signature.getMethodName());

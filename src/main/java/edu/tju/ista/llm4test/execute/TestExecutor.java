@@ -14,7 +14,7 @@ public class TestExecutor {
     private final String jarPath;
     private final File resultDir;
 
-    private static final String[] execFlags = {"", "-Xcomp", "-Xmixed"};
+    private static final String[] execFlags = {"-Xint", "-Xcomp", "-Xmixed"};
 
     public TestExecutor(String jarPath, File resultDir) {
         this.jarPath = jarPath;
@@ -28,7 +28,7 @@ public class TestExecutor {
                 return result;
             }
             TestOutput output = runTest(file);
-            result.setResult("-Xint", output);
+            result.setResult("java -ea -cp " + file.getParentFile().toPath() +  File.pathSeparator + jarPath +  " " + file.getName().replace(".java", ""), output);
             if (output.exitValue != 0) {
                 return result;
             }
@@ -41,7 +41,7 @@ public class TestExecutor {
     }
 
     public TestResult compileTest(File file) throws IOException, InterruptedException {
-        String compileCommand = "javac -cp " + resultDir.getPath() + ";" + jarPath + " " + file.getPath();
+        String compileCommand = "javac -cp " + file.getParentFile().toPath() + ";" + jarPath + " " + file.getPath();
         Process process = Runtime.getRuntime().exec(compileCommand);
         boolean flag = process.waitFor(30, TimeUnit.SECONDS);
         if (!flag) {
@@ -60,11 +60,11 @@ public class TestExecutor {
 
     public TestOutput runTest(File file) throws IOException, InterruptedException {
         String className = file.getName().replace(".java", "");
-        String execCommand = "java -ea -cp " + resultDir.getPath() +  File.pathSeparator + jarPath +  " " + className;
+        String execCommand = "java -ea -cp " + file.getParentFile().toPath() +  File.pathSeparator + jarPath +  " " + className;
         System.out.println("execCommand: " + execCommand);
         Process process = Runtime.getRuntime().exec(execCommand);
 
-        boolean flag = process.waitFor(30, TimeUnit.SECONDS);
+        boolean flag = process.waitFor(60, TimeUnit.SECONDS);
         if (!flag) {
             if (process.isAlive()) {
                 process.destroyForcibly();
@@ -84,10 +84,10 @@ public class TestExecutor {
         String className = file.getName().replace(".java", "");
         HashMap<String, TestOutput> execResults = new HashMap<>();
         for (String execflag: execFlags) {
-            String execCommand = "java -ea " + execflag + " -cp " + resultDir.getPath() +  File.pathSeparator + jarPath +  " " + className;
+            String execCommand = "java -ea " + execflag + " -cp " + file.getParentFile().toPath() +  File.pathSeparator + jarPath +  " " + className;
             System.out.println("execCommand: " + execCommand);
             Process process = Runtime.getRuntime().exec(execCommand);
-            boolean flag = process.waitFor(60, TimeUnit.SECONDS);
+            boolean flag = process.waitFor(300, TimeUnit.SECONDS);
             if (!flag) {
                 if (process.isAlive()) {
                     process.destroyForcibly();
@@ -100,7 +100,7 @@ public class TestExecutor {
             String stderr = new String(process.getErrorStream().readAllBytes());
             TestOutput output = new TestOutput(stdout, stderr, process.exitValue());
             LoggerUtil.logExec(Level.INFO, "Run " + execflag + " : " + file.getPath() + "\n" + execCommand + "\n" + output);
-            execResults.put(execflag, output);
+            execResults.put(execCommand, output);
         }
         return execResults;
     }
