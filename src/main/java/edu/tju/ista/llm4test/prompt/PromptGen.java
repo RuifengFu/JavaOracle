@@ -610,6 +610,7 @@ public class PromptGen {
                 2. keep original assert statement and add new assert statement. please comment all JML spec in java code blocks.
                 3. You should and only contains Task2 TestCases in last code block.
                 4. If testcase is longer than 4k tokens, you should just output "failed" and don't say anything more.
+                5. You should consider your assert statement is correct in context and won't cause false positive.
                 </Requirement>
                 """);
 
@@ -634,6 +635,7 @@ public class PromptGen {
                 2. keep original assert statement and add new assert statement. please comment all JML spec in java code blocks.
                 3. You should include only the Task2 TestCases in the last code block.
                 4. If testcase is longer than 4k tokens, you should just output "failed" and don't say anything more.
+                5. You should consider your assert statement is correct in context and won't cause false positive.
                 </Requirement>
                 """);
 
@@ -651,13 +653,20 @@ public class PromptGen {
                 <Test Output>
                 ${testOutput}
                 </Test Output>
+                                
+                <Root Cause>
+                ${rootCause}
+                </Root Cause>
                 
                 <Task>
-                1. analysis why testcase failed
+                1. analysis why testcase failed, especially for the assert statement.
                 2. fix testcase, make sure all buggy part are fixed.
                 </Task>
                 
                 <Requirement>
+                1. You can't change the compile and execute command, and dependencies jars.
+                2. If you can't fix this bug, don't return any code, just say "I can't fix"
+                </Requirement>
                 
                 """);
 
@@ -672,12 +681,17 @@ public class PromptGen {
                 ${testOutput}
                 </Test Output>
                 
+                <API docs>
+                ${apiDocs}
+                </API docs>
+                
                 <Task>
                 Please analyze why testcase failed and provide a root cause analysis.
                 </Task>
                 
                 <Requirement>
-                1. return only one function call, you can merge al info in to one function call
+                1. return only one function call, you should summary in to one function call
+                2. jdk don't have too much bug, please make sure your analysis is correct, especially for jdk function.
                 </Requirement>
                 
                 """);

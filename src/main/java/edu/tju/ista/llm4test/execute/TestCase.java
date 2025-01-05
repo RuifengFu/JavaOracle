@@ -27,6 +27,8 @@ public class TestCase {
     public File file;
     public TestResult result;
 
+    public String verifyMessage = "";
+
     public TestCase(File file){
         this.file = file;
         this.result = new TestResult(TestResultKind.UNKNOWN);
@@ -76,18 +78,20 @@ public class TestCase {
             Map<String, Object> dataModel = new HashMap<>();
             dataModel.put("testcase", testcase);
             dataModel.put("testOutput", result.toString());
+            dataModel.put("apiDocs", apiDocs);
 
             String prompt = PromptGen.generatePrompt("RootCause", dataModel);
             ArrayList<FuncTool> tools = new ArrayList<>();
             tools.add(FuncToolFactory.createRootCauseOutputFuncTool());
             var arguments = OpenAI.funcCall(prompt, "", tools).get("root_cause_analysis");
             var map = new ObjectMapper().readValue(arguments, Map.class);
-            var reportBug = map.get("report_bug").equals("true");
+            var reportBug = ((boolean)map.get("report_bug")) == true;
             if (reportBug) {
                 this.result.setKind(TestResultKind.VERIFIED_BUG);
             } else {
                 this.result.setKind(TestResultKind.MAYBE_TEST_FAIL);
             }
+            verifyMessage = map.toString();
         } catch(Exception e) {
             LoggerUtil.logExec(Level.WARNING, "Verifying test case failed: " + file + "\n" + e.getMessage());
             this.result.setKind(TestResultKind.MAYBE_TEST_FAIL);
@@ -126,6 +130,7 @@ public class TestCase {
             dataModel.put("testcase", getTestcase());
             dataModel.put("testOutput", result.toString());
             dataModel.put("apiDocs", apiDocs);
+            dataModel.put("rootCause", verifyMessage);
             String prompt = PromptGen.generatePrompt("FixTestCase", dataModel);
             String text = OpenAI.messageCompletion(prompt);
             ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
