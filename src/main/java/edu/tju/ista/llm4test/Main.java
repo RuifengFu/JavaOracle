@@ -1,22 +1,22 @@
-package org.example;
+package edu.tju.ista.llm4test;
 
 
 import edu.tju.ista.llm4test.execute.TestCase;
 import edu.tju.ista.llm4test.execute.TestExecutor;
 import edu.tju.ista.llm4test.execute.TestResult;
 import edu.tju.ista.llm4test.execute.TestResultKind;
-
 import edu.tju.ista.llm4test.llm.OpenAI;
 import edu.tju.ista.llm4test.prompt.PromptGen;
 import edu.tju.ista.llm4test.utils.*;
 
-
 import java.io.File;
-
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
-import java.util.concurrent.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
 
@@ -53,15 +53,15 @@ class Main {
     private static final String [] jars;
 
     static {
-        jars = new String[]{"Dependency/junit-4.13.1.jar",
-                "Dependency/testng-7.10.2.jar",
-                "Dependency/junit-jupiter-api-5.11.4.jar",
-                "Dependency/junit-jupiter-engine-5.11.4.jar",   };
+        jars = new String[]{"Dependency/testng-7.10.2.jar",
+                "Dependency/junit-jupiter-api-5.11.4.jar", // JUnit 5 before JUnit4
+                "Dependency/junit-jupiter-engine-5.11.4.jar",
+                "Dependency/junit-4.13.1.jar",};
     }
 
     public static void main(String[] args) {
         String jarPath = String.join(File.pathSeparator, jars);
-        File ResultDir = new File("Results");
+        File ResultDir = new File("test");
         if (!ResultDir.exists()) {
             ResultDir.mkdirs();
         }
@@ -90,7 +90,7 @@ class Main {
 //        instance.runTestSuiteParallel(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\util\\BitSet"));
 //        instance.runTestSuiteMultiThread(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\util\\Currency"));
 
-        instance.runTestSuiteParallel(Path.of("JavaTest/jdk/java/util/ArrayList"));
+        instance.runTestSuiteParallel(Path.of("JavaTest/jdk/java/util"));
     }
     public Main(String jarPath, File resultDir, String baseDocPath) {
         this.testExecutor = new TestExecutor(jarPath, resultDir);
@@ -136,7 +136,7 @@ class Main {
     public void runTestSuiteParallel(Path rootPath) {
         fileProcessor.copyTestFiles(rootPath);
         List<File> files = traverseDir(rootPath.toFile()).stream().filter(file -> file.getName().endsWith(".java")).collect(Collectors.toList());
-        int threadCount = Math.min(Runtime.getRuntime().availableProcessors(), files.size());
+        int threadCount = Math.min(Runtime.getRuntime().availableProcessors() , files.size());
         ExecutorService executor = Executors.newFixedThreadPool(threadCount);
         CountDownLatch latch = new CountDownLatch(files.size());
         
@@ -184,12 +184,15 @@ class Main {
             {// setup data model
                 String apiDocs = apiDocProcessor.processApiDocs(file);
                 dataModel.put("apiDocs", apiDocs);
-                dataModel.put("testcase", testCase.getTestcase());
+                dataModel.put("testcase", testCase.getTestcaseWithLineNumber());
                 testCase.setApiDocs(apiDocs);
             }
 
             String prompt = PromptGen.generatePrompt(TEMPLATE_MODE, dataModel);
             String generatedCode = processPrompt(prompt);
+            if (generatedCode.isEmpty()) {
+                return new TestResult(TestResultKind.UNKNOWN);
+            }
             testCase.writeTestCaseToFile(generatedCode);
 
             result = testExecutor.executeTest(file);
@@ -203,6 +206,7 @@ class Main {
                 testCase.setResult(testExecutor.executeTest(file));
                 result = testCase.getResult();
             }
+            testCase.verifyTestFail();
             statistics.recordResult(result.getKind());
             return result;
         } catch (Exception e) {
@@ -215,6 +219,9 @@ class Main {
     private String processPrompt(String prompt) {
         String text = OpenAI.messageCompletion(prompt);
         ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
+        if (codeBlocks.isEmpty()) {
+            return "";
+        }
         return codeBlocks.get(codeBlocks.size() - 1);
     }
 

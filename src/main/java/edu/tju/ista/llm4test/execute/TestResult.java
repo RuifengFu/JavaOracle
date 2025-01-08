@@ -8,7 +8,8 @@ import java.util.stream.Collectors;
 public class TestResult {
 
     private TestResultKind kind;
-    private final TestOutput compileResult;
+    private TestOutput compileResult;
+    private TestOutput jtregResult;
     private HashMap<String, TestOutput> execResults = new HashMap<>();
 
     public TestResult() {
@@ -22,15 +23,17 @@ public class TestResult {
         this.execResults = null;
     }
 
-    public TestResult(TestOutput compileResult) {
-        this.kind = TestResultKind.UNKNOWN;
-        this.compileResult = compileResult;
-        if (compileResult.exitValue != 0) {
-            if (compileResult.exitValue == 124) {
-                kind = TestResultKind.COMPILE_TIMEOUT;
+
+    public TestResult(TestOutput jtregResult) {
+        this.jtregResult = jtregResult;
+        if (jtregResult.exitValue != 0) {
+            if (jtregResult.exitValue == 124) {
+                kind = TestResultKind.EXECUTE_TIMEOUT;
             } else {
-                kind = TestResultKind.COMPILE_FAIL;
+                kind = TestResultKind.TEST_FAIL;
             }
+        } else {
+            kind = TestResultKind.SUCCESS;
         }
     }
 
@@ -65,6 +68,7 @@ public class TestResult {
         return kind.isSuccess();
     }
 
+    @Deprecated
     public void setResult(String option, TestOutput output) {
         execResults.put(option, output);
         if (output.exitValue != 0) {
@@ -78,9 +82,10 @@ public class TestResult {
         }
     }
 
+    @Deprecated
     public void mergeResults(Map<String, TestOutput> results) {
         execResults.putAll(results);
-        List<Integer> list = execResults.values().stream().map(TestOutput::getExitValue).distinct().collect(Collectors.toList());
+        List<Integer> list = execResults.values().stream().map(TestOutput::getExitValue).distinct().toList();
         if (list.size() > 1) {
             kind = TestResultKind.DIFF;
         } else {
@@ -110,11 +115,9 @@ public class TestResult {
         return execResults;
     }
 
+    @Deprecated
     public String toString() {
-        StringBuilder sb = new StringBuilder();
-        sb.append("Compile Result: ").append(compileResult).append("\n");
-        sb.append("Execution Results: ").append(execResults).append("\n");
-        return sb.toString();
+        return String.valueOf(jtregResult);
     }
 
 }
