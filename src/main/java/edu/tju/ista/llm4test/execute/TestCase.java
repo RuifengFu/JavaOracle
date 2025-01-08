@@ -1,7 +1,6 @@
 package edu.tju.ista.llm4test.execute;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.github.javaparser.utils.Log;
 import edu.tju.ista.llm4test.llm.OpenAI;
 import edu.tju.ista.llm4test.llm.functionCalling.FuncTool;
 import edu.tju.ista.llm4test.llm.functionCalling.FuncToolFactory;
@@ -61,7 +60,7 @@ public class TestCase {
 
     public void setResult(TestResult result) {
         this.result = result;
-        verifyTestFail();
+//        verifyTestFail();
     }
 
     public void setApiDocs(String apiDocs) {
@@ -73,7 +72,7 @@ public class TestCase {
             return;
         }
         try {
-            String testcase = getTestcase();
+            String testcase = getTestcaseWithLineNumber();
 
             Map<String, Object> dataModel = new HashMap<>();
             dataModel.put("testcase", testcase);
@@ -103,7 +102,7 @@ public class TestCase {
      * Get the content of the testcase file
      * @return the content of the testcase file
      */
-    public String getTestcase() {
+    public String getTestcaseWithLineNumber() {
         // read file into String
         String testcase = "";
         try {
@@ -111,6 +110,13 @@ public class TestCase {
         } catch (IOException e) {
             LoggerUtil.logExec(Level.SEVERE, "Writing test case to file failed: " + file + "\n" + e.getMessage());
             e.printStackTrace();
+        }
+        // add line number, 大模型在分析代码的时候，没有行号大模型会出现幻觉。
+        // 行号没有等宽，因为大模型不需要等宽
+        String[] lines = testcase.split("\n");
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < lines.length; i++) {
+            sb.append(i + 1).append(": ").append(lines[i]).append("\n");
         }
         return testcase;
     }
@@ -127,7 +133,7 @@ public class TestCase {
     public void fix() {
         try {
             Map<String, Object> dataModel = new HashMap<>();
-            dataModel.put("testcase", getTestcase());
+            dataModel.put("testcase", getTestcaseWithLineNumber());
             dataModel.put("testOutput", result.toString());
             dataModel.put("apiDocs", apiDocs);
             dataModel.put("rootCause", verifyMessage);

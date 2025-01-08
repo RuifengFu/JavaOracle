@@ -610,7 +610,15 @@ public class PromptGen {
                 2. keep original assert statement and add new assert statement. please comment all JML spec in java code blocks.
                 3. You should and only contains Task2 TestCases in last code block.
                 4. If testcase is longer than 4k tokens, you should just output "failed" and don't say anything more.
-                5. You should consider your assert statement is correct in context and won't cause false positive.
+                5. You should consider your assert statements are correct in context, JML spec sometimes is not correct.
+                6. Mark all your modification with comment "Enhance Test Oracle by LLM".
+                7. Keep jtreg format comment in code.
+                /*
+                 * @test
+                 * @bug 4160406 4705734 4707389 6358355 7032154
+                 * @summary Tests for Float.parseFloat method
+                 */
+                 
                 </Requirement>
                 """);
 
@@ -636,6 +644,7 @@ public class PromptGen {
                 3. You should include only the Task2 TestCases in the last code block.
                 4. If testcase is longer than 4k tokens, you should just output "failed" and don't say anything more.
                 5. You should consider your assert statement is correct in context and won't cause false positive.
+                6. Mark all your new assert statement with comment "New assert".
                 </Requirement>
                 """);
 
@@ -666,6 +675,15 @@ public class PromptGen {
                 <Requirement>
                 1. You can't change the compile and execute command, and dependencies jars.
                 2. If you can't fix this bug, don't return any code, just say "I can't fix"
+                3. You can add some output statement to help you debug, then you will get more information in next iteration, but don't output too much thing.
+                4. Mark all your modification with comment "Fix".
+                5. If You really TRUST THIS IS A JDK BUG, YOU CAN RETURN "JDK BUG" and don't contain any Code.
+                6. You MUST Keep jtreg format comment in code.
+                /*
+                 * @test
+                 * @bug 4160406 4705734 4707389 6358355 7032154
+                 * @summary Tests for Float.parseFloat method
+                 */
                 </Requirement>
                 
                 """);
