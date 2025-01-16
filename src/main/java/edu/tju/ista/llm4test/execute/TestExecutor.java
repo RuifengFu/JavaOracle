@@ -65,14 +65,18 @@ public class TestExecutor {
     }
 
     public void clearJTworkFiles(File file) {
-        String baseName = file.getName().replace(".java", "");
-        File jtWork = new File("JTwork");
-        Path relateivePath = resultDir.toPath().toAbsolutePath().relativize(file.toPath().toAbsolutePath()).getParent();
-        File classCache = jtWork.toPath().resolve("classes").resolve(relateivePath).resolve(baseName + ".class").toFile();
-        File jtrCache = jtWork.toPath().resolve(relateivePath).resolve(baseName + ".jtr").toFile();
-        File dCache = jtWork.toPath().resolve(relateivePath).resolve(baseName + ".d").toFile();
-        classCache.delete();
-        jtrCache.delete();
-        dCache.delete();
+        try {
+            String baseName = file.getName().replace(".java", "");
+            File jtWork = new File("JTwork");
+            Path relateivePath = resultDir.toPath().toAbsolutePath().relativize(file.toPath().toAbsolutePath()).getParent();
+            File classCache = jtWork.toPath().resolve("classes").resolve(relateivePath).resolve(baseName + ".class").toFile();
+            File jtrCache = jtWork.toPath().resolve(relateivePath).resolve(baseName + ".jtr").toFile();
+            File dCache = jtWork.toPath().resolve(relateivePath).resolve(baseName + ".d").toFile();
+            classCache.delete();
+            jtrCache.delete();
+            dCache.delete();
+        } catch (Exception e) {
+
+        }
     }
 }

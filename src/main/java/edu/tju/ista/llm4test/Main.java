@@ -67,30 +67,7 @@ class Main {
         }
         String baseDocPath = "JavaDoc/docs/api/java.base";
         Main instance = new Main(jarPath, ResultDir, baseDocPath);
-//        instance.runTestSuiteMultiThread(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\lang\\String"));
-//        instance.runTestSuiteMultiThread(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\lang\\StringBuffer"));
-//        instance.runTestSuiteMultiThread(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\lang\\StringBuilder"));
-////
-//        instance.runTestSuiteMultiThread(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\lang\\Boolean"));
-//        instance.runTestSuiteMultiThread(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\lang\\Byte"));
-//        instance.runTestSuiteMultiThread(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\lang\\Character"));
-//        instance.runTestSuiteMultiThread(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\lang\\Double"));
-//        instance.runTestSuiteMultiThread(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\lang\\Float"));
-//        instance.runTestSuiteMultiThread(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\lang\\Integer"));
-//        instance.runTestSuiteMultiThread(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\lang\\Long"));
-////
-//        instance.runTestSuiteMultiThread(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\math\\BigDecimal"));
-//        instance.runTestSuiteMultiThread(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\math\\BigInteger"));
-//        instance.runTestSuiteMultiThread(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\math\\RoundingMode"));
-//
-//        instance.runTestSuiteMultiThread(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\util\\ArrayList"));
-//        instance.runTestSuiteMultiThread(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\util\\Arrays"));
-//        instance.runTestSuiteMultiThread(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\util\\Collection"));
-//        instance.runTestSuiteParallel(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\util\\Collections"));
-//        instance.runTestSuiteParallel(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\util\\BitSet"));
-//        instance.runTestSuiteMultiThread(Path.of("H:\\research\\JavaOracle\\JavaTest\\jdk\\java\\util\\Currency"));
-
-        instance.runTestSuiteParallel(Path.of("JavaTest/jdk/java/util"));
+        instance.runTestSuiteParallel(Path.of("JavaTest/jdk/java/util/"));
     }
     public Main(String jarPath, File resultDir, String baseDocPath) {
         this.testExecutor = new TestExecutor(jarPath, resultDir);
@@ -136,7 +113,8 @@ class Main {
     public void runTestSuiteParallel(Path rootPath) {
         fileProcessor.copyTestFiles(rootPath);
         List<File> files = traverseDir(rootPath.toFile()).stream().filter(file -> file.getName().endsWith(".java")).collect(Collectors.toList());
-        int threadCount = Math.min(Runtime.getRuntime().availableProcessors() , files.size());
+        System.out.println("Total files: " + files.size());
+        int threadCount = Math.min(Runtime.getRuntime().availableProcessors(), files.size());
         ExecutorService executor = Executors.newFixedThreadPool(threadCount);
         CountDownLatch latch = new CountDownLatch(files.size());
         
@@ -153,24 +131,6 @@ class Main {
 
 
 
-    public void runTestSuiteMultiThread(Path testSuitePath)  {
-        fileProcessor.copyTestFiles(testSuitePath);
-
-        File[] files = testSuitePath.toFile().listFiles();
-        int threadCount = Math.min(Runtime.getRuntime().availableProcessors() * 4, files.length);
-        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
-        CountDownLatch latch = new CountDownLatch(files.length);
-        for (File file : files) {
-            executor.submit(() -> {
-                if (file.isFile() && file.getName().endsWith(".java")) {
-                    testCaseConstruction(file, testSuitePath);
-                }
-                latch.countDown();
-            });
-        }
-        waitForCompletion(executor, latch);
-        statistics.logStatistics();
-    }
 
     private TestResult processTestFile(TestCase testCase) {
         try {
@@ -193,11 +153,25 @@ class Main {
             if (generatedCode.isEmpty()) {
                 return new TestResult(TestResultKind.UNKNOWN);
             }
-            testCase.writeTestCaseToFile(generatedCode);
+            testCase.applyChange(generatedCode);
 
             result = testExecutor.executeTest(file);
             testCase.setResult(result);
 
+            for (int i = 0; i < 3; i++) {
+                if (!result.isFail()) {
+                    break;
+                }
+                testCase.fix();
+                testCase.setResult(testExecutor.executeTest(file));
+                result = testCase.getResult();
+            }
+            testCase.verifyTestFail();
+            if (testCase.getResult().isSuccess()) {
+                testCase.enhance();
+                testCase.setResult(testExecutor.executeTest(file));
+                result = testCase.getResult();
+            }
             for (int i = 0; i < 3; i++) {
                 if (!result.isFail()) {
                     break;

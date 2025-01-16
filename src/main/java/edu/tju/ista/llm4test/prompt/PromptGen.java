@@ -587,10 +587,53 @@ public class PromptGen {
 
         TEMPLATE_MAP.put("SpecTest", """
                 ${THINKING_CLAUDE_PROMPT}
-                
-                <JML examples>
+                                
+                <JML Examples>
                 ${JMLExample}
-                </JML examples>
+                </JML Examples>
+                                
+                <TestCase>
+                ${testcase}
+                </TestCase>
+                                
+                <API Document>
+                ${apiDocs}
+                </API Document>
+                                
+                <Tasks>
+                1. **Task 1**: Read the provided API document and write a JML-style specification for each method in the document. Ensure your specifications are accurate and correct.
+                2. **Task 2**: Based on the JML specifications you wrote, enhance the provided test case by adding assertions to augment the test oracle. Ensure that:
+                   - No assertion causes a false positive.
+                   - Original assertions are preserved.
+                   - New assertions are marked with the comment "Enhance Test Oracle by LLM".
+                   - The test case remains in jtreg format and includes all necessary import statements to avoid compile errors.
+                </Tasks>
+                                
+                <Requirements>
+                1. **Code Formatting**:
+                   - Include all necessary import statements in the test case.
+                   - Comment out all JML specifications in Java code blocks.
+                   - Ensure the test case is free of compile errors.
+                2. **Test Case Content**:
+                   - Only include the enhanced test case in the final output.
+                   - If the test case exceeds 4,000 tokens, output "failed" without further explanation.
+                3. **Assertions**:
+                   - Ensure all assertions are contextually correct, even if the JML specification is not.
+                   - Mark all modifications with the comment "Enhance Test Oracle by LLM".
+                4. **jtreg Format**:
+                   - Retain jtreg format comments in the code, including test metadata such as:
+                     ```
+                     /*
+                      * @test
+                      * @bug 4160406 4705734 4707389 6358355 7032154
+                      * @summary Tests for Float.parseFloat method
+                      */
+                     ```
+                </Requirements>
+                """);
+
+        TEMPLATE_MAP.put("EnhanceTestCase", """
+                ${THINKING_CLAUDE_PROMPT}
                 
                 <TestCase>
                 ${testcase}
@@ -601,24 +644,27 @@ public class PromptGen {
                 </api document>
                 
                 <Tasks>
-                Task1: please read api document, and write a JML style spec for each method in document. And Check Your Spec is write.
-                Task2. Then add some assert in Testcase to augment Test Oracle based on JML spec you wrote. please make sure every assert won't cause false postive.
+                1. **Code Explanation**: Add detailed comments to explain the logic of the code, especially focusing on complex or critical sections.
+                2. **Assertion Enhancement**: Write new assertions based on the logic of the code blocks. Ensure that each assertion is:
+                   - **Accurate**: Reflects the intended behavior of the code.
+                   - **Non-redundant**: Does not duplicate existing assertions.
+                   - **Non-false-positive**: Will not pass incorrectly due to unintended behavior.
+                3. **Code Formatting**: Ensure the code follows the jtreg format and includes all necessary import statements to avoid compile errors.
+                4. **Marking Modifications**: Clearly mark all modifications with the comment "Enhance Test Oracle by LLM".
                 </Tasks>
                 
                 <Requirement>
-                1. Your code for Task2 should contains import statements and make sure no compile errors.
-                2. keep original assert statement and add new assert statement. please comment all JML spec in java code blocks.
-                3. You should and only contains Task2 TestCases in last code block.
-                4. If testcase is longer than 4k tokens, you should just output "failed" and don't say anything more.
-                5. You should consider your assert statements are correct in context, JML spec sometimes is not correct.
-                6. Mark all your modification with comment "Enhance Test Oracle by LLM".
-                7. Keep jtreg format comment in code.
+                1. **Code Completeness**: The code should include all necessary import statements and be free of compile errors.
+                2. **Assertion Correctness**: Assertions should be contextually correct and align with the code's logic.
+                3. **Commenting**: Provide clear and concise comments to explain the code's logic.
+                4. **Formatting**: Maintain the jtreg format, including the test summary and bug IDs.
+                5. **Modification Marking**: All changes should be marked with the comment "Enhance Test Oracle by LLM".
+                6. **Keep Jtreg Test Comment**: Don't modify the jtreg test comment like below.
                 /*
                  * @test
                  * @bug 4160406 4705734 4707389 6358355 7032154
                  * @summary Tests for Float.parseFloat method
                  */
-                 
                 </Requirement>
                 """);
 
@@ -650,15 +696,15 @@ public class PromptGen {
 
         TEMPLATE_MAP.put("FixTestCase", """
                 ${THINKING_CLAUDE_PROMPT}
-                
+                                
                 <TestCase>
                 ${testcase}
                 </TestCase>
-                
-                <api document>
+                                
+                <API Document>
                 ${apiDocs}
-                </api document>
-                
+                </API Document>
+                                
                 <Test Output>
                 ${testOutput}
                 </Test Output>
@@ -666,26 +712,52 @@ public class PromptGen {
                 <Root Cause>
                 ${rootCause}
                 </Root Cause>
-                
+                                
                 <Task>
-                1. analysis why testcase failed, especially for the assert statement.
-                2. fix testcase, make sure all buggy part are fixed.
+                1. Analyze why the testcase failed, focusing on the assert statement.
+                2. Fix the testcase, ensuring all issues are addressed.
                 </Task>
+                                
+                <Requirements>
+                1. Do not change the compile/execute command or dependency jars.
+                2. If you cannot fix the bug, respond only with "I can't fix."
+                3. You may add minimal debug output to gather more information, but keep it concise.
+                4. Mark all modifications with the comment `// Fix`.
+                5. If the issue is genuinely a JDK bug, respond with "JDK BUG" and no code.
+                6. Preserve the `jtreg` format comments in the code:
+                   /*
+                    * @test
+                    * @bug 4160406 4705734 4707389 6358355 7032154
+                    * @summary Tests for Float.parseFloat method
+                    */
+                </Requirements>
                 
-                <Requirement>
-                1. You can't change the compile and execute command, and dependencies jars.
-                2. If you can't fix this bug, don't return any code, just say "I can't fix"
-                3. You can add some output statement to help you debug, then you will get more information in next iteration, but don't output too much thing.
-                4. Mark all your modification with comment "Fix".
-                5. If You really TRUST THIS IS A JDK BUG, YOU CAN RETURN "JDK BUG" and don't contain any Code.
-                6. You MUST Keep jtreg format comment in code.
-                /*
-                 * @test
-                 * @bug 4160406 4705734 4707389 6358355 7032154
-                 * @summary Tests for Float.parseFloat method
-                 */
-                </Requirement>
+                """);
+
+        TEMPLATE_MAP.put("ApplyChange", """
+                <Context>
+                You are a code assistant tasked with applying specific code changes to an original test case. Your goal is to ensure that the modified test case remains complete, correct, and compile-able.
+                </Context>
                 
+                <OriginTestCase>
+                ${originTestcase}
+                </OriginTestCase>
+                                
+                <Modified>
+                ${modified}
+                </Modified>
+                              
+                                
+                <Task>
+                Apply the provided code changes to the original test case. Return the entire modified test case with the changes correctly applied.
+                </Task>
+                                
+                <Requirements>
+                1. Apply the changes precisely as specified in the <ModifiedCode> section.
+                2. Ensure the modified test case is complete and compile-able.
+                3. Return the entire modified test case in a code block.
+                4. Do not omit or alter any part of the original test case unless explicitly instructed by the changes.
+                </Requirements>
                 """);
 
         TEMPLATE_MAP.put("RootCause", """
@@ -704,13 +776,13 @@ public class PromptGen {
                 </API docs>
                 
                 <Task>
-                Please analyze why testcase failed and provide a root cause analysis.
+                Analyze the reason for the test case failure and provide a root cause analysis.
                 </Task>
-                
-                <Requirement>
-                1. return only one function call, you should summary in to one function call
-                2. jdk don't have too much bug, please make sure your analysis is correct, especially for jdk function.
-                </Requirement>
+                                
+                <Requirements>
+                1. Summarize your analysis into a single function call as the output.
+                2. Ensure your analysis is accurate, especially for JDK functions, as JDK bugs are rare.
+                </Requirements>
                 
                 """);
 

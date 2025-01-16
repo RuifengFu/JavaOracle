@@ -17,4 +17,21 @@ public class executeTest {
         TestResult result = executor.executeTest(file);
         System.out.println(result.getKind());
     }
+
+    @Test
+    public void testClearCache() {
+        TestExecutor executor = new TestExecutor("", new File("Results"));
+        executor.clearJTworkFiles(new File("Results/Formatter/HexFloatZeroPadding.java"));
+    }
+
+    /*
+    Test the process output encode
+     */
+    @Test
+    public void processTest() throws IOException {
+        String jtregCommand = "echo -e \"\\u4F60\\u597D\"";  // 输出: 你好
+        Process process = Runtime.getRuntime().exec(jtregCommand);
+        String stdout = new String(process.getInputStream().readAllBytes());
+        System.out.println(stdout);
+    }
 }

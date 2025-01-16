@@ -17,9 +17,10 @@ import edu.tju.ista.llm4test.utils.LoggerUtil;
 import java.util.*;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class OpenAI {
-    private static final String API_KEY = "sk-xxxxxxxxxxxxxxxxxxxxxx"; // Replace with your API key
+    private static final String API_KEY; // Replace with your API key
 
     private static final String BASE_URL = "https://api.deepseek.com/beta/v1/chat/completions";
 
@@ -27,16 +28,21 @@ public class OpenAI {
 
     private static final double TEMPERATURE = 0.0;
 
-    private static final int MAX_TOKENS = 4096;
+    private static final int MAX_TOKENS = 8192;
 
     public static String messageCompletion(String prompt) {
-        return messageCompletion("You are a helpful assistant", prompt);
+        return messageCompletion("You are a helpful assistant", prompt, 0.0);
+    }
+
+    public static String messageCompletion(String prompt, double temperature) {
+        return messageCompletion("You are a helpful assistant", prompt, temperature);
     }
 
     static {
 //        API_KEY = "hk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
 //        BASE_URL = "https://api.openai-hk.com/beta/v1/chat/completions";
 //        MODEL = "claude-3-5-sonnet-20241022";
+        API_KEY = System.getProperty("OPENAI_API_KEY");
     }
 
 
@@ -76,19 +82,33 @@ public class OpenAI {
                 .build();
 
         // Send the request and receive the response
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<Stream<String>> response = httpClient.send(request, HttpResponse.BodyHandlers.ofLines());
         if (response.statusCode() != 200) {
-            throw new RuntimeException("HTTP error: " + response.statusCode() + "\n" + response.body());
+            throw new RuntimeException("HTTP error: " + response.statusCode() + "\n" + response.body().collect(Collectors.joining("\n")));
         }
-        // Parse the response body
-        Map<String, Object> responseBody = mapper.readValue(response.body(), Map.class);
+
+        // Process the response lines
+        Map<String, Object> responseBody = new HashMap<>();
+        response.body().forEach(line -> {
+            if (!line.trim().isEmpty() && !line.startsWith(": keep-alive")) {
+                try {
+                    Map<String, Object> lineResponse = mapper.readValue(line, Map.class);
+                    responseBody.putAll(lineResponse);
+                } catch (IOException e) {
+                    LoggerUtil.logExec(Level.WARNING, "Failed to parse response line: " + line + "\n" + e.getMessage());
+                }
+            }
+        });
         return responseBody;
     }
 
 
-    public static String messageCompletion(String systemPrompt, String prompt) {
+    public static String messageCompletion(String systemPrompt, String prompt, double temperature) {
         try {
             Map<String, Object> requestBody = getBaseRequestMap(systemPrompt, prompt);
+            // update temperature
+            requestBody.put("temperature", temperature);
+
             Map<String, Object> responseBody = getResponseBody(requestBody);
             // Extract the "message.content" value from the response
             List<Map<String, Object>> choices = (List<Map<String, Object>>) responseBody.get("choices");
@@ -115,6 +135,7 @@ public class OpenAI {
             // Create request body
             Map<String, Object> requestBody = getBaseRequestMap(systemPrompt, prompt);
             requestBody.put("tools", FuncToolFactory.toToolsArray(tools));
+            requestBody.put("temperature", 1.0); // Set the randomness of the output
 
             // Convert request body to JSON
             Map<String, Object> responseBody = getResponseBody(requestBody);

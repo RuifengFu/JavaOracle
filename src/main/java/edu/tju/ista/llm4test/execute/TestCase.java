@@ -18,9 +18,8 @@ import java.util.logging.Level;
 
 public class TestCase {
 
-
-
     public File originFile;
+    public String originTestCase;
     public String apiDocs;
 
     public File file;
@@ -44,6 +43,11 @@ public class TestCase {
 
     public void setOriginFile(File originFile) {
         this.originFile = originFile;
+        try {
+            this.originTestCase = Files.readString(originFile.toPath());
+        } catch (IOException e) {
+            this.originTestCase = "";
+        }
     }
 
     public File getFile() {
@@ -60,7 +64,14 @@ public class TestCase {
 
     public void setResult(TestResult result) {
         this.result = result;
-//        verifyTestFail();
+        if (result.isSuccess()) {
+            try {
+                originTestCase = Files.readString(file.toPath());
+            } catch (Exception e) {
+
+            }
+        }
+//        verifyTestFail();mv *
     }
 
     public void setApiDocs(String apiDocs) {
@@ -141,9 +152,40 @@ public class TestCase {
             String text = OpenAI.messageCompletion(prompt);
             ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
             String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
-            writeTestCaseToFile(generatedCode);
+            applyChange(generatedCode);
         } catch (Exception e) {
             LoggerUtil.logExec(Level.WARNING, "Fixing test case failed: " + file + "\n" + e.getMessage());
+        }
+    }
+
+    public void enhance() {
+        try {
+            Map<String, Object> dataModel = new HashMap<>();
+            dataModel.put("testcase", getTestcaseWithLineNumber());
+            dataModel.put("apiDocs", apiDocs);
+            String prompt = PromptGen.generatePrompt("EnhanceTestCase", dataModel);
+            String text = OpenAI.messageCompletion(prompt);
+            ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
+            String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
+            applyChange(generatedCode);
+        } catch (Exception e) {
+            LoggerUtil.logExec(Level.WARNING, "Enhancing test case failed: " + file + "\n" + e.getMessage());
+        }
+    }
+
+    public void applyChange(String change){
+        try {
+            String testcase = getTestcaseWithLineNumber();
+            Map<String, Object> dataModel = new HashMap<>();
+            dataModel.put("originTestcase", originTestCase);
+            dataModel.put("modified", change);
+            String prompt = PromptGen.generatePrompt("ApplyChange", dataModel);
+            String text = OpenAI.messageCompletion(prompt);
+            ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
+            String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
+            writeTestCaseToFile(generatedCode);
+        } catch (Exception e) {
+            LoggerUtil.logExec(Level.WARNING, "Applying change failed: " + file + "\n" + e.getMessage());
         }
     }
 
