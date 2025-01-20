@@ -19,6 +19,8 @@ import java.util.logging.Level;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static java.lang.Thread.sleep;
+
 public class OpenAI {
     private static final String API_KEY; // Replace with your API key
 
@@ -42,7 +44,7 @@ public class OpenAI {
 //        API_KEY = "hk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
 //        BASE_URL = "https://api.openai-hk.com/beta/v1/chat/completions";
 //        MODEL = "claude-3-5-sonnet-20241022";
-        API_KEY = System.getProperty("OPENAI_API_KEY");
+        API_KEY = System.getenv("OPENAI_API_KEY");
     }
 
 
@@ -84,6 +86,15 @@ public class OpenAI {
         // Send the request and receive the response
         HttpResponse<Stream<String>> response = httpClient.send(request, HttpResponse.BodyHandlers.ofLines());
         if (response.statusCode() != 200) {
+            if (response.statusCode() == 503 || response.statusCode() == 429) {
+                LoggerUtil.logExec(Level.WARNING, "Received HTTP error " + response.statusCode() + ", retrying...");
+                sleep(10000);
+                return getResponseBody(requestBody);
+            } else if (response.version() == HttpClient.Version.HTTP_2 && response.statusCode() == 421) {
+                LoggerUtil.logExec(Level.WARNING, "Received GOAWAY frame, retrying...");
+                sleep(10000); // Wait a bit before retrying
+                return getResponseBody(requestBody);
+            }
             throw new RuntimeException("HTTP error: " + response.statusCode() + "\n" + response.body().collect(Collectors.joining("\n")));
         }
 

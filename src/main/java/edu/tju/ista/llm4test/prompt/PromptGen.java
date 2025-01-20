@@ -696,32 +696,43 @@ public class PromptGen {
 
         TEMPLATE_MAP.put("FixTestCase", """
                 ${THINKING_CLAUDE_PROMPT}
-                                
+                
+                <Context>
+                You are a software testing expert tasked with analyzing and fixing a failing test case. Below are the details of the original test case, the enhanced test case, the API documentation, the test output, and the root cause of the failure. Your goal is to identify why the enhanced test case failed and provide a fix while adhering to the requirements.
+                
+                </Context>
+                
+                <OriginCase>
+                ${originCase}
+                </OriginCase>
+                
                 <TestCase>
                 ${testcase}
                 </TestCase>
-                                
+                
                 <API Document>
                 ${apiDocs}
                 </API Document>
-                                
+                
                 <Test Output>
                 ${testOutput}
                 </Test Output>
-                                
+                
                 <Root Cause>
                 ${rootCause}
                 </Root Cause>
-                                
+                
                 <Task>
-                1. Analyze why the testcase failed, focusing on the assert statement.
-                2. Fix the testcase, ensuring all issues are addressed.
+                1. Analyze the failure in the enhanced test case, focusing on the assert statement or any logical inconsistencies.
+                2. Compare the enhanced test case with the original test case to identify deviations that may have caused the failure.
+                3. Fix the enhanced test case, ensuring it aligns with the API behavior and the original test case's intent.
+                4. Ensure the fix addresses all issues without introducing new bugs.
                 </Task>
-                                
+                
                 <Requirements>
-                1. Do not change the compile/execute command or dependency jars.
-                2. If you cannot fix the bug, respond only with "I can't fix."
-                3. You may add minimal debug output to gather more information, but keep it concise.
+                1. Do not modify the compile/execute commands or dependency jars.
+                2. If the issue cannot be fixed, respond only with "I can't fix."
+                3. You may add minimal debug output to gather more information, but keep it concise and relevant.
                 4. Mark all modifications with the comment `// Fix`.
                 5. If the issue is genuinely a JDK bug, respond with "JDK BUG" and no code.
                 6. Preserve the `jtreg` format comments in the code:
@@ -730,8 +741,9 @@ public class PromptGen {
                     * @bug 4160406 4705734 4707389 6358355 7032154
                     * @summary Tests for Float.parseFloat method
                     */
+                7. Ensure the enhanced test case maintains its original purpose while being corrected.
+                8. Return the entire modified test case in the code block, don't omit or collapse any part of the test case.
                 </Requirements>
-                
                 """);
 
         TEMPLATE_MAP.put("ApplyChange", """

@@ -145,6 +145,7 @@ public class TestCase {
         try {
             Map<String, Object> dataModel = new HashMap<>();
             dataModel.put("testcase", getTestcaseWithLineNumber());
+            dataModel.put("originCase", originTestCase);
             dataModel.put("testOutput", result.toString());
             dataModel.put("apiDocs", apiDocs);
             dataModel.put("rootCause", verifyMessage);
