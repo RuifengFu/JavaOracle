@@ -22,6 +22,24 @@ public class FuncToolFactory {
         return tool;
     }
 
+    /**
+     * Create a FuncTool for JDK method-JavaDoc consistency verification
+     * Check whether JDK method implementations potentially deviate from official JavaDoc
+     * @return the FuncTool for JDK documentation conformance analysis
+     */
+    public static FuncTool createJDKDocConformanceFuncTool() {
+        FuncTool tool = new FuncTool(
+                "jdk_doc_conformance_check",
+                "Verify consistency between JDK method implementations and their JavaDoc specifications"
+        );
+
+        tool.addParameter("inconsistencies", "string", "List of detected discrepancies");
+        tool.addParameter("severity", "string", "Issue severity level(CRITICAL, WARNING, INFO, NO)");
+        tool.addParameter("confidence_score", "string", "Analysis confidence rating (0.0-1.0), 1.0 being the most confident");
+
+        return tool;
+    }
+
 
 
 

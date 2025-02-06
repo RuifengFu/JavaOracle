@@ -145,6 +145,15 @@
             <scope>compile</scope>
         </dependency>
 
+        <dependency>
+            <groupId>org.pitest</groupId>
+            <artifactId>pitest</artifactId>
+            <version>1.17.4</version>
+        </dependency>
+
+
+
+
     </dependencies>
 
 
@@ -162,6 +171,34 @@
                 <artifactId>jqf-maven-plugin</artifactId>
                 <!-- confirm the latest version at: https://mvnrepository.com/artifact/edu.berkeley.cs.jqf -->
                 <version>2.0</version>
+            </plugin>
+            <plugin>
+                <groupId>org.pitest</groupId>
+                <artifactId>pitest-maven</artifactId>
+                <version>1.17.4</version>
+                <configuration>
+                    <!-- no longer required -->
+                    <targetClasses>
+                        <param>examples.*</param>
+                    </targetClasses>
+                    <!-- no longer required -->
+                    <targetTests>
+                        <param>examples.AddAll</param>
+                    </targetTests>
+                </configuration>
+
+                <dependencies>
+                    <dependency>
+                        <groupId>org.pitest</groupId>
+                        <artifactId>pitest-junit5-plugin</artifactId>
+                        <version>1.2.1</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>org.pitest</groupId>
+                        <artifactId>pitest-testng-plugin</artifactId>
+                        <version>0.1</version>
+                    </dependency>
+                </dependencies>
             </plugin>
 
         </plugins>

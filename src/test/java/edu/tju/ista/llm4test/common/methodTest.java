@@ -31,7 +31,7 @@ public class methodTest {
 
     @Test
     public void testFilesToMethods() {
-        File file = new File("C:\\Users\\Administrator\\.jdks\\openjdk-17.0.2\\lib\\src\\java.base\\java\\util\\List.java");
+        File file = new File("JavaTest/jdk/java/util/ArrayList/AddAll.java");
         List<JavaMethod> methods = JavaParser.fileToMethods(file);
 
         for (JavaMethod method : methods) {
@@ -46,9 +46,9 @@ public class methodTest {
 
     @Test
     public void testMethod() {
-        File file = new File("C:\\Users\\Administrator\\.jdks\\openjdk-17.0.2\\lib\\src\\java.base\\java\\util\\ArrayList.java");
+        File file = new File("JavaTest/jdk/java/util/ArrayList/AddAll.java");
         List<JavaMethod> methods = JavaParser.fileToMethods(file);
-        JavaMethod method = methods.stream().filter(m -> m.getName().equals("equals")).limit(1).findAny().get(); // indexOf
+        JavaMethod method = methods.stream().filter(m -> m.getName().equals("main")).limit(1).findAny().get(); // indexOf
         JavaClass focalClass = method.getDeclaringClass();
 
 
@@ -86,7 +86,7 @@ public class methodTest {
 
     @Test
     public void testApiParser() {
-        Path arrayListTest = Path.of("JavaOracle\\JavaTest\\jdk\\java\\util\\ArrayList\\AddAll.java");
+        Path arrayListTest = Path.of("JavaTest/jdk/java/util/ArrayList/AddAll.java");
         APISignatureExtractor extractor = new APISignatureExtractor();
         extractor.extractSignatures(String.valueOf(arrayListTest)).forEach(signature -> {
 //            System.out.println(signature.getPackageName() + " " + signature.getClassName() + " " + signature.getMethodName());
@@ -98,10 +98,10 @@ public class methodTest {
 
     @Test
     public void testDocument() {
-        Path arrayListTest = Path.of("JavaOracle\\JavaTest\\jdk\\java\\util\\ArrayList\\AddAll.java");
+        Path arrayListTest = Path.of("JavaTest/jdk/java/util/ArrayList/AddAll.java");
         APISignatureExtractor extractor = new APISignatureExtractor();
 
-        String base = "JavaOracle\\JavaDoc\\docs\\api\\java.base";
+        String base = "JavaDoc/docs/api/java.base";
 
         extractor.extractSignatures(String.valueOf(arrayListTest)).forEach(signature -> {
             System.out.println(signature.getPackageName() + " " + signature.getClassName() + " " + signature.getMethodName());

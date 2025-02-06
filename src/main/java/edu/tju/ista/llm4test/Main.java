@@ -41,7 +41,7 @@ class TestStatistics {
     }
 }
 
-class Main {
+public class Main {
     private static final String TEMPLATE_MODE = "SpecTest";
     private final TestExecutor testExecutor;
     private final TestStatistics statistics;
@@ -67,7 +67,7 @@ class Main {
         }
         String baseDocPath = "JavaDoc/docs/api/java.base";
         Main instance = new Main(jarPath, ResultDir, baseDocPath);
-        instance.runTestSuiteParallel(Path.of("JavaTest/jdk/java/util/"));
+        instance.runTestSuiteParallel(Path.of("JavaTest/jdk/java/util/ArrayList"));
     }
     public Main(String jarPath, File resultDir, String baseDocPath) {
         this.testExecutor = new TestExecutor(jarPath, resultDir);
@@ -77,7 +77,7 @@ class Main {
         this.ResultDir = resultDir;
     }
     
-    public List<File> traverseDir(File dir) {
+    public static List<File> traverseDir(File dir) {
         ArrayList<File> list = new ArrayList<>();
         if(dir.isDirectory()) {
             for (File file : Objects.requireNonNull(dir.listFiles())) {
@@ -114,7 +114,7 @@ class Main {
         fileProcessor.copyTestFiles(rootPath);
         List<File> files = traverseDir(rootPath.toFile()).stream().filter(file -> file.getName().endsWith(".java")).collect(Collectors.toList());
         System.out.println("Total files: " + files.size());
-        int threadCount = Math.min(Runtime.getRuntime().availableProcessors(), files.size());
+        int threadCount = Math.min(Runtime.getRuntime().availableProcessors() * 2, files.size());
         ExecutorService executor = Executors.newFixedThreadPool(threadCount);
         CountDownLatch latch = new CountDownLatch(files.size());
         

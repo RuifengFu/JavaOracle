@@ -45,6 +45,7 @@ public class OpenAI {
 //        BASE_URL = "https://api.openai-hk.com/beta/v1/chat/completions";
 //        MODEL = "claude-3-5-sonnet-20241022";
         API_KEY = System.getenv("OPENAI_API_KEY");
+        System.out.println("API_KEY: " + API_KEY);
     }
 
 

@@ -64,7 +64,7 @@ public class JavaParser {
                 // we don't care about non-public or abstract classes
                 continue;
             }
-            System.out.println("类: " + javaClass.getFullyQualifiedName());
+//            System.out.println("类: " + javaClass.getFullyQualifiedName());
 
             // 遍历类中的所有方法
             for (JavaMethod method : javaClass.getMethods()) {

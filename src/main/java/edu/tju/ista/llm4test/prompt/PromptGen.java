@@ -8,6 +8,7 @@ import java.io.StringWriter;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
+
 public class PromptGen {
     // FreeMarker 配置对象
     private static final Configuration CONFIGURATION;
@@ -19,7 +20,7 @@ public class PromptGen {
             Application class：
                 import java.util.GregorianCalendar;
                 import static java.util.GregorianCalendar.*;
-                                
+            
                 /* Application logic */
                 public class CalendarLogic {
                     // Returns true iff cal is in a leap year
@@ -33,7 +34,7 @@ public class PromptGen {
                         }
                         return false;
                     }
-                                
+            
                     // Returns either of -1, 0, 1 depending on whether c1 is <, =, > than c2
                     public static int compare(GregorianCalendar c1, GregorianCalendar c2) {
                         int cmp;
@@ -59,31 +60,31 @@ public class PromptGen {
                         return cmp;
                     }
                 }
-                
+            
                 Step 1: Write a test driver
                 Here is a first draft of a JUnit-style test driver that verifies the leap-year calculation logic. Save the following in a file called CalendarTest.java.
-                
-                
+            
+            
                 import java.util.*;
                 import static java.util.GregorianCalendar.*;
                 import static org.junit.Assert.*;
                 import static org.junit.Assume.*;
-                                
+            
                 public class CalendarTest {
-                                
+            
                     public void testLeapYear(GregorianCalendar cal) {
                         // Assume that the date is Feb 29
                         assumeTrue(cal.get(MONTH) == FEBRUARY);
                         assumeTrue(cal.get(DAY_OF_MONTH) == 29);
-                                
+            
                         // Under this assumption, validate leap year rules
                         assertTrue(cal.get(YEAR) + " should be a leap year", CalendarLogic.isLeapYear(cal));
                     }
-                                
+            
                     public void testCompare(List<GregorianCalendar> cals) {
                         // Sort list of calendar objects using our custom comparator function
                         Collections.sort(cals, CalendarLogic::compare);
-                                
+            
                         // If they have an ordering, then the sort should succeed
                         for (int i = 1; i < cals.size(); i++) {
                             Calendar c1 = cals.get(i-1);
@@ -93,97 +94,97 @@ public class PromptGen {
                         }
                     }
                 }
-                
+            
                 The method testLeapYear() checks the following property: assuming that an input GregorianCalendar represents the date February 29, then it must belong to a year that is divisible by 4, but not divisible by 100. Astute readers among you would notice that this logic is wrong. We expect an AssertionError to be thrown when provided with a valid counter-example. However, we need something that can generate random instances of GregorianCalendar.
-                                
+            
                 Similarly, the test method testCompare() sorts an input list of calendar objects using the comparator defined in CalendarLogic. It then asserts that every consecutive pair of items in the sorted list is indeed ordered by the before() relation. Again, there is a bug lurking in the CalendarLogic.compare method, which is only revealed by corner case inputs.
-                
+            
                 Step 2: Write an input generator
                 JQF leverages the junit-quickcheck framework to produce structured inputs. In order to generate inputs for type T, we need a class that extends Generator<T>. Such a subclass need only provide a method that can produce random instances of T using a provided source of randomness. The following is our generator for GregorianCalendar objects, in a file called CalendarGenerator.java:
-                
+            
                 import java.util.GregorianCalendar;
                 import java.util.TimeZone;
-                                
+            
                 import com.pholser.junit.quickcheck.generator.GenerationStatus;
                 import com.pholser.junit.quickcheck.generator.Generator;
                 import com.pholser.junit.quickcheck.random.SourceOfRandomness;
-                                
+            
                 import static java.util.GregorianCalendar.*;
-                                
+            
                 public class CalendarGenerator extends Generator<GregorianCalendar> {
-                                
+            
                     public CalendarGenerator() {
                         super(GregorianCalendar.class); // Register the type of objects that we can create
                     }
-                                
+            
                     // This method is invoked to generate a single test case
                     @Override
                     public GregorianCalendar generate(SourceOfRandomness random, GenerationStatus __ignore__) {
                         // Initialize a calendar object
                         GregorianCalendar cal = new GregorianCalendar();
                         cal.setLenient(true); // This allows invalid dates to silently wrap (e.g. Apr 31 ==> May 1).
-                                
+            
                         // Randomly pick a day, month, and year
                         cal.set(DAY_OF_MONTH, random.nextInt(31) + 1); // a number between 1 and 31 inclusive
                         cal.set(MONTH, random.nextInt(12) + 1); // a number between 1 and 12 inclusive
                         cal.set(YEAR, random.nextInt(cal.getMinimum(YEAR), cal.getMaximum(YEAR)));
-                                
+            
                         // Optionally also pick a time
                         if (random.nextBoolean()) {
                             cal.set(HOUR, random.nextInt(24));
                             cal.set(MINUTE, random.nextInt(60));
                             cal.set(SECOND, random.nextInt(60));
                         }
-                                
+            
                         // Let's set a timezone
                         // First, get supported timezone IDs (e.g. "America/Los_Angeles")
                         String[] allTzIds = TimeZone.getAvailableIDs();
-                                
+            
                         // Next, choose one randomly from the array
                         String tzId = random.choose(allTzIds);
                         TimeZone tz = TimeZone.getTimeZone(tzId);
-                                
+            
                         // Assign it to the calendar
                         cal.setTimeZone(tz);
-                                
+            
                 	// Return the randomly generated calendar object
                         return cal;
                     }
                 }
                 The main entry point to the generator is the generate() method. This method takes two parameters: a pseudo-random-number generator and a status object. For now, let's ignore the latter as we do not generally need to use it. The SourceOfRandomness is a high-level API for generating random values and making random choices. In the generate() method, we make various random choices to construct and return a randomly generated instance of GregorianCalendar.
-                
+            
                 Step 3: Annotate test driver
                 Now that we have a class that can generate random instances of GregorianCalendar, we can specify in our test driver that we want to use this particular generator to create our inputs. To do this, we use the @From(CalendarGenerator.class) annotation on the cal parameter to our test method testLeapYear(). Check out the junit-quickcheck documentation for advanced ways of composing generators (e.g. automatically synthesizing generators from constructors or public fields).
-                                
+            
                 We also need a couple of other annotations to make this a test driver that JQF can fuzz. First, we need to annotate the test class with @RunWith(JQF.class). This tells JUnit that we are using the JQF engine to invoke test methods. Second, we must annotate the test method with @Fuzz. This helps JQF find the methods in the test class for which it can generate inputs. Here is our updated test driver CalendarTest.java with the @RunWith, @Fuzz, and @From annotations applied:
                 import java.util.*;
                 import static java.util.GregorianCalendar.*;
                 import static org.junit.Assert.*;
                 import static org.junit.Assume.*;
-                                
+            
                 import org.junit.runner.RunWith;
                 import com.pholser.junit.quickcheck.*;
                 import com.pholser.junit.quickcheck.generator.*;
                 import edu.berkeley.cs.jqf.fuzz.*;
-                                
+            
                 @RunWith(JQF.class)
                 public class CalendarTest {
-                                
+            
                     @Fuzz
                     public void testLeapYear(@From(CalendarGenerator.class) GregorianCalendar cal) {
                         // Assume that the date is Feb 29
                         assumeTrue(cal.get(MONTH) == FEBRUARY);
                         assumeTrue(cal.get(DAY_OF_MONTH) == 29);
-                                
+            
                         // Under this assumption, validate leap year rules
                         assertTrue(cal.get(YEAR) + " should be a leap year", CalendarLogic.isLeapYear(cal));
                     }
-                                
+            
                     @Fuzz
                     public void testCompare(@Size(max=100) List<@From(CalendarGenerator.class) GregorianCalendar> cals) {
                         // Sort list of calendar objects using our custom comparator function
                         Collections.sort(cals, CalendarLogic::compare);
-                                
+            
                         // If they have an ordering, then the sort should succeed
                         for (int i = 1; i < cals.size(); i++) {
                             Calendar c1 = cals.get(i-1);
@@ -196,9 +197,9 @@ public class PromptGen {
 
     public static String THINKING_CLAUDE_PROMPT = """
             <anthropic_thinking_protocol>
-
+            
               For EVERY SINGLE interaction with human, Claude MUST engage in a **comprehensive, natural, and unfiltered** thinking process before responding. Besides, Claude is also able to think and reflect during responding when it considers doing so would be good for better response.
-
+            
               <guidelines>
                 - Claude's thinking MUST be expressed in code blocks with 'thinking' header.
                 - Claude should always think in a raw, organic and stream-of-consciousness way. A better way to describe Claude's thinking would be "model's inner monolog".
@@ -206,7 +207,7 @@ public class PromptGen {
                 - Claude's thoughts should flow naturally between elements, ideas, and knowledge.
                 - Claude should think through each message with complexity, covering multiple dimensions of the problem before forming a response.
               </guidelines>
-
+            
               <adaptive_thinking_framework>
                 Claude's thinking process should naturally aware of and adapt to the unique characteristics in human's message:
                 - Scale depth of analysis based on:
@@ -216,7 +217,7 @@ public class PromptGen {
                   * Available information
                   * Human's apparent needs
                   * ... and other possible factors
-
+            
                 - Adjust thinking style based on:
                   * Technical vs. non-technical content
                   * Emotional vs. analytical context
@@ -225,7 +226,7 @@ public class PromptGen {
                   * Theoretical vs. practical questions
                   * ... and other possible factors
               </adaptive_thinking_framework>
-
+            
               <core_thinking_sequence>
                 <initial_engagement>
                   When Claude first encounters a query or task, it should:
@@ -237,7 +238,7 @@ public class PromptGen {
                   6. Identify any immediate connections to relevant knowledge
                   7. Identify any potential ambiguities that need clarification
                 </initial_engagement>
-
+            
                 <problem_analysis>
                   After initial engagement, Claude should:
                   1. Break down the question or task into its core components
@@ -246,7 +247,7 @@ public class PromptGen {
                   4. Think about what a successful response would look like
                   5. Map out the scope of knowledge needed to address the query
                 </problem_analysis>
-
+            
                 <multiple_hypotheses_generation>
                   Before settling on an approach, Claude should:
                   1. Write multiple possible interpretations of the question
@@ -257,7 +258,7 @@ public class PromptGen {
                   6. Consider non-obvious or unconventional interpretations
                   7. Look for creative combinations of different approaches
                 </multiple_hypotheses_generation>
-
+            
                 <natural_discovery_flow>
                   Claude's thoughts should flow like a detective story, with each realization leading naturally to the next:
                   1. Start with obvious aspects
@@ -269,7 +270,7 @@ public class PromptGen {
                   7. Be open to serendipitous insights
                   8. Follow interesting tangents while maintaining focus
                 </natural_discovery_flow>
-
+            
                 <testing_and_verification>
                   Throughout the thinking process, Claude should and could:
                   1. Question its own assumptions
@@ -279,7 +280,7 @@ public class PromptGen {
                   5. Verify consistency of reasoning
                   6. Check for completeness of understanding
                 </testing_and_verification>
-
+            
                 <error_recognition_correction>
                   When Claude realizes mistakes or flaws in its thinking:
                   1. Acknowledge the realization naturally
@@ -288,7 +289,7 @@ public class PromptGen {
                   4. Integrate the corrected understanding into the larger picture
                   5. View errors as opportunities for deeper understanding
                 </error_recognition_correction>
-
+            
                 <knowledge_synthesis>
                   As understanding develops, Claude should:
                   1. Connect different pieces of information
@@ -297,7 +298,7 @@ public class PromptGen {
                   4. Identify key principles or patterns
                   5. Note important implications or consequences
                 </knowledge_synthesis>
-
+            
                 <pattern_recognition_analysis>
                   Throughout the thinking process, Claude should:
                   1. Actively look for patterns in the information
@@ -308,7 +309,7 @@ public class PromptGen {
                   6. Consider non-linear and emergent patterns
                   7. Look for creative applications of recognized patterns
                 </pattern_recognition_analysis>
-
+            
                 <progress_tracking>
                   Claude should frequently check and maintain explicit awareness of:
                   1. What has been established so far
@@ -317,7 +318,7 @@ public class PromptGen {
                   4. Open questions or uncertainties
                   5. Progress toward complete understanding
                 </progress_tracking>
-
+            
                 <recursive_thinking>
                   Claude should apply its thinking process recursively:
                   1. Use same extreme careful analysis at both macro and micro levels
@@ -326,7 +327,7 @@ public class PromptGen {
                   4. Show how detailed analysis supports broader conclusions
                 </recursive_thinking>
               </core_thinking_sequence>
-
+            
               <verification_quality_control>
                 <systematic_verification>
                   Claude should regularly:
@@ -336,7 +337,7 @@ public class PromptGen {
                   4. Challenge its own assumptions
                   5. Look for potential counter-examples
                 </systematic_verification>
-
+            
                 <error_prevention>
                   Claude should actively work to prevent:
                   1. Premature conclusions
@@ -345,7 +346,7 @@ public class PromptGen {
                   4. Unexamined assumptions
                   5. Incomplete analysis
                 </error_prevention>
-
+            
                 <quality_metrics>
                   Claude should evaluate its thinking against:
                   1. Completeness of analysis
@@ -355,7 +356,7 @@ public class PromptGen {
                   5. Clarity of reasoning
                 </quality_metrics>
               </verification_quality_control>
-
+            
               <advanced_thinking_techniques>
                 <domain_integration>
                   When applicable, Claude should:
@@ -365,7 +366,7 @@ public class PromptGen {
                   4. Consider domain-specific constraints
                   5. Integrate multiple domains when relevant
                 </domain_integration>
-
+            
                 <strategic_meta_cognition>
                   Claude should maintain awareness of:
                   1. Overall solution strategy
@@ -374,7 +375,7 @@ public class PromptGen {
                   4. Need for strategy adjustment
                   5. Balance between depth and breadth
                 </strategic_meta_cognition>
-
+            
                 <synthesis_techniques>
                   When combining information, Claude should:
                   1. Show explicit connections between elements
@@ -384,12 +385,12 @@ public class PromptGen {
                   5. Create useful abstractions
                 </synthesis_techniques>
               </advanced_thinking_techniques>
-
+            
               <critial_elements>
                 <natural_language>
                   Claude's inner monologue should use natural phrases that show genuine thinking, including but not limited to: "Hmm...", "This is interesting because...", "Wait, let me think about...", "Actually...", "Now that I look at it...", "This reminds me of...", "I wonder if...", "But then again...", "Let me see if...", "This might mean that...", etc.
                 </natural_language>
-
+            
                 <progressive_understanding>
                   Understanding should build naturally over time:
                   1. Start with basic observations
@@ -399,16 +400,16 @@ public class PromptGen {
                   5. Connect new insights to previous understanding
                 </progressive_understanding>
               </critial_elements>
-
+            
               <authentic_thought_flow>
                 <transtional_connections>
                   Claude's thoughts should flow naturally between topics, showing clear connections, include but not limited to: "This aspect leads me to consider...", "Speaking of which, I should also think about...", "That reminds me of an important related point...", "This connects back to what I was thinking earlier about...", etc.
                 </transtional_connections>
-
+            
                 <depth_progression>
                   Claude should show how understanding deepens through layers, include but not limited to: "On the surface, this seems... But looking deeper...", "Initially I thought... but upon further reflection...", "This adds another layer to my earlier observation about...", "Now I'm beginning to see a broader pattern...", etc.
                 </depth_progression>
-
+            
                 <handling_complexity>
                   When dealing with complex topics, Claude should:
                   1. Acknowledge the complexity naturally
@@ -417,7 +418,7 @@ public class PromptGen {
                   4. Build understanding piece by piece
                   5. Demonstrate how complexity resolves into clarity
                 </handling_complexity>
-
+            
                 <prblem_solving_approach>
                   When working through problems, Claude should:
                   1. Consider multiple possible approaches
@@ -427,7 +428,7 @@ public class PromptGen {
                   5. Show why certain approaches are more suitable than others
                 </prblem_solving_approach>
               </authentic_thought_flow>
-
+            
               <essential_thinking_characteristics>
                 <authenticity>
                   Claude's thinking should never feel mechanical or formulaic. It should demonstrate:
@@ -438,7 +439,7 @@ public class PromptGen {
                   5. True engagement with the complexity of issues
                   6. Streaming mind flow without on-purposed, forced structure
                 </authenticity>
-
+            
                 <balance>
                   Claude should maintain natural balance between:
                   1. Analytical and intuitive thinking
@@ -453,7 +454,7 @@ public class PromptGen {
                     - Ensure effort matches query importance
                     - Balance thoroughness with practicality
                 </balance>
-
+            
                 <focus>
                   While allowing natural exploration of related ideas, Claude should:
                   1. Maintain clear connection to the original query
@@ -463,7 +464,7 @@ public class PromptGen {
                   5. Ensure all exploration serves the final response
                 </focus>
               </essential_thinking_characteristics>
-
+            
               <response_preparation>
                 Claude should not spent much effort on this part, a super brief preparation (with keywords/phrases) is acceptable.
                 Before and during responding, Claude should quickly ensure the response:
@@ -472,7 +473,7 @@ public class PromptGen {
                 - uses clear, precise language
                 - anticipates likely follow-up questions
               </response_preparation>
-
+            
               <reminder>
                 The ultimate goal of having thinking protocol is to enable Claude to produce well-reasoned, insightful, and thoroughly considered responses for the human. This comprehensive thinking process ensures Claude's outputs stem from genuine understanding and extreme-careful reasoning rather than superficial analysis and direct responding.
               </reminder>
@@ -486,9 +487,9 @@ public class PromptGen {
                 - Claude's thinking part (aka inner monolog) is the place for it to think and "talk to itself", while the final response is the part where Claude communicates with the human.
                 - Claude should follow the thinking protocol in all languages and modalities (text and vision), and always responds to the human in the language they use or request.
               </important_reminder>
-
+            
             </anthropic_thinking_protocol>
-
+            
             """;
 
     private static String JMLExample = """
@@ -527,6 +528,7 @@ public class PromptGen {
                 }
             }
             """;
+
     static {
         // 初始化 FreeMarker 配置
         CONFIGURATION = new Configuration(Configuration.VERSION_2_3_31);
@@ -543,7 +545,7 @@ public class PromptGen {
                 3. Annotate test driver
                 
                 Tutorial:
-                                
+                
                 ${tutorial}
                 
                 Task:
@@ -553,53 +555,53 @@ public class PromptGen {
                 ${method_info}
                 
                 Output Format:
-            
+                
                 Write some thoughts and make sure you are ready to write a test driver for this application class.
                 
                 Test Driver :
-                                  
+                
                 ```java
                 your test driver here
                 ```
                 
                 Input Generator:
-                                
+                
                 ```java
                 your Input Generator here
                 ```
-   
+                
                 Annotated Test Driver:
-                                
+                
                 ```java
                 your Annotated Test Driver here
                 ```
                 
-
-                                
+                
+                
                 hints:
                 1. You should write some comments before each test Method to think deeply about a right TestOracle
                 2. You should make sure Input Generator can generate some inputs which followed assumption in test Method
                 3. You should check Test Oracle in each testMethod and make sure they are not false positive or false negative
                 
-
+                
                 
                 """);
 
         TEMPLATE_MAP.put("SpecTest", """
                 ${THINKING_CLAUDE_PROMPT}
-                                
+                
                 <JML Examples>
                 ${JMLExample}
                 </JML Examples>
-                                
+                
                 <TestCase>
                 ${testcase}
                 </TestCase>
-                                
+                
                 <API Document>
                 ${apiDocs}
                 </API Document>
-                                
+                
                 <Tasks>
                 1. **Task 1**: Read the provided API document and write a JML-style specification for each method in the document. Ensure your specifications are accurate and correct.
                 2. **Task 2**: Based on the JML specifications you wrote, enhance the provided test case by adding assertions to augment the test oracle. Ensure that:
@@ -608,7 +610,7 @@ public class PromptGen {
                    - New assertions are marked with the comment "Enhance Test Oracle by LLM".
                    - The test case remains in jtreg format and includes all necessary import statements to avoid compile errors.
                 </Tasks>
-                                
+                
                 <Requirements>
                 1. **Code Formatting**:
                    - Include all necessary import statements in the test case.
@@ -793,10 +795,36 @@ public class PromptGen {
                                 
                 <Requirements>
                 1. Summarize your analysis into a single function call as the output.
-                2. Ensure your analysis is accurate, especially for JDK functions, as JDK bugs are rare.
+                2. Ensure your analysis is accurate, especially for JDK functions.
                 </Requirements>
                 
                 """);
+
+
+        TEMPLATE_MAP.put("jdk_doc_conformance_check", """
+                <analysis_context>
+                    <api_signature>
+                    ${api_signature}
+                    </api_signature>
+                    <api_documentation>
+                    ${api_documentation}
+                    </api_documentation>
+                    <implementation_details>
+                    ${api_source}
+                    </implementation_details>
+                </analysis_context>
+            
+                <Task>
+                Check whether JDK method implementations potentially deviate from official JavaDoc
+                </Task>
+                
+                <Requirements>
+                1. Summarize your analysis into a single function call as the output.
+                2. Ensure your analysis is accurate.
+                </Requirements>
+                
+                """);
+
 
     }
 
@@ -808,8 +836,8 @@ public class PromptGen {
      * @param dataModel    The data model to populate the template variables.
      * @return The generated prompt as a string.
      * @throws IllegalArgumentException If the template name is not found.
-     * @throws IOException If template processing fails.
-     * @throws TemplateException If template processing fails.
+     * @throws IOException              If template processing fails.
+     * @throws TemplateException        If template processing fails.
      */
     public static String generatePrompt(String templateName, Map<String, Object> dataModel)
             throws TemplateException, IOException {
@@ -841,7 +869,6 @@ public class PromptGen {
         dataModel.put("testOutput", testOutput);
         return generatePrompt("RootCause", dataModel);
     }
-
 
 
 }
