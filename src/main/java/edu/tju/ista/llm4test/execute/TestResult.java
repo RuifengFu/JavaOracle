@@ -107,12 +107,18 @@ public class TestResult {
         return kind;
     }
 
+    @Deprecated
     public TestOutput getCompileResult() {
         return compileResult;
     }
 
+    @Deprecated
     public HashMap<String, TestOutput> getExecResults() {
         return execResults;
+    }
+
+    public TestOutput getJtregResult() {
+        return jtregResult;
     }
 
     @Deprecated

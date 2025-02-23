@@ -152,8 +152,12 @@ public class TestCase {
             String prompt = PromptGen.generatePrompt("FixTestCase", dataModel);
             String text = OpenAI.messageCompletion(prompt);
             ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
-            String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
-            applyChange(generatedCode);
+            if (codeBlocks.isEmpty()) {
+                applyChange(text);
+            } else {
+                String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
+                applyChange(generatedCode);
+            }
         } catch (Exception e) {
             LoggerUtil.logExec(Level.WARNING, "Fixing test case failed: " + file + "\n" + e.getMessage());
         }
@@ -167,27 +171,32 @@ public class TestCase {
             String prompt = PromptGen.generatePrompt("EnhanceTestCase", dataModel);
             String text = OpenAI.messageCompletion(prompt);
             ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
-            String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
-            applyChange(generatedCode);
+            if (codeBlocks.isEmpty()) {
+                applyChange(text);
+            } else {
+                String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
+                applyChange(generatedCode);
+            }
         } catch (Exception e) {
             LoggerUtil.logExec(Level.WARNING, "Enhancing test case failed: " + file + "\n" + e.getMessage());
         }
     }
 
     public void applyChange(String change){
-        try {
-            String testcase = getTestcaseWithLineNumber();
-            Map<String, Object> dataModel = new HashMap<>();
-            dataModel.put("originTestcase", originTestCase);
-            dataModel.put("modified", change);
-            String prompt = PromptGen.generatePrompt("ApplyChange", dataModel);
-            String text = OpenAI.messageCompletion(prompt);
-            ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
-            String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
-            writeTestCaseToFile(generatedCode);
-        } catch (Exception e) {
-            LoggerUtil.logExec(Level.WARNING, "Applying change failed: " + file + "\n" + e.getMessage());
-        }
+        writeTestCaseToFile(change);
+//        try {
+//            String testcase = getTestcaseWithLineNumber();
+//            Map<String, Object> dataModel = new HashMap<>();
+//            dataModel.put("originTestcase", originTestCase);
+//            dataModel.put("modified", change);
+//            String prompt = PromptGen.generatePrompt("ApplyChange", dataModel);
+//            String text = OpenAI.messageCompletion(prompt);
+//            ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
+//            String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
+//            writeTestCaseToFile(generatedCode);
+//        } catch (Exception e) {
+//            LoggerUtil.logExec(Level.WARNING, "Applying change failed: " + file + "\n" + e.getMessage());
+//        }
     }
 
 

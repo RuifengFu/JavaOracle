@@ -636,38 +636,105 @@ public class PromptGen {
 
         TEMPLATE_MAP.put("EnhanceTestCase", """
                 ${THINKING_CLAUDE_PROMPT}
-                
                 <TestCase>
                 ${testcase}
                 </TestCase>
-                
+
                 <api document>
                 ${apiDocs}
                 </api document>
-                
+
                 <Tasks>
-                1. **Code Explanation**: Add detailed comments to explain the logic of the code, especially focusing on complex or critical sections.
-                2. **Assertion Enhancement**: Write new assertions based on the logic of the code blocks. Ensure that each assertion is:
-                   - **Accurate**: Reflects the intended behavior of the code.
-                   - **Non-redundant**: Does not duplicate existing assertions.
-                   - **Non-false-positive**: Will not pass incorrectly due to unintended behavior.
-                3. **Code Formatting**: Ensure the code follows the jtreg format and includes all necessary import statements to avoid compile errors.
-                4. **Marking Modifications**: Clearly mark all modifications with the comment "Enhance Test Oracle by LLM".
+                1. **API Analysis and Interaction Study**:
+                   - Identify the core APIs and classes being tested
+                   - Study the API documentation to understand:
+                     * Main functionality and purpose
+                     * Related APIs and their relationships
+                     * Common usage patterns
+                   - Analyze potential interactions with common Java operations:
+                     * toString() behavior
+                     * equals() and hashCode() implementations
+                     * Serialization/Deserialization
+                     * Type conversion and casting
+                     * Null handling
+                     * Threading safety if applicable
+                     * Integration with Collections framework
+                     * Interaction with other standard Java utilities
+
+                2. **Cross-functional Testing Considerations**:
+                   - Consider how the API behaves when:
+                     * Used in combination with other related APIs
+                     * Involved in common Java operations
+                     * Handling edge cases and special values
+                     * Dealing with different data types
+                   - Think about potential integration issues with:
+                     * Standard Java libraries
+                     * Common design patterns
+                     * Typical usage scenarios
+
+                3. **Deep Analysis and Creative Thinking**:
+                   - Think like a senior test engineer - what could be missing in current tests?
+                   - Consider edge cases that might not be obvious at first glance
+                   - Identify potential vulnerabilities or weak points
+                   - Feel free to propose innovative test scenarios
+
+                4. **Add Effective Assertions**:
+                   - Based on the API analysis and interaction study, add assertions that:
+                     * Verify core API functionality
+                     * Test API interactions with related components
+                     * Cover common Java operations
+                     * Handle edge cases and special scenarios
+                   - Focus on these characteristics:
+                     * Non-redundant with existing assertions
+                     * Genuinely reflect correct execution
+                     * Consider boundary conditions
+                     * Test important API interactions
+
+                5. **Mark and Document Changes**:
+                   - Add comment "// Enhanced Test Oracle by LLM" before new assertions
+                   - Provide detailed reasoning for each new assertion
+                   - Document any interesting findings about API interactions
+                   - Explain the importance of each test scenario
+
+                6. **Additional Insights** (Optional but encouraged):
+                   - Suggest potential improvements to test coverage
+                   - Identify any API usage patterns that might need testing
+                   - Share observations about possible API misuse scenarios
+                   - Propose additional interaction test cases
                 </Tasks>
-                
-                <Requirement>
-                1. **Code Completeness**: The code should include all necessary import statements and be free of compile errors.
-                2. **Assertion Correctness**: Assertions should be contextually correct and align with the code's logic.
-                3. **Commenting**: Provide clear and concise comments to explain the code's logic.
-                4. **Formatting**: Maintain the jtreg format, including the test summary and bug IDs.
-                5. **Modification Marking**: All changes should be marked with the comment "Enhance Test Oracle by LLM".
-                6. **Keep Jtreg Test Comment**: Don't modify the jtreg test comment like below.
-                /*
-                 * @test
-                 * @bug 4160406 4705734 4707389 6358355 7032154
-                 * @summary Tests for Float.parseFloat method
-                 */
-                </Requirement>
+
+                <Requirements>
+                1. Maintain existing test framework structure:
+                   - Preserve jtreg test comments and imports
+                   - Keep basic code structure intact
+
+                2. All new assertions must be:
+                   - Compilation error-free
+                   - Logically correct
+                   - Well-documented with clear purpose
+                   - Based on actual API behavior
+
+                3. Test coverage should consider:
+                   - Core API functionality
+                   - Common Java operations
+                   - API interactions
+                   - Edge cases and special scenarios
+
+                4. Feel free to:
+                   - Apply testing best practices
+                   - Suggest API interaction scenarios
+                   - Share insights about potential risks
+                   - Propose comprehensive test cases
+                </Requirements>
+
+                <Note>
+                You are encouraged to:
+                1. First thoroughly understand the API's purpose and behavior
+                2. Think about how this API interacts with Java's standard features
+                3. Consider common programming patterns and potential misuse
+                4. Share your reasoning about why certain tests are important
+                5. Suggest tests for API interaction scenarios you think are valuable
+                </Note>
                 """);
 
         TEMPLATE_MAP.put("ApiTest", """
@@ -847,6 +914,7 @@ public class PromptGen {
             throw new IllegalArgumentException("Template not found: " + templateName);
         }
         dataModel.put("tutorial", JQF_TUTORIAL);
+        THINKING_CLAUDE_PROMPT = "";
         dataModel.put("THINKING_CLAUDE_PROMPT", THINKING_CLAUDE_PROMPT);
         dataModel.put("JMLExample", JMLExample);
 

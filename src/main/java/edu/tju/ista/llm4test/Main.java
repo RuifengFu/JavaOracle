@@ -1,10 +1,7 @@
 package edu.tju.ista.llm4test;
 
 
-import edu.tju.ista.llm4test.execute.TestCase;
-import edu.tju.ista.llm4test.execute.TestExecutor;
-import edu.tju.ista.llm4test.execute.TestResult;
-import edu.tju.ista.llm4test.execute.TestResultKind;
+import edu.tju.ista.llm4test.execute.*;
 import edu.tju.ista.llm4test.llm.OpenAI;
 import edu.tju.ista.llm4test.prompt.PromptGen;
 import edu.tju.ista.llm4test.utils.*;
@@ -48,6 +45,7 @@ public class Main {
     private final ApiDocProcessor apiDocProcessor;
     private final FileProcessor fileProcessor;
 
+    private TestSuite testSuite;
     private final File ResultDir;
 
     private static final String [] jars;
@@ -60,21 +58,46 @@ public class Main {
     }
 
     public static void main(String[] args) {
+        for (String arg: args) {
+            System.out.println(arg);
+        }
+        switch (args[0]) {
+            case "execute": execute(args[1]); break;
+            case "generate": generate(args[1]); break;
+        }
+    }
+
+    public static void generate(String testPath) {
         String jarPath = String.join(File.pathSeparator, jars);
         File ResultDir = new File("test");
         if (!ResultDir.exists()) {
             ResultDir.mkdirs();
         }
         String baseDocPath = "JavaDoc/docs/api/java.base";
-        Main instance = new Main(jarPath, ResultDir, baseDocPath);
-        instance.runTestSuiteParallel(Path.of("JavaTest/jdk/java/util/ArrayList"));
+        String suitePath = "jdk17u-dev/test/jdk/" + testPath; // this is the true suitePath
+        Main instance = new Main(jarPath, ResultDir, baseDocPath, suitePath);
+        instance.runTestSuiteParallel();
     }
-    public Main(String jarPath, File resultDir, String baseDocPath) {
+
+    public static void execute(String testPath) {
+        String jarPath = String.join(File.pathSeparator, jars);
+        File ResultDir = new File("test");
+        if (!ResultDir.exists()) {
+            ResultDir.mkdirs();
+        }
+        String baseDocPath = "JavaDoc/docs/api/java.base";
+        String suitePath = "jdk17u-dev/test/jdk/" + testPath; // this is the true suitePath
+        Main instance = new Main(jarPath, ResultDir, baseDocPath, suitePath);
+        instance.runTestSuiteParallel2(Path.of("jdk/java/util/ArrayList"));
+    }
+    public Main(String jarPath, File resultDir, String baseDocPath, String suitePath) {
         this.testExecutor = new TestExecutor(jarPath, resultDir);
         this.statistics = new TestStatistics();
         this.apiDocProcessor = new ApiDocProcessor(baseDocPath);
         this.fileProcessor = new FileProcessor(resultDir);
         this.ResultDir = resultDir;
+        this.testSuite = new TestSuite(suitePath);
+        fileProcessor.copyTestFiles(Path.of("jdk17u-dev/test"));
     }
     
     public static List<File> traverseDir(File dir) {
@@ -91,36 +114,72 @@ public class Main {
         return list;
     }
 
-    private void testCaseConstruction(File file, Path rootPath) {
+    private void testCaseConstruction(File file) {
         try {
-            if (Files.size(file.toPath()) <= 100000) {
+            if (Files.size(file.toPath()) <= 10000) {
                 LoggerUtil.logExec(Level.INFO,"Processing file: " + file);
-                File targetFile = new File(file.getAbsolutePath().replace(rootPath.toString(), ResultDir.getPath()));
+//                File targetFile = new File(file.getAbsolutePath().replace(rootPath.toString(), ResultDir.getPath()));
+                File targetFile = new File(file.getAbsolutePath().replace("jdk17u-dev/test", "test"));
                 TestCase testcase = new TestCase(targetFile);
                 testcase.setOriginFile(file);
                 TestResult result = processTestFile(testcase);
                 LoggerUtil.logResult(Level.INFO, file + " " + result.getKind());
                 if (result.isFail() || result.isBug())
                     LoggerUtil.logResult(Level.INFO, testcase.verifyMessage);
-
-
+            } else {
+                statistics.recordResult(TestResultKind.PASS);
             }
         } catch (Exception e) {
             LoggerUtil.logExec(Level.WARNING, "Processing test file failed: " + file + "\n" + e.getMessage());
         }
     }
 
-    public void runTestSuiteParallel(Path rootPath) {
-        fileProcessor.copyTestFiles(rootPath);
-        List<File> files = traverseDir(rootPath.toFile()).stream().filter(file -> file.getName().endsWith(".java")).collect(Collectors.toList());
+    private void executeTestCase(File originFile, Path rootPath) {
+        File targetFile = new File(originFile.getAbsolutePath().replace("jdk17u-dev/test", "test"));
+        TestCase testcase = new TestCase(targetFile);
+        testcase.setOriginFile(originFile);
+        File file = testcase.getFile();
+        TestResult result = testExecutor.executeTest(file);
+        LoggerUtil.logExec(Level.INFO, "Processing file: " + file);
+        LoggerUtil.logResult(Level.INFO, file + " " + result.getKind() + " " + result.getJtregResult().exitValue);
+        statistics.recordResult(result.getKind());
+    }
+
+    public void runTestSuiteParallel() {
+
+        ArrayList<String> testCases = testSuite.getTestCases().stream().map(s -> "jdk17u-dev/test/jdk/" + s).collect(Collectors.toCollection(ArrayList::new));
+
+//        fileProcessor.copyTestFiles(rootPath);
+//        List<File> files = traverseDir(rootPath.toFile()).stream().filter(file -> file.getName().endsWith(".java")).collect(Collectors.toList());
+        // 这里的文件路径不对，需要更新
+        List<File> files = testCases.stream().map(File::new).toList();
+        System.out.println(files);
+        System.out.println("Total files: " + files.size());
+        int threadCount = Math.min(Runtime.getRuntime().availableProcessors() * 2, files.size());
+        threadCount = 1;
+        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+        CountDownLatch latch = new CountDownLatch(files.size());
+        files.forEach(file -> {
+            executor.submit(() -> {
+                testCaseConstruction(file);
+                latch.countDown();
+            });
+        });
+        waitForCompletion(executor, latch);
+        statistics.logStatistics();
+    }
+
+    public void runTestSuiteParallel2(Path rootPath) {
+
+        ArrayList<String> testCases = testSuite.getTestCases().stream().map(s -> "jdk17u-dev/test/jdk/" + s).collect(Collectors.toCollection(ArrayList::new));
+        List<File> files = testCases.stream().map(File::new).toList();
         System.out.println("Total files: " + files.size());
         int threadCount = Math.min(Runtime.getRuntime().availableProcessors() * 2, files.size());
         ExecutorService executor = Executors.newFixedThreadPool(threadCount);
         CountDownLatch latch = new CountDownLatch(files.size());
-        
         files.forEach(file -> {
             executor.submit(() -> {
-                testCaseConstruction(file, rootPath);
+                executeTestCase(file, rootPath);
                 latch.countDown();
             });
         });
@@ -136,21 +195,45 @@ public class Main {
         try {
             File file = testCase.getFile();
             TestResult result = testExecutor.executeTest(file);
+            System.out.println("result " + result.getKind());
             if (!result.isSuccess()) {
                 statistics.recordResult(TestResultKind.PASS);
                 return new TestResult(TestResultKind.PASS);
             }
+            String apiDocs = apiDocProcessor.processApiDocs(file);
+            testCase.setApiDocs(apiDocs);
+
+            testCase.enhance();
+            testCase.verifyTestFail();
+            testCase.setResult(testExecutor.executeTest(file));
+            result = testCase.getResult();
+            for (int i = 0; i < 1; i++) {
+                if (!result.isFail()) {
+                    break;
+                }
+                testCase.fix();
+                testCase.setResult(testExecutor.executeTest(file));
+                result = testCase.getResult();
+            }
+            testCase.verifyTestFail();
+
+            // 根据api信息生成assert
+            if (!result.isSuccess()) {
+                statistics.recordResult(result.getKind());
+                return result;
+            }
+
             Map<String, Object> dataModel = new HashMap<>();
             {// setup data model
-                String apiDocs = apiDocProcessor.processApiDocs(file);
                 dataModel.put("apiDocs", apiDocs);
                 dataModel.put("testcase", testCase.getTestcaseWithLineNumber());
-                testCase.setApiDocs(apiDocs);
             }
 
             String prompt = PromptGen.generatePrompt(TEMPLATE_MODE, dataModel);
+            System.out.println("call openAI");
             String generatedCode = processPrompt(prompt);
             if (generatedCode.isEmpty()) {
+                statistics.recordResult(TestResultKind.UNKNOWN);
                 return new TestResult(TestResultKind.UNKNOWN);
             }
             testCase.applyChange(generatedCode);
@@ -158,7 +241,7 @@ public class Main {
             result = testExecutor.executeTest(file);
             testCase.setResult(result);
 
-            for (int i = 0; i < 3; i++) {
+            for (int i = 0; i < 1; i++) {
                 if (!result.isFail()) {
                     break;
                 }
@@ -167,20 +250,22 @@ public class Main {
                 result = testCase.getResult();
             }
             testCase.verifyTestFail();
-            if (testCase.getResult().isSuccess()) {
-                testCase.enhance();
-                testCase.setResult(testExecutor.executeTest(file));
-                result = testCase.getResult();
-            }
-            for (int i = 0; i < 3; i++) {
-                if (!result.isFail()) {
-                    break;
-                }
-                testCase.fix();
-                testCase.setResult(testExecutor.executeTest(file));
-                result = testCase.getResult();
-            }
-            testCase.verifyTestFail();
+
+
+//            if (testCase.getResult().isSuccess()) {
+//                testCase.enhance();
+//                testCase.setResult(testExecutor.executeTest(file));
+//                result = testCase.getResult();
+//            }
+//            for (int i = 0; i < 1; i++) {
+//                if (!result.isFail()) {
+//                    break;
+//                }
+//                testCase.fix();
+//                testCase.setResult(testExecutor.executeTest(file));
+//                result = testCase.getResult();
+//            }
+//            testCase.verifyTestFail();
             statistics.recordResult(result.getKind());
             return result;
         } catch (Exception e) {
@@ -192,9 +277,10 @@ public class Main {
 
     private String processPrompt(String prompt) {
         String text = OpenAI.messageCompletion(prompt);
+        System.out.println("text " + text);
         ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
         if (codeBlocks.isEmpty()) {
-            return "";
+            return text; // 让apply change的大模型自己处理。
         }
         return codeBlocks.get(codeBlocks.size() - 1);
     }

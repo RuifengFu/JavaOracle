@@ -41,7 +41,10 @@ build/
 Results
 JavaDoc
 JavaTest
+jdk17u-dev
 target
 src/test/java/examples
-
+JTwork
+test
 *.log
+*.jar

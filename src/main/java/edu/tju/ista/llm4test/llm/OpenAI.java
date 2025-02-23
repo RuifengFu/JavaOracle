@@ -15,6 +15,7 @@ import edu.tju.ista.llm4test.llm.functionCalling.FuncToolFactory;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
 
 import java.util.*;
+import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -24,16 +25,19 @@ import static java.lang.Thread.sleep;
 public class OpenAI {
     private static final String API_KEY; // Replace with your API key
 
-    private static final String BASE_URL = "https://api.deepseek.com/beta/v1/chat/completions";
+    private static String BASE_URL = "https://api.deepseek.com/beta/v1/chat/completions";
+//    private static final String BASE_URL = "https://api.siliconflow.cn/v1/chat/completions";
 
-    private static final String MODEL = "deepseek-chat";
+    private static String MODEL = "deepseek-chat";
+    private static String FUNC_CALL_MODEL = "ep-20250214193558-qh465";
 
-    private static final double TEMPERATURE = 0.0;
+    private static final double TEMPERATURE = 0.3;
 
-    private static final int MAX_TOKENS = 8192;
+    private static int MAX_TOKENS = 8192;
+    private static boolean STREAM = true;
 
     public static String messageCompletion(String prompt) {
-        return messageCompletion("You are a helpful assistant", prompt, 0.0);
+        return messageCompletion("You are a helpful assistant", prompt, 0.7);
     }
 
     public static String messageCompletion(String prompt, double temperature) {
@@ -41,11 +45,18 @@ public class OpenAI {
     }
 
     static {
-//        API_KEY = "hk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
-//        BASE_URL = "https://api.openai-hk.com/beta/v1/chat/completions";
-//        MODEL = "claude-3-5-sonnet-20241022";
         API_KEY = System.getenv("OPENAI_API_KEY");
+        BASE_URL = System.getenv("OPENAI_BASE_URL");
+        MODEL = System.getenv("OPENAI_MODEL");
+        if (BASE_URL.isEmpty()) {
+            BASE_URL = "https://api.deepseek.com/beta/v1/chat/completions";
+        }
+        if (MODEL.isEmpty()) {
+            MODEL = "deepseek-chat";
+        }
+        System.out.println("BASE_URL: " + BASE_URL);
         System.out.println("API_KEY: " + API_KEY);
+        System.out.println("MODEL: " + MODEL);
     }
 
 
@@ -59,6 +70,7 @@ public class OpenAI {
         ));
         requestBody.put("max_tokens", MAX_TOKENS); // Limit the response length
         requestBody.put("temperature", TEMPERATURE); // Set the randomness of the output
+        requestBody.put("stream", STREAM);
         return requestBody;
     }
 
@@ -95,6 +107,10 @@ public class OpenAI {
                 LoggerUtil.logExec(Level.WARNING, "Received GOAWAY frame, retrying...");
                 sleep(10000); // Wait a bit before retrying
                 return getResponseBody(requestBody);
+            } else if (response.statusCode() == 504) {
+                LoggerUtil.logExec(Level.WARNING, "Received HTTP error " + response.statusCode() + ", retrying...");
+                sleep(10000);
+                return getResponseBody(requestBody);
             }
             throw new RuntimeException("HTTP error: " + response.statusCode() + "\n" + response.body().collect(Collectors.joining("\n")));
         }
@@ -115,12 +131,104 @@ public class OpenAI {
     }
 
 
+    private static void streamResponse(Map<String, Object> requestBody, Consumer<Map<String, Object>> chunkConsumer) throws IOException, InterruptedException {
+        ObjectMapper mapper = new ObjectMapper();
+        String requestBodyJson = mapper.writeValueAsString(requestBody);
+
+        HttpClient httpClient = buildHttpClient(); // 提取HTTP客户端构建逻辑
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + API_KEY)
+                .POST(HttpRequest.BodyPublishers.ofString(requestBodyJson))
+                .build();
+
+        HttpResponse<Stream<String>> response = httpClient.send(request, HttpResponse.BodyHandlers.ofLines());
+
+        if (response.statusCode() != 200) {
+            handleErrorResponse(response); // 提取错误处理逻辑
+            return;
+        }
+
+        // 流式处理核心逻辑
+        response.body().forEach(line -> {
+//            System.out.println(line);
+            if (isValidDataLine(line)) {
+                try {
+                    if (line.startsWith("data: [DONE]")) return; // 结束标志
+                    String jsonContent = extractJsonContent(line);
+                    Map<String, Object> chunk = mapper.readValue(jsonContent, Map.class);
+                    chunkConsumer.accept(chunk); // 通过回调函数实时输出
+                } catch (IOException e) {
+                    LoggerUtil.logExec(Level.WARNING, "Failed to parse chunk: " + line);
+                }
+            }
+        });
+
+        System.out.println("Stream response completed " + response.statusCode());
+    }
+
+    // 提取的辅助方法
+    private static HttpClient buildHttpClient() {
+        if (System.getProperty("os.name").toLowerCase().contains("linux")) {
+            return HttpClient.newBuilder()
+                    .proxy(ProxySelector.of(new InetSocketAddress("172.19.135.130", 5000)))
+                    .build();
+        }
+        return HttpClient.newHttpClient();
+    }
+
+    private static boolean isValidDataLine(String line) {
+        return !line.trim().isEmpty()
+                && !line.startsWith(": keep-alive")
+                && line.startsWith("data: ");
+    }
+
+    private static String extractJsonContent(String line) {
+        return line.substring(5).trim(); // 去掉"data:"前缀
+    }
+
+    private static void handleErrorResponse(HttpResponse<Stream<String>> response) throws InterruptedException {
+        String errorBody = response.body().collect(Collectors.joining("\n"));
+        if (response.statusCode() == 503 || response.statusCode() == 429 || response.statusCode() == 504) {
+            LoggerUtil.logExec(Level.WARNING, "Received HTTP error " + response.statusCode() + ", retrying...");
+            sleep(10000);
+            // 这里可以添加重试逻辑
+        } else {
+            throw new RuntimeException("HTTP error: " + response.statusCode() + "\n" + errorBody);
+        }
+    }
+
+
     public static String messageCompletion(String systemPrompt, String prompt, double temperature) {
         try {
             Map<String, Object> requestBody = getBaseRequestMap(systemPrompt, prompt);
             // update temperature
             requestBody.put("temperature", temperature);
-
+            if (STREAM) {
+                StringBuilder reasonSb = new StringBuilder();
+                StringBuilder contentSb = new StringBuilder();
+                // 调用流式接口
+                streamResponse(requestBody, chunk -> {
+                    List<Map<String, Object>> choices = (List<Map<String, Object>>) chunk.get("choices");
+                    if (choices != null && !choices.isEmpty()) {
+                        Map<String, Object> choice = choices.get(0);
+                        Map<String, Object> message = (Map<String, Object>) choice.get("delta");
+                        if (message != null) {
+                            String reasoning_content = (String) message.get("reasoning_content");
+                            if (reasoning_content != null)
+                                reasonSb.append(reasoning_content);
+                            String content = (String) message.get("content");
+                            if (content != null)
+                                contentSb.append(content);
+                        }
+                    }
+                });
+                String result = "<thinking>\n" + reasonSb + "\n<thinking\\>\n" + contentSb;
+                LoggerUtil.logOpenAI(Level.INFO, "OpenAI response: \n" + result);
+                return result;
+            }
             Map<String, Object> responseBody = getResponseBody(requestBody);
             // Extract the "message.content" value from the response
             List<Map<String, Object>> choices = (List<Map<String, Object>>) responseBody.get("choices");
@@ -129,6 +237,7 @@ public class OpenAI {
                 Map<String, Object> message = (Map<String, Object>) choice.get("message");
                 if (message != null) {
                     String content = (String) message.get("content"); // Extract "content"
+                    String thinking = (String) message.get("reasoning_content");
                     LoggerUtil.logOpenAI(Level.FINE, "OpenAI response: \n" + content);
                     return content; // Return the extracted content
                 }
@@ -147,7 +256,10 @@ public class OpenAI {
             // Create request body
             Map<String, Object> requestBody = getBaseRequestMap(systemPrompt, prompt);
             requestBody.put("tools", FuncToolFactory.toToolsArray(tools));
-            requestBody.put("temperature", 1.0); // Set the randomness of the output
+//            requestBody.put("temperature", 1.0); // Set the randomness of the output
+            requestBody.put("stream", false);
+            requestBody.put("max_tokens", 4096);
+            requestBody.put("model", FUNC_CALL_MODEL);
 
             // Convert request body to JSON
             Map<String, Object> responseBody = getResponseBody(requestBody);

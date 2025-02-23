@@ -1,8 +1,12 @@
 package edu.tju.ista.llm4test.execute;
 
+import edu.tju.ista.llm4test.utils.PathUtils;
+
+import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.stream.Collectors;
 
 public class TestSuite {
 
@@ -18,11 +22,12 @@ public class TestSuite {
     public ArrayList<String> jtregTestSuiteFinder() {
         try {
             ProcessBuilder builder = new ProcessBuilder();
-            builder.command("jreg", "-l", rootPath);
+            builder.command("jtreg", "-l", rootPath);
             Process process = builder.start();
             String stdout = new String(process.getInputStream().readAllBytes());
             String[] lines = stdout.split("\n");
-            return new ArrayList<>(Arrays.asList(lines).subList(1, lines.length - 1));
+            var list = Arrays.asList(lines).subList(1, lines.length - 1).stream().filter(s -> s.endsWith(".java")).collect(Collectors.toCollection(ArrayList::new));
+            return list;
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -35,5 +40,4 @@ public class TestSuite {
     public ArrayList<String> getTestCases() {
         return testCases;
     }
-
 }

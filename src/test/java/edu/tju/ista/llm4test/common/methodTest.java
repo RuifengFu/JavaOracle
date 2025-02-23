@@ -80,8 +80,6 @@ public class methodTest {
         } catch (TemplateException | IOException e) {
             throw new RuntimeException(e);
         }
-
-
     }
 
     @Test
