@@ -93,7 +93,7 @@ public class TestCase {
             String prompt = PromptGen.generatePrompt("RootCause", dataModel);
             ArrayList<FuncTool> tools = new ArrayList<>();
             tools.add(FuncToolFactory.createRootCauseOutputFuncTool());
-            var arguments = OpenAI.funcCall(prompt, "", tools).get("root_cause_analysis");
+            var arguments = OpenAI.Doubao.funcCall(prompt, "", tools).get("root_cause_analysis");
             var map = new ObjectMapper().readValue(arguments, Map.class);
             var reportBug = ((boolean)map.get("report_bug")) == true;
             if (reportBug) {
@@ -123,7 +123,6 @@ public class TestCase {
             e.printStackTrace();
         }
         // add line number, 大模型在分析代码的时候，没有行号大模型会出现幻觉。
-        // 行号没有等宽，因为大模型不需要等宽
         String[] lines = testcase.split("\n");
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < lines.length; i++) {
@@ -150,7 +149,7 @@ public class TestCase {
             dataModel.put("apiDocs", apiDocs);
             dataModel.put("rootCause", verifyMessage);
             String prompt = PromptGen.generatePrompt("FixTestCase", dataModel);
-            String text = OpenAI.messageCompletion(prompt);
+            String text = OpenAI.Doubao.messageCompletion(prompt);
             ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
             if (codeBlocks.isEmpty()) {
                 applyChange(text);
@@ -169,34 +168,36 @@ public class TestCase {
             dataModel.put("testcase", getTestcaseWithLineNumber());
             dataModel.put("apiDocs", apiDocs);
             String prompt = PromptGen.generatePrompt("EnhanceTestCase", dataModel);
-            String text = OpenAI.messageCompletion(prompt);
+            String text = OpenAI.Doubao.messageCompletion(prompt);
             ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
+
             if (codeBlocks.isEmpty()) {
                 applyChange(text);
             } else {
                 String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
                 applyChange(generatedCode);
             }
+
         } catch (Exception e) {
             LoggerUtil.logExec(Level.WARNING, "Enhancing test case failed: " + file + "\n" + e.getMessage());
         }
     }
 
     public void applyChange(String change){
-        writeTestCaseToFile(change);
-//        try {
-//            String testcase = getTestcaseWithLineNumber();
-//            Map<String, Object> dataModel = new HashMap<>();
-//            dataModel.put("originTestcase", originTestCase);
-//            dataModel.put("modified", change);
-//            String prompt = PromptGen.generatePrompt("ApplyChange", dataModel);
-//            String text = OpenAI.messageCompletion(prompt);
-//            ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
-//            String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
-//            writeTestCaseToFile(generatedCode);
-//        } catch (Exception e) {
-//            LoggerUtil.logExec(Level.WARNING, "Applying change failed: " + file + "\n" + e.getMessage());
-//        }
+//        writeTestCaseToFile(change);
+        try {
+            String testcase = getTestcaseWithLineNumber();
+            Map<String, Object> dataModel = new HashMap<>();
+            dataModel.put("originTestcase", originTestCase);
+            dataModel.put("modified", change);
+            String prompt = PromptGen.generatePrompt("ApplyChange", dataModel);
+            String text = OpenAI.Doubao.messageCompletion(prompt);
+            ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
+            String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
+            writeTestCaseToFile(generatedCode);
+        } catch (Exception e) {
+            LoggerUtil.logExec(Level.WARNING, "Applying change failed: " + file + "\n" + e.getMessage());
+        }
     }
 
 

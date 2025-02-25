@@ -71,7 +71,7 @@ public class methodTest {
         System.out.println(method_info.toString());
         try {
             String prompt = PromptGen.generatePrompt("FuzzDriver", objectMap);
-            String text = OpenAI.messageCompletion(prompt);
+            String text = OpenAI.Doubao.messageCompletion(prompt);
 //            System.out.println("Answer: \n" + text);
             ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
             for (String code: codeBlocks) {
@@ -139,7 +139,7 @@ public class methodTest {
         String prompt = PromptGen.generatePrompt("RootCause", dataModel);
         ArrayList<FuncTool> tools = new ArrayList<>();
         tools.add(FuncToolFactory.createRootCauseOutputFuncTool());
-        var arguments = OpenAI.funcCall(prompt, "", tools).get("root_cause_analysis");
+        var arguments = OpenAI.Doubao.funcCall(prompt, "", tools).get("root_cause_analysis");
         var map = new ObjectMapper().readValue(arguments, Map.class);
         System.out.println(map);
         System.out.println(map.get("report_bug"));

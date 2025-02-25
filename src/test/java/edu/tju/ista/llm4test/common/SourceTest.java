@@ -85,7 +85,7 @@ public class SourceTest {
                                     String prompt = PromptGen.generatePrompt("jdk_doc_conformance_check", dataModel);
                                     ArrayList<FuncTool> tools = new ArrayList<>();
                                     tools.add(FuncToolFactory.createJDKDocConformanceFuncTool());
-                                    var arguments = OpenAI.funcCall(prompt, "", tools).get("jdk_doc_conformance_check");
+                                    var arguments = OpenAI.Doubao.funcCall(prompt, "", tools).get("jdk_doc_conformance_check");
                                     var map = new ObjectMapper().readValue(arguments, Map.class);
                                     LoggerUtil.logResult(Level.INFO, file.getPath() + " " + method.getDeclarationSignature(false) + " " + map);
                                 } catch (Exception e) {

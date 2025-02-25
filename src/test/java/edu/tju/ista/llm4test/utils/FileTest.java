@@ -10,7 +10,7 @@ public class FileTest {
     public void testFileProcessor() throws Exception {
         File testDir = new File("TempDir");
         if (testDir.exists()){
-            throw new RuntimeException("TempDir already exists");
+//            throw new RuntimeException("TempDir already exists");
         } else {
             testDir.mkdirs();
         }

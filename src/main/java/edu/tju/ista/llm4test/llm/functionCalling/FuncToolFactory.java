@@ -18,7 +18,7 @@ public class FuncToolFactory {
         tool.addParameter("bug_location", "string", "The location of the bug");
         tool.addParameter("bug_type", "string", "The type of the bug");
         tool.addParameter("fix_advice", "string", "The advice to fix the bug");
-        tool.addParameter("report_bug", "boolean", "Whether to report the bug to JDK Community");
+        tool.addParameter("report_bug", "boolean", "Whether to report the bug to Java Community");
         return tool;
     }
 

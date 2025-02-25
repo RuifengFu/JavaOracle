@@ -1,0 +1,29 @@
+package edu.tju.ista.llm4test.agents;
+
+public class BugVerifyAgent extends Agent {
+    String prompt = """
+                <TestCase>
+                ${testcase}
+                </TestCase>
+                
+                <Test Output>
+                ${testOutput}
+                </Test Output>
+                
+                <API docs>
+                ${apiDocs}
+                </API docs>
+                
+                <Task>
+                Analyze the reason for the test case failure and provide a root cause analysis.
+                </Task>
+                
+                <Requirements>
+                1. Summarize your analysis into a single function call as the output.
+                2. Ensure your analysis is accurate, especially for JDK functions.
+                </Requirements>
+                """;
+
+
+
+}

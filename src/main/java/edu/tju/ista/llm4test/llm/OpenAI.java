@@ -23,28 +23,28 @@ import java.util.stream.Stream;
 import static java.lang.Thread.sleep;
 
 public class OpenAI {
-    private static final String API_KEY; // Replace with your API key
+    private final String API_KEY; // Replace with your API key
 
-    private static String BASE_URL = "https://api.deepseek.com/beta/v1/chat/completions";
+    private String BASE_URL = "https://api.deepseek.com/beta/v1/chat/completions";
 //    private static final String BASE_URL = "https://api.siliconflow.cn/v1/chat/completions";
 
-    private static String MODEL = "deepseek-chat";
-    private static String FUNC_CALL_MODEL = "ep-20250214193558-qh465";
+    private String MODEL = "deepseek-chat";
 
-    private static final double TEMPERATURE = 0.3;
+    private final double TEMPERATURE = 0.3;
 
-    private static int MAX_TOKENS = 8192;
-    private static boolean STREAM = true;
+    private int MAX_TOKENS = 8192;
+    private boolean STREAM = true;
 
-    public static String messageCompletion(String prompt) {
+
+    public String messageCompletion(String prompt) {
         return messageCompletion("You are a helpful assistant", prompt, 0.7);
     }
 
-    public static String messageCompletion(String prompt, double temperature) {
+    public String messageCompletion(String prompt, double temperature) {
         return messageCompletion("You are a helpful assistant", prompt, temperature);
     }
 
-    static {
+    public OpenAI() {
         API_KEY = System.getenv("OPENAI_API_KEY");
         BASE_URL = System.getenv("OPENAI_BASE_URL");
         MODEL = System.getenv("OPENAI_MODEL");
@@ -59,8 +59,27 @@ public class OpenAI {
         System.out.println("MODEL: " + MODEL);
     }
 
+    public OpenAI(String modelName) {
+        this();
+        MODEL = modelName;
+    }
 
-    private static Map<String, Object> getBaseRequestMap(String systemPrompt, String prompt) {
+    public OpenAI(String API_KEY, String BASE_URL, String modelName) {
+        this.API_KEY = API_KEY;
+        this.BASE_URL = BASE_URL;
+        MODEL = modelName;
+    }
+
+    public static OpenAI R1;
+    public static OpenAI Doubao;
+
+    static {
+        R1 = new OpenAI();
+        Doubao = new OpenAI("ep-20250214193558-qh465");
+    }
+
+
+    private Map<String, Object> getBaseRequestMap(String systemPrompt, String prompt) {
         // Create request body
         Map<String, Object> requestBody = new HashMap<>();
         requestBody.put("model", MODEL); // Choose the model, e.g., "gpt-4" or "gpt-3.5-turbo"
@@ -74,7 +93,7 @@ public class OpenAI {
         return requestBody;
     }
 
-    private static Map<String, Object> getResponseBody(Map<String, Object> requestBody) throws IOException, InterruptedException {
+    private Map<String, Object> getResponseBody(Map<String, Object> requestBody) throws IOException, InterruptedException {
         // Convert request body to JSON
         ObjectMapper mapper = new ObjectMapper();
         String requestBodyJson = mapper.writeValueAsString(requestBody);
@@ -131,7 +150,7 @@ public class OpenAI {
     }
 
 
-    private static void streamResponse(Map<String, Object> requestBody, Consumer<Map<String, Object>> chunkConsumer) throws IOException, InterruptedException {
+    private void streamResponse(Map<String, Object> requestBody, Consumer<Map<String, Object>> chunkConsumer) throws IOException, InterruptedException {
         ObjectMapper mapper = new ObjectMapper();
         String requestBodyJson = mapper.writeValueAsString(requestBody);
 
@@ -201,7 +220,7 @@ public class OpenAI {
     }
 
 
-    public static String messageCompletion(String systemPrompt, String prompt, double temperature) {
+    public String messageCompletion(String systemPrompt, String prompt, double temperature) {
         try {
             Map<String, Object> requestBody = getBaseRequestMap(systemPrompt, prompt);
             // update temperature
@@ -251,7 +270,7 @@ public class OpenAI {
     }
 
 
-    public static Map<String, String> funcCall(String systemPrompt, String prompt, List<FuncTool> tools) {
+    public Map<String, String> funcCall(String systemPrompt, String prompt, List<FuncTool> tools) {
         try {
             // Create request body
             Map<String, Object> requestBody = getBaseRequestMap(systemPrompt, prompt);
@@ -259,7 +278,7 @@ public class OpenAI {
 //            requestBody.put("temperature", 1.0); // Set the randomness of the output
             requestBody.put("stream", false);
             requestBody.put("max_tokens", 4096);
-            requestBody.put("model", FUNC_CALL_MODEL);
+            requestBody.put("model", MODEL);
 
             // Convert request body to JSON
             Map<String, Object> responseBody = getResponseBody(requestBody);

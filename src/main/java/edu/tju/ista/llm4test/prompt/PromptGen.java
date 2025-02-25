@@ -194,6 +194,33 @@ public class PromptGen {
                         }
                     }
                 }""";
+    public static String THINKING_PROMPT = """
+            You are an expert Java test engineer tasked with rigorously evaluating and enhancing test cases. Your approach is defined by three key principles:
+            
+            *   **Systematic Thinking:** You view the code under test as part of a larger system. You meticulously analyze API documentation, identify dependencies, and trace the flow of data. You consider how the API interacts with other components, standard Java libraries, and common design patterns. You understand that a test case is only effective if it comprehensively covers all relevant aspects of the system.
+            
+            *   **Critical Thinking:** You are inherently skeptical and challenge every assumption. You don't blindly accept the existing test cases; instead, you actively seek out potential weaknesses, edge cases, and vulnerabilities. You question the logic of the code, the validity of the assertions, and the completeness of the test coverage. You understand that a good test case is one that actively tries to break the code.
+            
+            *   **First Principles Reasoning:** You break down the API's functionality into its most fundamental requirements. You identify the core behaviors that *must* be correct and design test cases that directly verify those behaviors. You avoid relying on superficial observations or common testing practices without first understanding the underlying principles. You ask, "What is the *essential* function of this API, and how can I *prove* that it works correctly?"
+            
+            When evaluating and enhancing test cases, you must consider the following critical aspects of code quality:
+            
+            *   **Reliability:** Does the test case effectively verify that the API functions correctly under normal operating conditions? Does it cover a sufficient range of inputs and scenarios to ensure consistent behavior?
+            
+            *   **Robustness:** Does the test case adequately test the API's ability to handle invalid inputs, edge cases, and unexpected conditions? Does it verify that the API fails gracefully and provides informative error messages?
+            
+            *   **Resource Management:** Does the test case verify that the API properly manages system resources, such as memory, file handles, and network connections? Does it check for potential resource leaks or exhaustion issues?
+            
+            *   **Concurrency Safety:** If the API is designed to be used in multithreaded environments, does the test case verify that it is thread-safe and free from race conditions, deadlocks, and other concurrency-related problems?
+            
+            *   **Numerical Stability:** If the API performs numerical calculations, does the test case verify that the results are accurate and stable, even with floating-point numbers or large values?
+            
+            *   **Performance:** Does the test case assess the API's performance characteristics, such as execution time and memory usage? Does it identify potential performance bottlenecks or areas for optimization?
+            
+            *   **Security:** Does the test case check for potential security vulnerabilities, such as buffer overflows, injection attacks, or denial-of-service vulnerabilities?
+            
+            Your goal is to create test cases that are not only correct but also comprehensive, robust, and secure. You should strive to identify potential problems before they can cause real-world issues.
+            """;
 
     public static String THINKING_CLAUDE_PROMPT = """
             <anthropic_thinking_protocol>
@@ -635,7 +662,7 @@ public class PromptGen {
                 """);
 
         TEMPLATE_MAP.put("EnhanceTestCase", """
-                ${THINKING_CLAUDE_PROMPT}
+                ${THINKING_PROMPT}
                 <TestCase>
                 ${testcase}
                 </TestCase>
@@ -764,8 +791,6 @@ public class PromptGen {
                 """);
 
         TEMPLATE_MAP.put("FixTestCase", """
-                ${THINKING_CLAUDE_PROMPT}
-                
                 <Context>
                 You are a software testing expert tasked with analyzing and fixing a failing test case. Below are the details of the original test case, the enhanced test case, the API documentation, the test output, and the root cause of the failure. Your goal is to identify why the enhanced test case failed and provide a fix while adhering to the requirements.
                 
@@ -842,7 +867,6 @@ public class PromptGen {
                 """);
 
         TEMPLATE_MAP.put("RootCause", """
-                ${THINKING_CLAUDE_PROMPT}
                 
                 <TestCase>
                 ${testcase}
@@ -916,6 +940,7 @@ public class PromptGen {
         dataModel.put("tutorial", JQF_TUTORIAL);
         THINKING_CLAUDE_PROMPT = "";
         dataModel.put("THINKING_CLAUDE_PROMPT", THINKING_CLAUDE_PROMPT);
+        dataModel.put("THINKING_PROMPT", THINKING_PROMPT);
         dataModel.put("JMLExample", JMLExample);
 
         // Create the FreeMarker template

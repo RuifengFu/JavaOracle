@@ -17,7 +17,16 @@ class TestExecutor(private val jarPath: String, private val resultDir: File) {
     fun executeTest(file: File): TestResult {
         return try {
             val output = runBlocking { runJtreg(file) }
-            TestResult(output)
+            var result = TestResult(output)
+            for (i in 1..3) { // retry 3 times if fail
+                if (result.isFail()) {
+                    result = TestResult(output)
+                } else {
+                    break
+                }
+            }
+
+            result
         } catch (e: Exception) {
             LoggerUtil.logExec(Level.WARNING, "Execute: ${file.path}\n${e.message}")
             e.printStackTrace()

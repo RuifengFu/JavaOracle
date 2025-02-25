@@ -156,7 +156,7 @@ public class Main {
         System.out.println(files);
         System.out.println("Total files: " + files.size());
         int threadCount = Math.min(Runtime.getRuntime().availableProcessors() * 2, files.size());
-        threadCount = 1;
+//        threadCount = 1;
         ExecutorService executor = Executors.newFixedThreadPool(threadCount);
         CountDownLatch latch = new CountDownLatch(files.size());
         files.forEach(file -> {
@@ -207,7 +207,7 @@ public class Main {
             testCase.verifyTestFail();
             testCase.setResult(testExecutor.executeTest(file));
             result = testCase.getResult();
-            for (int i = 0; i < 1; i++) {
+            for (int i = 0; i < 3; i++) {
                 if (!result.isFail()) {
                     break;
                 }
@@ -217,39 +217,39 @@ public class Main {
             }
             testCase.verifyTestFail();
 
-            // 根据api信息生成assert
-            if (!result.isSuccess()) {
-                statistics.recordResult(result.getKind());
-                return result;
-            }
-
-            Map<String, Object> dataModel = new HashMap<>();
-            {// setup data model
-                dataModel.put("apiDocs", apiDocs);
-                dataModel.put("testcase", testCase.getTestcaseWithLineNumber());
-            }
-
-            String prompt = PromptGen.generatePrompt(TEMPLATE_MODE, dataModel);
-            System.out.println("call openAI");
-            String generatedCode = processPrompt(prompt);
-            if (generatedCode.isEmpty()) {
-                statistics.recordResult(TestResultKind.UNKNOWN);
-                return new TestResult(TestResultKind.UNKNOWN);
-            }
-            testCase.applyChange(generatedCode);
-
-            result = testExecutor.executeTest(file);
-            testCase.setResult(result);
-
-            for (int i = 0; i < 1; i++) {
-                if (!result.isFail()) {
-                    break;
-                }
-                testCase.fix();
-                testCase.setResult(testExecutor.executeTest(file));
-                result = testCase.getResult();
-            }
-            testCase.verifyTestFail();
+//            // 根据api信息生成assert
+//            if (!result.isSuccess()) {
+//                statistics.recordResult(result.getKind());
+//                return result;
+//            }
+//
+//            Map<String, Object> dataModel = new HashMap<>();
+//            {// setup data model
+//                dataModel.put("apiDocs", apiDocs);
+//                dataModel.put("testcase", testCase.getTestcaseWithLineNumber());
+//            }
+//
+//            String prompt = PromptGen.generatePrompt(TEMPLATE_MODE, dataModel);
+//            System.out.println("call openAI");
+//            String generatedCode = processPrompt(prompt);
+//            if (generatedCode.isEmpty()) {
+//                statistics.recordResult(TestResultKind.UNKNOWN);
+//                return new TestResult(TestResultKind.UNKNOWN);
+//            }
+//            testCase.applyChange(generatedCode);
+//
+//            result = testExecutor.executeTest(file);
+//            testCase.setResult(result);
+//
+//            for (int i = 0; i < 1; i++) {
+//                if (!result.isFail()) {
+//                    break;
+//                }
+//                testCase.fix();
+//                testCase.setResult(testExecutor.executeTest(file));
+//                result = testCase.getResult();
+//            }
+//            testCase.verifyTestFail();
 
 
 //            if (testCase.getResult().isSuccess()) {
@@ -276,7 +276,7 @@ public class Main {
     }
 
     private String processPrompt(String prompt) {
-        String text = OpenAI.messageCompletion(prompt);
+        String text = OpenAI.Doubao.messageCompletion(prompt);
         System.out.println("text " + text);
         ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
         if (codeBlocks.isEmpty()) {
