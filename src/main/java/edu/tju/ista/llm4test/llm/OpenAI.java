@@ -74,8 +74,11 @@ public class OpenAI {
     public static OpenAI Doubao;
 
     static {
+
         R1 = new OpenAI();
-        Doubao = new OpenAI("ep-20250214193558-qh465");
+        var ark_api_key = System.getenv("ARK_API_KEY");
+        var ark_base_url = System.getenv("ARK_BASE_URL");
+        Doubao = new OpenAI(ark_api_key, ark_base_url, "ep-20250214193558-qh465");
     }
 
 

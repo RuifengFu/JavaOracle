@@ -149,7 +149,7 @@ public class TestCase {
             dataModel.put("apiDocs", apiDocs);
             dataModel.put("rootCause", verifyMessage);
             String prompt = PromptGen.generatePrompt("FixTestCase", dataModel);
-            String text = OpenAI.Doubao.messageCompletion(prompt);
+            String text = OpenAI.R1.messageCompletion(prompt);
             ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
             if (codeBlocks.isEmpty()) {
                 applyChange(text);
@@ -168,7 +168,7 @@ public class TestCase {
             dataModel.put("testcase", getTestcaseWithLineNumber());
             dataModel.put("apiDocs", apiDocs);
             String prompt = PromptGen.generatePrompt("EnhanceTestCase", dataModel);
-            String text = OpenAI.Doubao.messageCompletion(prompt);
+            String text = OpenAI.R1.messageCompletion(prompt);
             ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
 
             if (codeBlocks.isEmpty()) {

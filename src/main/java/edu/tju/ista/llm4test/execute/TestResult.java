@@ -82,7 +82,6 @@ public class TestResult {
         }
     }
 
-    @Deprecated
     public void mergeResults(Map<String, TestOutput> results) {
         execResults.putAll(results);
         List<Integer> list = execResults.values().stream().map(TestOutput::getExitValue).distinct().toList();

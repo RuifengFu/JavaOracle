@@ -34,4 +34,12 @@ public class executeTest {
         String stdout = new String(process.getInputStream().readAllBytes());
         System.out.println(stdout);
     }
+
+
+    @Test
+    public void envTest()  {
+        ProcessBuilder builder = new ProcessBuilder();
+        var env = builder.environment();
+        System.out.println(env.get("Path"));
+    }
 }

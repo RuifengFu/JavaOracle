@@ -8,11 +8,17 @@ import kotlinx.coroutines.*
 
 class TestExecutor(private val jarPath: String, private val resultDir: File) {
 
+
+
     companion object {
         // 目前未使用，可按需求后续扩展，比如在启动 jtreg 时加入不同的 exec 参数
         private val execFlags: Array<String> = arrayOf("-Xint", "-Xcomp", "-Xmixed")
         private val env: MutableMap<String, String> = hashMapOf("LANG" to "en_US.UTF-8")
+        private val Path = System.getenv("PATH").replace("/usr/lib/jvm/java-17-openjdk-amd64/bin:", "")
+        private val JDKs = arrayListOf("/home/Java/HotSpot/jdk-17.0.14+7", "/home/Java/HotSpot/jdk-21.0.6+7",
+                "/home/Java/OpenJ9/jdk-17.0.14+7", "/home/Java/OpenJ9/jdk-21.0.6+7")
     }
+
 
     fun executeTest(file: File): TestResult {
         return try {
@@ -32,6 +38,18 @@ class TestExecutor(private val jarPath: String, private val resultDir: File) {
             e.printStackTrace()
             TestResult(TestResultKind.UNKNOWN)
         }
+    }
+
+    fun differentialTesting(file: File): TestResult {
+        val results : HashMap<String, TestOutput> = hashMapOf()
+        for (jdk in JDKs) {
+            env["PATH"] = "$jdk/bin:$Path"
+            val result = runBlocking { runJtreg(file) }
+            results[jdk] = result
+        }
+        val res = TestResult()
+        res.mergeResults(results)
+        return res
     }
 
     @Throws(Exception::class)
