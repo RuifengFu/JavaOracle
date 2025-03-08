@@ -64,7 +64,13 @@ public class Main {
         switch (args[0]) {
             case "execute": execute(args[1]); break;
             case "generate": generate(args[1]); break;
+            case "env" : testJDKenv(); break;
         }
+    }
+
+    private static void testJDKenv() {
+        var executor = new TestExecutor("", new File(""));
+        executor.testJDKenv();
     }
 
     public static void generate(String testPath) {

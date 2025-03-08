@@ -43,8 +43,9 @@ class TestExecutor(private val jarPath: String, private val resultDir: File) {
     fun differentialTesting(file: File): TestResult {
         val results : HashMap<String, TestOutput> = hashMapOf()
         for (jdk in JDKs) {
-            env["PATH"] = "$jdk/bin:$Path"
-            val result = runBlocking { runJtreg(file) }
+            var jdk_env = HashMap(env)
+            jdk_env["PATH"] = "$jdk/bin:$Path"
+            val result = runBlocking { runJtreg(file, jdk_env) }
             results[jdk] = result
         }
         val res = TestResult()
@@ -58,7 +59,12 @@ class TestExecutor(private val jarPath: String, private val resultDir: File) {
     }
 
     @Throws(Exception::class)
-    private suspend fun runJtreg(file: File): TestOutput = withContext(Dispatchers.IO) {
+    private suspend fun runJtreg(file: File) : TestOutput {
+        return runJtreg(file, env)
+    }
+
+    @Throws(Exception::class)
+    private suspend fun runJtreg(file: File,  env: MutableMap<String, String>): TestOutput = withContext(Dispatchers.IO) {
         // 清理临时文件
         clearJTworkFiles(file)
 
@@ -140,5 +146,42 @@ class TestExecutor(private val jarPath: String, private val resultDir: File) {
             reportDir.mkdirs()
         }
         return reportDir.path
+    }
+
+    public fun testJDKenv() {
+        runBlocking {
+            for (jdk in JDKs) {
+                var jdk_env = HashMap(env)
+                jdk_env["PATH"] = "$jdk/bin:$Path"
+                val testCMD = listOf("which", "java")
+
+                // 使用 ProcessBuilder 构造进程并设置环境变量
+                val processBuilder = ProcessBuilder(testCMD)
+                processBuilder.environment().putAll(jdk_env)
+                val process = processBuilder.start()
+
+                val stdoutDeferred = async { readStream(process.inputStream) }
+                val stderrDeferred = async { readStream(process.errorStream) }
+
+                val finished = withTimeoutOrNull(600_000) { process.waitFor() }
+                if (finished == null) {
+                    if (process.isAlive) {
+                        process.destroyForcibly()
+                    }
+                    val stdout = stdoutDeferred.await()
+                    val stderr = stderrDeferred.await()
+                    System.out.println("TEST FAILED")
+                }
+
+                val exitValue = process.exitValue()
+                val stdout = stdoutDeferred.await()
+                val stderr = stderrDeferred.await()
+                System.out.println("Execute Success")
+                System.out.println(stdout)
+                System.out.println(stderr)
+                System.out.println("FINISH for " + jdk);
+            }
+        }
+
     }
 }

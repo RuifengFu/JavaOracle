@@ -12,7 +12,6 @@ import edu.tju.ista.llm4test.prompt.PromptGen;
 import edu.tju.ista.llm4test.utils.HtmlParser;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
 import freemarker.template.TemplateException;
-import org.jsoup.nodes.Document;
 import org.junit.Test;
 
 import java.io.File;
