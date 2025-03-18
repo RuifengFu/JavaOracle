@@ -48,3 +48,5 @@ JTwork
 test
 *.log
 *.jar
+/extracted_content.md
+/extracted_content.png

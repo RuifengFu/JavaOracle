@@ -122,6 +122,13 @@ public class TestResult {
 
     @Deprecated
     public String toString() {
+        if (!execResults.isEmpty()) {
+            StringBuilder sb = new StringBuilder();
+            for (Map.Entry<String, TestOutput> entry : execResults.entrySet()) {
+                sb.append(entry.getKey()).append("Execute Result").append(": ").append(entry.getValue()).append("\n");
+            }
+            return sb.toString();
+        }
         return String.valueOf(jtregResult);
     }
 

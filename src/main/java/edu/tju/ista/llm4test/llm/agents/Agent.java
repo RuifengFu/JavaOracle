@@ -1,5 +1,6 @@
-package edu.tju.ista.llm4test.agents;
+package edu.tju.ista.llm4test.llm.agents;
 
+import edu.tju.ista.llm4test.llm.OpenAI;
 import freemarker.template.Configuration;
 import freemarker.template.Template;
 
@@ -9,6 +10,7 @@ import java.util.HashMap;
 public class Agent {
     protected String prompt;
     protected static final Configuration cfg = new Configuration(Configuration.VERSION_2_3_31);
+    protected OpenAI LLM = OpenAI.R1;
 
     public Agent() {
         prompt = "You are a helpful assistant.";

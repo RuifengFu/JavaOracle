@@ -1,4 +1,4 @@
-package edu.tju.ista.llm4test.agents;
+package edu.tju.ista.llm4test.llm.agents;
 
 public class BugVerifyAgent extends Agent {
     String prompt = """

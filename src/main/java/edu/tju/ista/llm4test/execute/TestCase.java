@@ -93,7 +93,7 @@ public class TestCase {
             String prompt = PromptGen.generatePrompt("RootCause", dataModel);
             ArrayList<FuncTool> tools = new ArrayList<>();
             tools.add(FuncToolFactory.createRootCauseOutputFuncTool());
-            var arguments = OpenAI.Doubao.funcCall(prompt, "", tools).get("root_cause_analysis");
+            var arguments = OpenAI.Doubao.funcCall(prompt, tools).get("root_cause_analysis");
             var map = new ObjectMapper().readValue(arguments, Map.class);
             var reportBug = ((boolean)map.get("report_bug")) == true;
             if (reportBug) {

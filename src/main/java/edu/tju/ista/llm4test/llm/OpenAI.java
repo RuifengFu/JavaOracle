@@ -30,19 +30,16 @@ public class OpenAI {
 
     private String MODEL = "deepseek-chat";
 
-    private final double TEMPERATURE = 0.3;
+    private final double TEMPERATURE = 0.6;
 
     private int MAX_TOKENS = 8192;
     private boolean STREAM = true;
 
 
     public String messageCompletion(String prompt) {
-        return messageCompletion("You are a helpful assistant", prompt, 0.7);
+        return messageCompletion(prompt, 0.7);
     }
 
-    public String messageCompletion(String prompt, double temperature) {
-        return messageCompletion("You are a helpful assistant", prompt, temperature);
-    }
 
     public OpenAI() {
         API_KEY = System.getenv("OPENAI_API_KEY");
@@ -82,12 +79,12 @@ public class OpenAI {
     }
 
 
-    private Map<String, Object> getBaseRequestMap(String systemPrompt, String prompt) {
+    private Map<String, Object> getBaseRequestMap(String prompt) {
         // Create request body
         Map<String, Object> requestBody = new HashMap<>();
         requestBody.put("model", MODEL); // Choose the model, e.g., "gpt-4" or "gpt-3.5-turbo"
         requestBody.put("messages", List.of(
-                Map.of("role", "system", "content", systemPrompt),
+//                Map.of("role", "system", "content", systemPrompt),
                 Map.of("role", "user", "content", prompt)
         ));
         requestBody.put("max_tokens", MAX_TOKENS); // Limit the response length
@@ -223,9 +220,9 @@ public class OpenAI {
     }
 
 
-    public String messageCompletion(String systemPrompt, String prompt, double temperature) {
+    public String messageCompletion(String prompt, double temperature) {
         try {
-            Map<String, Object> requestBody = getBaseRequestMap(systemPrompt, prompt);
+            Map<String, Object> requestBody = getBaseRequestMap(prompt);
             // update temperature
             requestBody.put("temperature", temperature);
             if (STREAM) {
@@ -273,10 +270,10 @@ public class OpenAI {
     }
 
 
-    public Map<String, String> funcCall(String systemPrompt, String prompt, List<FuncTool> tools) {
+    public Map<String, String> funcCall(String prompt, List<FuncTool> tools) {
         try {
             // Create request body
-            Map<String, Object> requestBody = getBaseRequestMap(systemPrompt, prompt);
+            Map<String, Object> requestBody = getBaseRequestMap(prompt);
             requestBody.put("tools", FuncToolFactory.toToolsArray(tools));
 //            requestBody.put("temperature", 1.0); // Set the randomness of the output
             requestBody.put("stream", false);

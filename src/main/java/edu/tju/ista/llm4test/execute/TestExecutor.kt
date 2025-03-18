@@ -15,37 +15,38 @@ class TestExecutor(private val jarPath: String, private val resultDir: File) {
         private val execFlags: Array<String> = arrayOf("-Xint", "-Xcomp", "-Xmixed")
         private val env: MutableMap<String, String> = hashMapOf("LANG" to "en_US.UTF-8")
         private val Path = System.getenv("PATH").replace("/usr/lib/jvm/java-17-openjdk-amd64/bin:", "")
-        private val JDKs = arrayListOf("/home/Java/HotSpot/jdk-17.0.14+7", "/home/Java/HotSpot/jdk-21.0.6+7",
-                "/home/Java/OpenJ9/jdk-17.0.14+7", "/home/Java/OpenJ9/jdk-21.0.6+7")
+        private val JDKs = arrayListOf("/home/Java/HotSpot/jdk-17.0.14+7", "/home/Java/HotSpot/jdk-21.0.6+7")
+//                , "/home/Java/OpenJ9/jdk-17.0.14+7", "/home/Java/OpenJ9/jdk-21.0.6+7")
     }
 
 
     fun executeTest(file: File): TestResult {
-        return try {
-            val output = runBlocking { runJtreg(file) }
-            var result = TestResult(output)
-            for (i in 1..3) { // retry 3 times if fail
-                if (result.isFail()) {
-                    result = TestResult(output)
-                } else {
-                    break
-                }
-            }
-
-            result
-        } catch (e: Exception) {
-            LoggerUtil.logExec(Level.WARNING, "Execute: ${file.path}\n${e.message}")
-            e.printStackTrace()
-            TestResult(TestResultKind.UNKNOWN)
-        }
+//        return try {
+//            val output = runBlocking { runJtreg(file) }
+//            var result = TestResult(output)
+//            for (i in 1..3) { // retry 3 times if fail
+//                if (result.isFail()) {
+//                    result = TestResult(output)
+//                } else {
+//                    break
+//                }
+//            }
+//
+//            result
+//        } catch (e: Exception) {
+//            LoggerUtil.logExec(Level.WARNING, "Execute: ${file.path}\n${e.message}")
+//            e.printStackTrace()
+//            TestResult(TestResultKind.UNKNOWN)
+//        }
+        return differentialTesting(file)
     }
 
     fun differentialTesting(file: File): TestResult {
         val results : HashMap<String, TestOutput> = hashMapOf()
         for (jdk in JDKs) {
-            var jdk_env = HashMap(env)
-            jdk_env["PATH"] = "$jdk/bin:$Path"
-            val result = runBlocking { runJtreg(file, jdk_env) }
+            val jdkEnv: HashMap<String, String> = HashMap(env)
+            jdkEnv["PATH"] = "$jdk/bin:$Path"
+            val result = runBlocking { runJtreg(file, jdk) }
             results[jdk] = result
         }
         val res = TestResult()
@@ -60,17 +61,17 @@ class TestExecutor(private val jarPath: String, private val resultDir: File) {
 
     @Throws(Exception::class)
     private suspend fun runJtreg(file: File) : TestOutput {
-        return runJtreg(file, env)
+        return runJtreg(file)
     }
 
     @Throws(Exception::class)
-    private suspend fun runJtreg(file: File,  env: MutableMap<String, String>): TestOutput = withContext(Dispatchers.IO) {
+    private suspend fun runJtreg(file: File, jdk: String): TestOutput = withContext(Dispatchers.IO) {
         // 清理临时文件
         clearJTworkFiles(file)
 
         // 构造 jtreg 命令及其参数，创建报告目录
         val reportDir = mkJReportDir()
-        val jtregCommand = listOf("jtreg", "-avm", "-ea", "-va", "-r:$reportDir", file.path)
+        val jtregCommand = listOf("jtreg", "-avm", "-ea", "-va", "-r:$reportDir", "-jdk:$jdk", file.path)
         LoggerUtil.logExec(Level.INFO, "execCommand: ${jtregCommand.joinToString(" ")}")
 
         // 使用 ProcessBuilder 构造进程并设置环境变量
@@ -153,7 +154,8 @@ class TestExecutor(private val jarPath: String, private val resultDir: File) {
             for (jdk in JDKs) {
                 var jdk_env = HashMap(env)
                 jdk_env["PATH"] = "$jdk/bin:$Path"
-                val testCMD = listOf("which", "java")
+                jdk_env["JAVA_HOME"] = jdk
+                val testCMD = listOf("java", "-version")
 
                 // 使用 ProcessBuilder 构造进程并设置环境变量
                 val processBuilder = ProcessBuilder(testCMD)
