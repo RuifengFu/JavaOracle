@@ -70,7 +70,7 @@ public class Main {
     }
 
     private static void testJDKenv() {
-        var executor = new TestExecutor("", new File(""));
+        var executor = new TestExecutor(new File(""));
         executor.testJDKenv();
     }
 
@@ -98,7 +98,7 @@ public class Main {
         instance.runTestSuiteParallel2(Path.of("jdk/java/util/ArrayList"));
     }
     public Main(String jarPath, File resultDir, String baseDocPath, String suitePath) {
-        this.testExecutor = new TestExecutor(jarPath, resultDir);
+        this.testExecutor = new TestExecutor(resultDir);
         this.statistics = new TestStatistics();
         this.apiDocProcessor = new ApiDocProcessor(baseDocPath);
         this.fileProcessor = new FileProcessor(resultDir);

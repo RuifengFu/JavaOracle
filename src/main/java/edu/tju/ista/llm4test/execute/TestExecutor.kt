@@ -6,7 +6,7 @@ import java.io.InputStream
 import java.util.logging.Level
 import kotlinx.coroutines.*
 
-class TestExecutor(private val jarPath: String, private val resultDir: File) {
+class TestExecutor(private val resultDir: File) {
 
 
 

@@ -39,5 +39,9 @@ public class Agent {
     public void setPrompt(String prompt) {
         this.prompt = prompt;
     }
+
+    public OpenAI getLLM() {
+        return LLM;
+    }
 }
 

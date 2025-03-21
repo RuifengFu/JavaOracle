@@ -752,6 +752,15 @@ public class PromptGen {
                    - Suggest API interaction scenarios
                    - Share insights about potential risks
                    - Propose comprehensive test cases
+                   
+                5. **Use document-verified behavior only**:
+                   - Only add assertions or tests for behaviors explicitly documented in the API
+                   - Do not assume or test implementation-specific behaviors
+                   - Avoid asserting behavior in gray areas where documentation is silent
+                   - When testing edge cases, verify whether the documentation specifies the behavior
+                   - If documentation is ambiguous, consider adding alternative test paths that handle all possible valid behaviors
+                   - For method behaviors not explicitly specified, test for reasonable outcomes rather than specific results
+                   - Clearly distinguish between tests of specified behavior versus reasonable assumptions
                 </Requirements>
 
                 <Note>

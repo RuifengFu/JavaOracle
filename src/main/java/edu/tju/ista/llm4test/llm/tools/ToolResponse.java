@@ -3,28 +3,36 @@ package edu.tju.ista.llm4test.llm.tools;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * 工具执行响应
+ * @param <T> 响应结果类型
+ */
 public class ToolResponse<T> {
     private final boolean success;
+    private final String message;
     private final T result;
-    private final String errorMessage;
     private final Map<String, Object> metadata;
 
     // Private constructor
-    private ToolResponse(boolean success, T result, String errorMessage) {
+    private ToolResponse(boolean success, String message, T result) {
         this.success = success;
+        this.message = message;
         this.result = result;
-        this.errorMessage = errorMessage;
         this.metadata = new HashMap<>();
     }
 
-    // Static factory method for success
+    /**
+     * 创建成功响应
+     */
     public static <T> ToolResponse<T> success(T result) {
-        return new ToolResponse<>(true, result, null);
+        return new ToolResponse<>(true, "执行成功", result);
     }
 
-    // Static factory method for failure
-    public static <T> ToolResponse<T> failure(String errorMessage) {
-        return new ToolResponse<>(false, null, errorMessage);
+    /**
+     * 创建失败响应
+     */
+    public static <T> ToolResponse<T> failure(String message) {
+        return new ToolResponse<>(false, message, null);
     }
 
     // Add metadata method
@@ -32,18 +40,24 @@ public class ToolResponse<T> {
         metadata.put(key, value);
     }
 
-    // Getter methods
-    public boolean isSuccess() { return success; }
-    public T getResult() { return result; }
-    public String getErrorMessage() { return errorMessage; }
-    public Map<String, Object> getMetadata() { return metadata; }
+    public boolean isSuccess() {
+        return success;
+    }
 
-    // Convert result to string for LLM interaction
+    public String getMessage() {
+        return message;
+    }
+
+    public T getResult() {
+        return result;
+    }
+
+    @Override
     public String toString() {
         if (success) {
-            return result != null ? result.toString() : "Success with no output";
+            return result == null ? "成功，无返回结果" : result.toString();
         } else {
-            return "Error: " + errorMessage;
+            return "失败: " + message;
         }
     }
 
