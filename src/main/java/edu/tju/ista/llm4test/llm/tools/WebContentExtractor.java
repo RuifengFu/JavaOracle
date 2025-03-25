@@ -674,7 +674,7 @@ public class WebContentExtractor implements Tool<String> {
     }
 
     @Override
-    public ToolResponse<String> execute(String url) throws Exception {
+    public ToolResponse<String> execute(String url) {
         try {
             var markdown = extractContent(url);
             return ToolResponse.success(markdown);

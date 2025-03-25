@@ -1,6 +1,7 @@
 package edu.tju.ista.llm4test.llm.agents.flow;
 
 import edu.tju.ista.llm4test.llm.agents.Agent;
+import edu.tju.ista.llm4test.llm.memory.MemoryStore;
 import edu.tju.ista.llm4test.llm.tools.Tool;
 import edu.tju.ista.llm4test.llm.tools.ToolResponse;
 
@@ -29,7 +30,15 @@ public class AgentFlow {
         this.flowHistory = new ArrayList<>();
         this.maxIterations = maxIterations;
     }
-    
+
+
+    public AgentFlow(Agent agent, int maxIterations, MemoryStore sharedMemory) {
+        this.agent = agent;
+        this.tools = new HashMap<>();
+        this.flowHistory = new ArrayList<>();
+        this.maxIterations = maxIterations;
+    }
+
     /**
      * 注册代理可以使用的工具
      * @param tool 工具实例

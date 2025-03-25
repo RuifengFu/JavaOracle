@@ -45,10 +45,10 @@ public class OpenAI {
         API_KEY = System.getenv("OPENAI_API_KEY");
         BASE_URL = System.getenv("OPENAI_BASE_URL");
         MODEL = System.getenv("OPENAI_MODEL");
-        if (BASE_URL.isEmpty()) {
+        if (BASE_URL == null || BASE_URL.isEmpty()) {
             BASE_URL = "https://api.deepseek.com/beta/v1/chat/completions";
         }
-        if (MODEL.isEmpty()) {
+        if (MODEL == null || MODEL.isEmpty()) {
             MODEL = "deepseek-chat";
         }
         System.out.println("BASE_URL: " + BASE_URL);

@@ -12,7 +12,7 @@ public class executeTest {
                 "C:\\Users\\Administrator\\.m2\\repository\\org\\testng\\testng\\6.7\\testng-6.7.jar"};
         String jarPath = String.join(File.pathSeparator, jars);
         File ResultDir = new File("Results");
-        TestExecutor executor = new TestExecutor(jarPath, ResultDir);
+        TestExecutor executor = new TestExecutor(ResultDir);
         File file = new File("Results\\NCopies.java");
         TestResult result = executor.executeTest(file);
         System.out.println(result.getKind());
@@ -20,7 +20,7 @@ public class executeTest {
 
     @Test
     public void testClearCache() {
-        TestExecutor executor = new TestExecutor("", new File("Results"));
+        TestExecutor executor = new TestExecutor(new File("Results"));
         executor.clearJTworkFiles(new File("Results/Formatter/HexFloatZeroPadding.java"));
     }
 

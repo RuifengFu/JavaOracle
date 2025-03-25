@@ -3,12 +3,16 @@ package edu.tju.ista.llm4test;
 
 import edu.tju.ista.llm4test.execute.*;
 import edu.tju.ista.llm4test.llm.OpenAI;
+import edu.tju.ista.llm4test.llm.agents.BugVerifyAgent;
+import edu.tju.ista.llm4test.llm.tools.JtregExecuteTool;
+import edu.tju.ista.llm4test.llm.tools.ToolResponse;
 import edu.tju.ista.llm4test.prompt.PromptGen;
 import edu.tju.ista.llm4test.utils.*;
 
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -66,6 +70,7 @@ public class Main {
             case "execute": execute(args[1]); break;
             case "generate": generate(args[1]); break;
             case "env" : testJDKenv(); break;
+            case "verify": verifyBugs(); break;
         }
     }
 
@@ -302,6 +307,141 @@ public class Main {
         } catch (InterruptedException e) {
             executor.shutdownNow();
             Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * 验证已识别的bug并生成详细报告
+     */
+    public static void verifyBugs() {
+        LoggerUtil.logResult(Level.INFO, "开始验证bug并生成报告...");
+        
+        // 设置路径和工具
+        String jarPath = String.join(File.pathSeparator, jars);
+        String baseDocPath = "JavaDoc/docs/api/java.base";
+        String jdkSourcePath = "jdk17u-dev/src";
+        
+        // 创建Bug报告目录
+        String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
+        File bugReportDir = new File("BugReport/" + timestamp);
+        if (!bugReportDir.exists()) {
+            bugReportDir.mkdirs();
+            LoggerUtil.logResult(Level.INFO, "创建Bug报告目录: " + bugReportDir.getAbsolutePath());
+        }
+        
+        // 创建BugVerifyAgent
+        BugVerifyAgent agent = new BugVerifyAgent(baseDocPath, jdkSourcePath);
+        
+        // 从result.log读取已验证的bug
+        try {
+            File resultLog = new File("result.log");
+            if (!resultLog.exists()) {
+                LoggerUtil.logResult(Level.WARNING, "找不到result.log文件，无法验证bug");
+                return;
+            }
+            
+            // 解析log文件
+            List<String> lines = Files.readAllLines(resultLog.toPath());
+            Map<String, String> verifiedBugs = new HashMap<>();
+            
+            for (int i = 0; i < lines.size() - 1; i++) {
+                String line = lines.get(i);
+                // 查找包含 VERIFIED_BUG 的行
+                if (line.contains("VERIFIED_BUG")) {
+                    // 提取文件路径 - 格式: INFO: jdk17u-dev/test/jdk/java/util/xxx/Test.java VERIFIED_BUG
+                    int pathStart = line.lastIndexOf("INFO: ") + 6;
+                    int pathEnd = line.lastIndexOf(" VERIFIED_BUG");
+                    
+                    if (pathStart >= 6 && pathEnd > pathStart) {
+                        String filePath = line.substring(pathStart, pathEnd);
+                        filePath = filePath.replace("jdk17u-dev/test", "test"); // 实际的测试用例放在test目录下
+                        
+                        // 检查下一行是否包含bug详细信息
+                        String nextLine = lines.get(i + 2);
+                        if (nextLine.contains("{") && nextLine.contains("}")) {
+                            String verifyMessage = nextLine.substring(nextLine.indexOf("{"));
+                            verifiedBugs.put(filePath, verifyMessage);
+                            LoggerUtil.logResult(Level.INFO, "找到已验证的bug: " + filePath);
+                        }
+                        i += 2;
+                    }
+                }
+            }
+            
+            LoggerUtil.logResult(Level.INFO, "从日志中找到 " + verifiedBugs.size() + " 个已验证的bug");
+            
+            // 为每个bug生成报告
+            for (Map.Entry<String, String> entry : verifiedBugs.entrySet()) {
+                String filePath = entry.getKey();
+                String verifyMessage = entry.getValue();
+                
+                // 从JDK路径转换到测试路径
+                File originFile = new File(filePath);
+                File testFile = new File(filePath.replace("jdk17u-dev/test", "test"));
+                
+                if (!testFile.exists() && !originFile.exists()) {
+                    LoggerUtil.logResult(Level.WARNING, "测试文件不存在: " + filePath);
+                    continue;
+                }
+                
+                // 使用存在的文件
+                File fileToUse = testFile.exists() ? testFile : originFile;
+                
+                String testCaseName = fileToUse.getName().replace(".java", "");
+                LoggerUtil.logResult(Level.INFO, "正在分析bug: " + testCaseName);
+                
+                try {
+                    // 读取测试用例内容
+                    String testContent = Files.readString(fileToUse.toPath());
+                    
+                    // 运行测试获取输出
+                    JtregExecuteTool jtregTool = new JtregExecuteTool();
+                    ToolResponse<TestResult> response = jtregTool.execute(fileToUse.getPath());
+                    
+                    String testOutput = "";
+                    if (response.isSuccess()) {
+                        testOutput = response.getResult().getOutput();
+                    } else {
+                        // 如果执行失败，尝试从result文件获取输出
+                        File resultFile = new File(fileToUse.getPath() + ".result");
+                        if (resultFile.exists()) {
+                            testOutput = Files.readString(resultFile.toPath());
+                        } else {
+                            // 使用verifyMessage作为备选
+                            testOutput = "无法获取测试输出，使用验证消息作为替代: " + verifyMessage;
+                        }
+                    }
+                    
+                    // 创建该测试用例的报告目录
+                    File caseReportDir = new File(bugReportDir, testCaseName);
+                    if (!caseReportDir.exists()) {
+                        caseReportDir.mkdirs();
+                    }
+                    
+                    // 设置测试数据并分析
+                    agent.setTestData(testContent, testOutput, verifyMessage);
+                    String report = agent.analyze();
+                    
+                    // 保存Bug报告
+                    Path reportPath = Path.of(caseReportDir.getPath(), "bugReport.md");
+                    Files.writeString(reportPath, report);
+                    
+                    // 复制测试文件
+                    Files.copy(fileToUse.toPath(), 
+                            Path.of(caseReportDir.getPath(), fileToUse.getName()),
+                            java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    
+                    LoggerUtil.logResult(Level.INFO, "Bug报告已生成: " + reportPath);
+                } catch (Exception e) {
+                    LoggerUtil.logResult(Level.WARNING, "为测试用例生成报告失败: " + testCaseName);
+                    e.printStackTrace();
+                }
+            }
+            
+            LoggerUtil.logResult(Level.INFO, "Bug验证和报告生成完成，报告保存在: " + bugReportDir.getAbsolutePath());
+        } catch (Exception e) {
+            LoggerUtil.logResult(Level.SEVERE, "Bug验证过程失败: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 }

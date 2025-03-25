@@ -11,6 +11,7 @@ public class TestResult {
     private TestOutput compileResult;
     private TestOutput jtregResult;
     private HashMap<String, TestOutput> execResults = new HashMap<>();
+    private String output;
 
     public TestResult() {
         this.kind = TestResultKind.UNKNOWN;
@@ -130,6 +131,44 @@ public class TestResult {
             return sb.toString();
         }
         return String.valueOf(jtregResult);
+    }
+
+    /**
+     * 设置测试结果的成功状态
+     * @param success 是否成功
+     */
+    public void setSuccess(boolean success) {
+        if (success) {
+            kind = TestResultKind.SUCCESS;
+        } else {
+            // 如果已有更具体的失败类型，则保留
+            if (kind == TestResultKind.SUCCESS || kind == TestResultKind.UNKNOWN) {
+                kind = TestResultKind.TEST_FAIL;
+            }
+        }
+    }
+
+    /**
+     * 设置测试输出结果
+     * @param output 测试输出文本
+     */
+    public void setOutput(String output) {
+        this.output = output;
+    }
+
+    /**
+     * 获取测试输出结果
+     * @return 测试输出文本
+     */
+    public String getOutput() {
+        if (output != null) {
+            return output;
+        }
+        // 如果没有设置输出，尝试从jtregResult或其他结果中获取
+        if (jtregResult != null) {
+            return jtregResult.toString();
+        }
+        return toString();
     }
 
 }
