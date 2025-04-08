@@ -761,6 +761,16 @@ public class PromptGen {
                    - If documentation is ambiguous, consider adding alternative test paths that handle all possible valid behaviors
                    - For method behaviors not explicitly specified, test for reasonable outcomes rather than specific results
                    - Clearly distinguish between tests of specified behavior versus reasonable assumptions
+
+                6. **Provide rich diagnostic information on failure**:
+                   - Include descriptive error messages in assertions that explain expected vs. actual behavior
+                   - Add context information before running tests (e.g., environment details, test parameters)
+                   - For complex operations, log intermediate state or values to aid in debugging
+                   - Consider using custom assertions that provide detailed failure information
+                   - When testing multiple related conditions, ensure each failure is reported independently
+                   - Include relevant API documentation references in failure messages
+                   - For unexpected exceptions, capture and display the full stack trace with explanatory context
+                   - Consider implementing test listeners or reporters that provide structured failure information
                 </Requirements>
 
                 <Note>

@@ -9,6 +9,14 @@ import java.util.*;
 import java.util.logging.Level;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 
 public class BugVerifyAgent extends Agent {
     // 基础提示模板
@@ -39,7 +47,7 @@ public class BugVerifyAgent extends Agent {
     private final JavaDocSearchTool javadocTool;
     private final SourceCodeSearchTool sourceTool;
     private final WebContentExtractor webTool;
-    private final DuckDuckGoSearcher searchTool;
+    private final BingSearch searchTool;
     private final JavaExecuteTool executeTool;
     private final JtregExecuteTool jtregTool;
     
@@ -55,6 +63,15 @@ public class BugVerifyAgent extends Agent {
     private Map<String, TestResult> verificationResults = new HashMap<>();
     private String conclusion;
     
+    // 报告输出路径
+    private String bugReportPath = "BugReport";
+    private String verifyContextFolder = null;
+    private String testCaseName = null;
+    
+    // 信息源标记
+    private int infoCounter = 0;
+    private Map<String, String> infoSourceMap = new HashMap<>();
+    
     /**
      * 创建BugVerifyAgent
      * @param javadocPath JavaDoc路径
@@ -65,9 +82,22 @@ public class BugVerifyAgent extends Agent {
         this.javadocTool = new JavaDocSearchTool(javadocPath);
         this.sourceTool = new SourceCodeSearchTool(sourcePath);
         this.webTool = new WebContentExtractor(true);
-        this.searchTool = new DuckDuckGoSearcher();
+        this.searchTool = new BingSearch();
         this.executeTool = new JavaExecuteTool();
         this.jtregTool = new JtregExecuteTool();
+    }
+    
+    /**
+     * 创建BugVerifyAgent并指定BugReport路径
+     * @param javadocPath JavaDoc路径
+     * @param sourcePath 源码路径
+     * @param bugReportPath BugReport路径
+     */
+    public BugVerifyAgent(String javadocPath, String sourcePath, String bugReportPath) {
+        this(javadocPath, sourcePath);
+        if (bugReportPath != null && !bugReportPath.isEmpty()) {
+            this.bugReportPath = bugReportPath;
+        }
     }
     
     /**
@@ -77,6 +107,54 @@ public class BugVerifyAgent extends Agent {
         this.testCase = testCase;
         this.testOutput = testOutput;
         this.initialAnalysis = initialAnalysis;
+        
+        // 创建验证上下文文件夹
+        createVerifyContextFolder();
+    }
+    
+    /**
+     * 创建验证上下文文件夹
+     */
+    private void createVerifyContextFolder() {
+        try {
+            // 提取测试类名作为文件夹名称
+            testCaseName = extractClassNameFromCode(testCase);
+            if (testCaseName == null) {
+                testCaseName = "UnknownTest";
+            }
+            
+            // 创建以时间戳为后缀的验证上下文文件夹
+            String timestamp = String.valueOf(System.currentTimeMillis());
+            verifyContextFolder = "VerifyContext_" + timestamp;
+            
+            // 创建完整路径
+            Path testCasePath = Paths.get(bugReportPath, testCaseName);
+            Path verifyContextPath = testCasePath.resolve(verifyContextFolder);
+            Files.createDirectories(verifyContextPath);
+            
+            // 保存测试用例和输出
+            saveToFile(testCasePath.resolve("TestCase.java").toString(), testCase);
+            saveToFile(verifyContextPath.resolve("output.txt").toString(), testOutput);
+            if (initialAnalysis != null) {
+                saveToFile(verifyContextPath.resolve("initial_analysis.txt").toString(), initialAnalysis);
+            }
+            
+            LoggerUtil.logExec(Level.INFO, "创建验证上下文文件夹: " + verifyContextPath);
+        } catch (IOException e) {
+            LoggerUtil.logExec(Level.WARNING, "创建验证上下文文件夹失败: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * 保存内容到文件
+     */
+    private void saveToFile(String filePath, String content) {
+        try (FileWriter writer = new FileWriter(filePath)) {
+            writer.write(content);
+            LoggerUtil.logExec(Level.INFO, "已保存文件: " + filePath);
+        } catch (IOException e) {
+            LoggerUtil.logExec(Level.WARNING, "保存文件失败 " + filePath + ": " + e.getMessage());
+        }
     }
     
     /**
@@ -89,21 +167,41 @@ public class BugVerifyAgent extends Agent {
         String initialInsight = performInitialAnalysis();
         LoggerUtil.logExec(Level.INFO, "初始分析完成：" + initialInsight);
         
+        // 保存初始分析结果
+        if (verifyContextFolder != null && testCaseName != null) {
+            Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
+            saveToFile(verifyContextPath.resolve("initial_insight.json").toString(), initialInsight);
+        }
+        
         // 2. 收集信息
         collectRelevantInformation(initialInsight);
         LoggerUtil.logExec(Level.INFO, "信息收集完成，共 " + collectedInfo.size() + " 项");
+        
+        // 保存收集到的信息
+        saveCollectedInfo();
         
         // 3. 形成假设
         formHypotheses();
         LoggerUtil.logExec(Level.INFO, "形成 " + hypotheses.size() + " 个假设");
         
+        // 保存假设
+        saveHypotheses();
+        
         // 4. 验证假设
         verifyHypotheses();
         LoggerUtil.logExec(Level.INFO, "验证完成，结果数: " + verificationResults.size());
         
+        // 保存验证结果
+        saveVerificationResults();
+        
         // 5. 形成结论和报告
         String report = generateReport();
         LoggerUtil.logExec(Level.INFO, "Bug验证报告已生成");
+        
+        // 保存最终报告
+        if (testCaseName != null) {
+            saveToFile(Paths.get(bugReportPath, testCaseName, "BugReport.md").toString(), report);
+        }
         
         return report;
     }
@@ -177,7 +275,13 @@ public class BugVerifyAgent extends Agent {
         for (String className : relevantClasses) {
             ToolResponse<String> docResponse = javadocTool.execute(className);
             if (docResponse.isSuccess()) {
-                collectedInfo.put("javadoc_" + className, docResponse.getResult());
+                String infoId = "INFO_" + (++infoCounter);
+                String sourcePath = "JavaDoc: " + className;
+                infoSourceMap.put(infoId, sourcePath);
+                
+                // 添加信息源标记
+                String markedContent = "[" + infoId + " 来源: " + sourcePath + "]\n" + docResponse.getResult();
+                collectedInfo.put("javadoc_" + className, markedContent);
             }
         }
         
@@ -185,7 +289,13 @@ public class BugVerifyAgent extends Agent {
         for (String className : relevantClasses) {
             ToolResponse<String> sourceResponse = sourceTool.execute(className);
             if (sourceResponse.isSuccess()) {
-                collectedInfo.put("source_" + className, sourceResponse.getResult());
+                String infoId = "INFO_" + (++infoCounter);
+                String sourcePath = "源码: " + className;
+                infoSourceMap.put(infoId, sourcePath);
+                
+                // 添加信息源标记
+                String markedContent = "[" + infoId + " 来源: " + sourcePath + "]\n" + sourceResponse.getResult();
+                collectedInfo.put("source_" + className, markedContent);
             }
         }
         
@@ -201,7 +311,13 @@ public class BugVerifyAgent extends Agent {
                     try {
                         ToolResponse<String> contentResponse = webTool.execute(result.getUrl());
                         if (contentResponse.isSuccess()) {
-                            collectedInfo.put("web_" + query + "_" + count, contentResponse.getResult());
+                            String infoId = "INFO_" + (++infoCounter);
+                            String sourceUrl = result.getUrl();
+                            infoSourceMap.put(infoId, sourceUrl);
+                            
+                            // 添加信息源标记
+                            String markedContent = "[" + infoId + " 来源: " + sourceUrl + "]\n" + contentResponse.getResult();
+                            collectedInfo.put("web_" + query + "_" + count, markedContent);
                             count++;
                         }
                     } catch (Exception e) {
@@ -209,6 +325,45 @@ public class BugVerifyAgent extends Agent {
                     }
                 }
             }
+        }
+    }
+    
+    /**
+     * 保存收集到的信息
+     */
+    private void saveCollectedInfo() {
+        if (verifyContextFolder == null || testCaseName == null) return;
+        
+        try {
+            // 创建info子目录
+            Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
+            Path infoDir = verifyContextPath.resolve("collected_info");
+            Files.createDirectories(infoDir);
+            
+            // 保存每项收集到的信息
+            for (Map.Entry<String, Object> entry : collectedInfo.entrySet()) {
+                if (entry.getValue() instanceof String) {
+                    String fileName = entry.getKey().replaceAll("[\\\\/:*?\"<>|]", "_") + ".txt";
+                    saveToFile(infoDir.resolve(fileName).toString(), (String) entry.getValue());
+                }
+            }
+            
+            // 保存汇总信息
+            StringBuilder summary = new StringBuilder();
+            summary.append("# 收集的信息汇总\n\n");
+            for (String key : collectedInfo.keySet()) {
+                summary.append("- ").append(key).append("\n");
+            }
+            
+            // 添加信息源映射
+            summary.append("\n## 信息源映射\n\n");
+            for (Map.Entry<String, String> entry : infoSourceMap.entrySet()) {
+                summary.append("- ").append(entry.getKey()).append(": ").append(entry.getValue()).append("\n");
+            }
+            
+            saveToFile(infoDir.resolve("_summary.md").toString(), summary.toString());
+        } catch (IOException e) {
+            LoggerUtil.logExec(Level.WARNING, "保存收集的信息失败: " + e.getMessage());
         }
     }
     
@@ -232,7 +387,7 @@ public class BugVerifyAgent extends Agent {
         }
         
         String prompt = """
-                你是一位Java Bug分析专家。基于测试用例、测试输出和收集到的信息，形成关于Bug原因的假设。
+                你是一位Java Bug分析专家。基于测试用例、测试输出和收集到的信息，形成关于问题原因的假设。
                 
                 <TestCase>
                 %s
@@ -246,7 +401,17 @@ public class BugVerifyAgent extends Agent {
                 %s
                 </Collected Information>
                 
-                请形成3-5个可能的假设，解释这个Bug的原因。每个假设应该具体明确，并且可以通过修改代码来验证。
+                请形成3-5个可能的假设，解释这个问题的原因。请务必考虑以下所有可能性：
+                1. JDK实现中的真正bug
+                2. 测试用例违反了API规范或使用文档
+                3. 测试用例中的逻辑错误
+                4. 测试用例期望的行为超出了API保证的范围
+                5. 环境或配置问题
+                
+                每个假设应该具体明确，并且可以通过修改代码来验证。
+                
+                在分析过程中，请明确标注你引用的信息来源，使用[INFO_X]格式引用，其中X是信息编号。
+                例如："根据[INFO_1]中的JavaDoc文档，HashMap在并发环境下不是线程安全的..."
                 
                 输出格式:
                 {
@@ -254,6 +419,7 @@ public class BugVerifyAgent extends Agent {
                     {
                       "id": "H1",
                       "description": "假设描述",
+                      "category": "JDK_BUG|TEST_ERROR|SPEC_VIOLATION|UNDEFINED_BEHAVIOR|ENVIRONMENT_ISSUE",
                       "rationale": "为什么这是合理的假设",
                       "verificationCode": "可用于验证这个假设的Java测试代码"
                     },
@@ -264,6 +430,51 @@ public class BugVerifyAgent extends Agent {
         
         String response = llm.messageCompletion(prompt);
         hypotheses = extractJsonObjectArrayFromField(response, "hypotheses");
+    }
+    
+    /**
+     * 保存假设
+     */
+    private void saveHypotheses() {
+        if (verifyContextFolder == null || testCaseName == null) return;
+        
+        try {
+            // 创建假设目录
+            Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
+            Path hypothesesDir = verifyContextPath.resolve("hypotheses");
+            Files.createDirectories(hypothesesDir);
+            
+            // 保存每个假设
+            for (int i = 0; i < hypotheses.size(); i++) {
+                String hypothesis = hypotheses.get(i);
+                String id = extractJsonFieldValue(hypothesis, "id");
+                if (id == null) id = "H" + (i + 1);
+                
+                saveToFile(hypothesesDir.resolve(id + ".json").toString(), hypothesis);
+                
+                // 如果有验证代码，也单独保存
+                String verificationCode = extractJsonFieldValue(hypothesis, "verificationCode");
+                if (verificationCode != null && !verificationCode.isEmpty()) {
+                    saveToFile(hypothesesDir.resolve(id + "_verification.java").toString(), verificationCode);
+                }
+            }
+            
+            // 保存假设汇总
+            StringBuilder summary = new StringBuilder();
+            summary.append("# 假设汇总\n\n");
+            for (String hypothesis : hypotheses) {
+                String id = extractJsonFieldValue(hypothesis, "id");
+                String description = extractJsonFieldValue(hypothesis, "description");
+                String category = extractJsonFieldValue(hypothesis, "category");
+                
+                summary.append("## ").append(id != null ? id : "未知ID").append("\n\n");
+                summary.append("- 描述: ").append(description != null ? description : "无描述").append("\n");
+                summary.append("- 类别: ").append(category != null ? category : "未分类").append("\n\n");
+            }
+            saveToFile(hypothesesDir.resolve("_summary.md").toString(), summary.toString());
+        } catch (IOException e) {
+            LoggerUtil.logExec(Level.WARNING, "保存假设失败: " + e.getMessage());
+        }
     }
     
     /**
@@ -296,6 +507,49 @@ public class BugVerifyAgent extends Agent {
     }
     
     /**
+     * 保存验证结果
+     */
+    private void saveVerificationResults() {
+        if (verifyContextFolder == null || testCaseName == null) return;
+        
+        try {
+            // 创建验证结果目录
+            Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
+            Path resultsDir = verifyContextPath.resolve("verification_results");
+            Files.createDirectories(resultsDir);
+            
+            // 保存每个验证结果
+            for (Map.Entry<String, TestResult> entry : verificationResults.entrySet()) {
+                String id = entry.getKey();
+                TestResult result = entry.getValue();
+                
+                StringBuilder content = new StringBuilder();
+                content.append("# 验证结果: ").append(id).append("\n\n");
+                content.append("成功: ").append(result.isSuccess()).append("\n\n");
+                content.append("输出:\n```\n").append(result.getOutput()).append("\n```\n");
+                
+                saveToFile(resultsDir.resolve(id + "_result.md").toString(), content.toString());
+            }
+            
+            // 保存验证结果汇总
+            StringBuilder summary = new StringBuilder();
+            summary.append("# 验证结果汇总\n\n");
+            for (Map.Entry<String, TestResult> entry : verificationResults.entrySet()) {
+                summary.append("## ").append(entry.getKey()).append("\n\n");
+                summary.append("- 成功: ").append(entry.getValue().isSuccess()).append("\n");
+                summary.append("- 输出摘要: ").append(
+                        entry.getValue().getOutput().length() > 100 
+                        ? entry.getValue().getOutput().substring(0, 100) + "..." 
+                        : entry.getValue().getOutput()
+                ).append("\n\n");
+            }
+            saveToFile(resultsDir.resolve("_summary.md").toString(), summary.toString());
+        } catch (IOException e) {
+            LoggerUtil.logExec(Level.WARNING, "保存验证结果失败: " + e.getMessage());
+        }
+    }
+    
+    /**
      * 结论形成阶段 - 生成最终报告
      */
     private String generateReport() {
@@ -315,34 +569,113 @@ public class BugVerifyAgent extends Agent {
             hypothesesBuilder.append(hypothesis).append("\n\n");
         }
         
-        String prompt = """
-                你是一位Java Bug分析专家。请基于测试用例、初始分析和验证结果，生成一份完整的Bug报告。
+        // 检查是否有测试用例问题相关的假设被验证
+        boolean hasTestCaseIssueHypothesis = false;
+        String testIssueHypothesisId = "";
+        
+        for (String hypothesisJson : hypotheses) {
+            String category = extractJsonFieldValue(hypothesisJson, "category");
+            String hypothesisId = extractJsonFieldValue(hypothesisJson, "id");
+            
+            if (category != null && (
+                    category.equals("TEST_ERROR") || 
+                    category.equals("SPEC_VIOLATION") || 
+                    category.equals("UNDEFINED_BEHAVIOR"))) {
                 
-                <TestCase>
-                %s
-                </TestCase>
-                
-                <Test Output>
-                %s
-                </Test Output>
-                
-                <Hypotheses>
-                %s
-                </Hypotheses>
-                
-                <Verification Results>
-                %s
-                </Verification Results>
-                
-                请生成一份完整的Bug报告，包括:
-                1. Bug概述
-                2. 复现步骤
-                3. 根本原因分析
-                4. 建议修复方案
-                5. 相关API或类的使用说明
-                
-                请使用Markdown格式输出报告。
-                """.formatted(testCase, testOutput, hypothesesBuilder.toString(), resultsBuilder.toString());
+                // 检查验证结果是否支持这个假设
+                TestResult result = verificationResults.get(hypothesisId);
+                if (result != null && result.isSuccess()) {
+                    hasTestCaseIssueHypothesis = true;
+                    testIssueHypothesisId = hypothesisId;
+                    break;
+                }
+            }
+        }
+        
+        // 构建信息源映射
+        StringBuilder infoSourceBuilder = new StringBuilder();
+        infoSourceBuilder.append("# 信息源映射\n\n");
+        for (Map.Entry<String, String> entry : infoSourceMap.entrySet()) {
+            infoSourceBuilder.append("- ").append(entry.getKey()).append(": ").append(entry.getValue()).append("\n");
+        }
+        
+        // 根据是否为测试用例问题调整提示模板
+        String reportTemplate;
+        if (hasTestCaseIssueHypothesis) {
+            reportTemplate = """
+                    你是一位Java测试专家。分析表明这可能是测试用例问题而非JDK bug。请生成一份分析报告。
+                    
+                    <TestCase>
+                    %s
+                    </TestCase>
+                    
+                    <Test Output>
+                    %s
+                    </Test Output>
+                    
+                    <Hypotheses>
+                    %s
+                    </Hypotheses>
+                    
+                    <Verification Results>
+                    %s
+                    </Verification Results>
+                    
+                    <Information Sources>
+                    %s
+                    </Information Sources>
+                    
+                    请生成一份详细的测试用例问题分析报告，包括:
+                    1. 问题概述（明确指出这是测试用例问题而非JDK bug）
+                    2. 测试用例中的具体问题
+                    3. 相关API正确用法说明
+                    4. 修复测试用例的建议
+                    5. 相关文档参考
+                    
+                    在分析过程中，请明确标注你引用的信息来源，使用[INFO_X]格式引用，其中X是信息编号。
+                    
+                    请使用Markdown格式输出报告。
+                    """;
+        } else {
+            // 使用原有的Bug报告模板
+            reportTemplate = """
+                    你是一位Java Bug分析专家。请基于测试用例、初始分析和验证结果，生成一份完整的Bug报告。
+                    
+                    <TestCase>
+                    %s
+                    </TestCase>
+                    
+                    <Test Output>
+                    %s
+                    </Test Output>
+                    
+                    <Hypotheses>
+                    %s
+                    </Hypotheses>
+                    
+                    <Verification Results>
+                    %s
+                    </Verification Results>
+                    
+                    <Information Sources>
+                    %s
+                    </Information Sources>
+                    
+                    请生成一份完整的Bug报告，包括:
+                    1. Bug概述
+                    2. 复现步骤
+                    3. 根本原因分析
+                    4. 建议修复方案
+                    5. 相关API或类的使用说明
+                    
+                    在分析过程中，请明确标注你引用的信息来源，使用[INFO_X]格式引用，其中X是信息编号。
+                    
+                    请使用Markdown格式输出报告。
+                    """;
+        }
+        
+        String prompt = reportTemplate.formatted(testCase, testOutput, 
+                hypothesesBuilder.toString(), resultsBuilder.toString(), infoSourceBuilder.toString());
         
         conclusion = llm.messageCompletion(prompt);
         return conclusion;
@@ -408,7 +741,7 @@ public class BugVerifyAgent extends Agent {
         
         List<String> result = new ArrayList<>();
         try {
-            Pattern pattern = Pattern.compile("\"" + fieldName + "\"\\s*:\\s*\\[(.*?)\\]", Pattern.DOTALL);
+            Pattern pattern = Pattern.compile("\"" + fieldName + "\"\\s*:\\s*\\[(.*?)]", Pattern.DOTALL);
             Matcher matcher = pattern.matcher(json);
             if (matcher.find()) {
                 String arrayContent = matcher.group(1);
@@ -452,15 +785,16 @@ public class BugVerifyAgent extends Agent {
      */
     public static void main(String[] args) {
         if (args.length < 2) {
-            System.out.println("Usage: java BugVerifyAgent <javadoc_path> <source_path> <test_file>");
+            System.out.println("Usage: java BugVerifyAgent <javadoc_path> <source_path> <test_file> [bug_report_path]");
             return;
         }
         
         String javadocPath = args[0];
         String sourcePath = args[1];
+        String bugReportPath = args.length > 3 ? args[3] : "BugReport";
         
         // 创建Agent
-        BugVerifyAgent agent = new BugVerifyAgent(javadocPath, sourcePath);
+        BugVerifyAgent agent = new BugVerifyAgent(javadocPath, sourcePath, bugReportPath);
         
         // 如果有测试文件，读取文件内容
         if (args.length > 2) {
@@ -534,6 +868,132 @@ public class BugVerifyAgent extends Agent {
             // 分析Bug
             String report = agent.analyze();
             System.out.println(report);
+            agent.close();
         }
+    }
+    
+    /**
+     * 从日志文件中提取已验证的bug并生成报告
+     * @param logPath 日志文件路径
+     * @param javadocPath JavaDoc路径
+     * @param sourcePath 源码路径
+     * @param bugReportPath Bug报告输出路径
+     */
+    public static void verifyBugsFromLog(String logPath, String javadocPath, String sourcePath, String bugReportPath) {
+        LoggerUtil.logExec(Level.INFO, "开始从日志文件验证bug: " + logPath);
+        
+        // 创建BugVerifyAgent
+        BugVerifyAgent agent = new BugVerifyAgent(javadocPath, sourcePath, bugReportPath);
+        
+        try {
+            // 读取日志文件
+            File logFile = new File(logPath);
+            if (!logFile.exists()) {
+                LoggerUtil.logExec(Level.WARNING, "日志文件不存在: " + logPath);
+                return;
+            }
+            
+            List<String> lines = Files.readAllLines(logFile.toPath());
+            Map<String, String> verifiedBugs = new HashMap<>();
+            
+            // 解析日志文件，提取已验证的bug
+            for (int i = 0; i < lines.size() - 1; i++) {
+                String line = lines.get(i);
+                if (line.contains("VERIFIED_BUG")) {
+                    // 提取文件路径
+                    int pathStart = line.indexOf(": ") + 2;
+                    int pathEnd = line.lastIndexOf(" VERIFIED_BUG");
+                    
+                    if (pathEnd > pathStart) {
+                        String filePath = line.substring(pathStart, pathEnd);
+                        filePath = filePath.replace("jdk17u-dev/test", "test"); // 实际的测试用例放在test目录下
+                        
+                        // 检查下一行是否包含bug详细信息
+                        if (i + 2 < lines.size()) {
+                            String nextLine = lines.get(i + 2);
+                            if (nextLine.contains("{") && nextLine.contains("}")) {
+                                String verifyMessage = nextLine.substring(nextLine.indexOf("{"));
+                                verifiedBugs.put(filePath, verifyMessage);
+                                LoggerUtil.logExec(Level.INFO, "找到已验证的bug: " + filePath);
+                            }
+                        }
+                        i += 2;
+                    }
+                }
+            }
+            
+            LoggerUtil.logExec(Level.INFO, "从日志中找到 " + verifiedBugs.size() + " 个已验证的bug");
+            
+            // 为每个bug生成报告
+            for (Map.Entry<String, String> entry : verifiedBugs.entrySet()) {
+                String filePath = entry.getKey();
+                String verifyMessage = entry.getValue();
+                
+                // 从JDK路径转换到测试路径
+                File originFile = new File(filePath);
+                File testFile = new File(filePath.replace("jdk17u-dev/test", "test"));
+                
+                if (!testFile.exists() && !originFile.exists()) {
+                    LoggerUtil.logExec(Level.WARNING, "测试文件不存在: " + filePath);
+                    continue;
+                }
+                
+                // 使用存在的文件
+                File fileToUse = testFile.exists() ? testFile : originFile;
+                
+                String testCaseName = fileToUse.getName().replace(".java", "");
+                LoggerUtil.logExec(Level.INFO, "正在分析bug: " + testCaseName);
+                
+                try {
+                    // 读取测试用例内容
+                    String testContent = Files.readString(fileToUse.toPath());
+                    
+                    // 运行测试获取输出
+                    JtregExecuteTool jtregTool = new JtregExecuteTool();
+                    ToolResponse<TestResult> response = jtregTool.execute(fileToUse.getPath());
+                    
+                    String testOutput = "";
+                    if (response.isSuccess()) {
+                        testOutput = response.getResult().getOutput();
+                    } else {
+                        // 如果执行失败，尝试从result文件获取输出
+                        File resultFile = new File(fileToUse.getPath() + ".result");
+                        if (resultFile.exists()) {
+                            testOutput = Files.readString(resultFile.toPath());
+                        } else {
+                            // 使用verifyMessage作为备选
+                            testOutput = "无法获取测试输出，使用验证消息作为替代: " + verifyMessage;
+                        }
+                    }
+                    
+                    // 设置测试数据并分析
+                    agent.setTestData(testContent, testOutput, verifyMessage);
+                    String report = agent.analyze();
+                    
+                    LoggerUtil.logExec(Level.INFO, "Bug报告已生成: " + testCaseName);
+                } catch (Exception e) {
+                    LoggerUtil.logExec(Level.WARNING, "为测试用例生成报告失败: " + testCaseName);
+                    e.printStackTrace();
+                }
+            }
+            
+            LoggerUtil.logExec(Level.INFO, "Bug验证和报告生成完成，报告保存在: " + bugReportPath);
+        } catch (Exception e) {
+            LoggerUtil.logExec(Level.SEVERE, "Bug验证过程失败: " + e.getMessage());
+            e.printStackTrace();
+        } finally {
+            agent.close();
+        }
+    }
+    
+    /**
+     * 无参数重载，使用默认路径
+     */
+    public static void verifyBugsFromLog() {
+        verifyBugsFromLog("result.log", "JavaDoc/docs/api/java.base", "jdk17u-dev/src", "BugReport");
+    }
+    
+    public void close(){
+        webTool.close();
     }
 }

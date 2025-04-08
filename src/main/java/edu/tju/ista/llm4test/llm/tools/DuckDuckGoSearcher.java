@@ -172,9 +172,9 @@ public class DuckDuckGoSearcher implements Tool<List<SearchResult>> {
 
     @Override
     public ToolResponse<List<SearchResult>> execute(String query) {
-        String proxyHost = "127.0.0.1"; // 替换为实际代理主机
+        String proxyHost = "172.31.144.1"; // 替换为实际代理主机
         int proxyPort = 7890; // 替换为实际代理端口
-        var list = search("Elon Musk latest news", 10, proxyHost, proxyPort);
+        var list = search(query, 10, proxyHost, proxyPort);
         if (list.isEmpty()) {
             return ToolResponse.failure("No results found.");
         } else {

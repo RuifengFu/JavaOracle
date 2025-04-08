@@ -169,7 +169,7 @@ public class ToolsTest {
         System.out.println("响应成功: " + response.isSuccess());
         
         if (response.isSuccess()) {
-            System.out.println("搜索结果摘要:\n" + truncateOutput(response.getResult(), 300));
+            System.out.println("搜索结果摘要:\n" + response.getResult());
         } else {
             System.out.println("错误信息: " + response.getMessage());
         }

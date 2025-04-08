@@ -53,8 +53,8 @@ public class JavaDocSearchTool implements Tool<String> {
                 return ToolResponse.failure("无法找到有效的JavaDoc API根目录");
             }
             
-            // 使用LLM找出可能的类路径
-            String potentialPaths = findPotentialPaths(input, apiRootPath.toString());
+            // 使用LLM找到可能的JavaDoc路径并进行有效性过滤
+            List<String> potentialPaths = findPotentialPaths(input, apiRootPath.toString());
             
             // 检查是否找到了可能的路径
             if (potentialPaths.isEmpty()) {
@@ -63,12 +63,8 @@ public class JavaDocSearchTool implements Tool<String> {
             
             // 读取文档
             StringBuilder docContent = new StringBuilder();
-            String[] paths = potentialPaths.split("\n");
             
-            for (String path : paths) {
-                path = path.trim();
-                if (path.isEmpty()) continue;
-                
+            for (String path : potentialPaths) {
                 try {
                     // 可能是类文件
                     if (path.endsWith(".html")) {
@@ -79,19 +75,6 @@ public class JavaDocSearchTool implements Tool<String> {
                         }
                         
                         if (docFile != null && docFile.exists()) {
-                            // 优先使用ApiDocProcessor处理文档
-                            try {
-                                String content = docProcessor.processApiDocs(docFile);
-                                if (content != null && !content.trim().isEmpty()) {
-                                    docContent.append("--- 来自文件: ").append(docFile.getPath()).append(" ---\n");
-                                    docContent.append(content).append("\n\n");
-                                    continue;
-                                }
-                            } catch (Exception e) {
-                                // ApiDocProcessor失败时使用直接HTML解析作为后备
-                                LoggerUtil.logExec(Level.WARNING, "ApiDocProcessor处理失败，使用HTML解析: " + e.getMessage());
-                            }
-                            
                             // 直接解析HTML
                             String htmlContent = processHtmlFile(docFile);
                             docContent.append("--- 来自文件: ").append(docFile.getPath()).append(" ---\n");
@@ -103,18 +86,6 @@ public class JavaDocSearchTool implements Tool<String> {
                         List<File> htmlFiles = findHtmlFilesInPackage(apiRootPath, path);
                         
                         for (File htmlFile : htmlFiles) {
-                            // 优先使用ApiDocProcessor
-                            try {
-                                String content = docProcessor.processApiDocs(htmlFile);
-                                if (content != null && !content.trim().isEmpty()) {
-                                    docContent.append("--- 来自目录文件: ").append(htmlFile.getPath()).append(" ---\n");
-                                    docContent.append(content).append("\n\n");
-                                    continue;
-                                }
-                            } catch (Exception e) {
-                                // 失败时使用HTML解析
-                            }
-                            
                             // 直接解析HTML
                             String htmlContent = processHtmlFile(htmlFile);
                             docContent.append("--- 来自目录文件: ").append(htmlFile.getPath()).append(" ---\n");
@@ -307,23 +278,93 @@ public class JavaDocSearchTool implements Tool<String> {
     }
     
     /**
-     * 使用LLM分析输入，找出可能的JavaDoc文件路径
+     * 使用LLM找到可能的JavaDoc路径并进行有效性过滤
      */
-    private String findPotentialPaths(String input, String apiRootPath) {
+    private List<String> findPotentialPaths(String input, String apiRootPath) {
         String prompt = String.format(
-                "你是JavaDoc路径查找助手。根据用户的查询，分析最可能包含相关信息的JavaDoc文件路径。\n" +
-                "- JDK的JavaDoc目录结构通常按模块和包名组织，例如：\n" +
-                "  * java.base/java/lang/String.html 表示java.lang.String类\n" +
-                "  * java.base/java/util/package-summary.html 表示java.util包的概述\n" +
-                "- 某些文档可能在class-use子目录下，记录了API的使用情况\n" +
-                "- 如果用户提供了具体类名，请直接给出类文件路径\n" +
-                "- 如果用户只提供了模糊描述，请推断可能的包和类名\n" +
-                "- 请返回多个可能的文件路径，每行一个，按可能性排序\n\n" +
-                "API根目录：%s\n" +
-                "用户查询: %s\n" +
-                "可能的JavaDoc路径:", apiRootPath, input);
+            "根据查询'%s'，列出可能的JavaDoc文档路径。考虑类、包、方法名。\n" +
+            "JavaDoc根目录: %s\n" +
+            "仅列出相对于根目录的路径，每行一个。路径必须是.html文件或有效目录。\n" +
+            "示例格式:\njava/lang/String.html\njava/util\n",
+            input, apiRootPath
+        );
         
-        return llm.messageCompletion(prompt, 0.0);
+        String rawResponse = llm.messageCompletion(prompt, 0.0);
+        
+        // 1. 过滤思维链
+        rawResponse = filterThinkingChain(rawResponse);
+        
+        // 2. 分割为行并过滤有效路径
+        List<String> filteredPaths = new ArrayList<>();
+        String[] lines = rawResponse.split("\n");
+        
+        for (String line : lines) {
+            line = line.trim();
+            
+            // 忽略空行
+            if (line.isEmpty()) continue;
+            
+            // 忽略注释和非路径行
+            if (line.startsWith("#") || line.startsWith("//") || 
+                line.startsWith("-") || line.contains(":")) continue;
+                
+            // 验证是HTML文件或看起来像目录路径
+            boolean isHtmlFile = line.endsWith(".html");
+            boolean looksLikeDirectory = !line.contains(".") && 
+                                        !line.contains("(") && 
+                                        !line.contains(" ");
+                                        
+            if (isHtmlFile || looksLikeDirectory) {
+                // 规范化路径格式（去除前导/等）
+                while (line.startsWith("/") || line.startsWith(".")) {
+                    line = line.substring(1);
+                }
+                
+                // 验证文件或目录是否存在
+                File testPath = new File(apiRootPath, line);
+                if (testPath.exists()) {
+                    filteredPaths.add(line);
+                    continue;
+                }
+                
+                // 尝试常见的变体
+                if (isHtmlFile) {
+                    // 尝试不同的大小写组合
+                    String fileName = new File(line).getName();
+                    String parentPath = line.substring(0, line.length() - fileName.length());
+                    
+                    // 首字母大写变体
+                    String capitalizedName = fileName.substring(0, 1).toUpperCase() + 
+                                           fileName.substring(1);
+                    File capitalizedPath = new File(apiRootPath, parentPath + capitalizedName);
+                    if (capitalizedPath.exists()) {
+                        filteredPaths.add(parentPath + capitalizedName);
+                    }
+                }
+            }
+        }
+        
+        // 记录找到的有效路径
+        LoggerUtil.logExec(Level.INFO, "为查询'" + input + "'找到" + filteredPaths.size() + 
+                          "个有效路径");
+        
+        return filteredPaths;
+    }
+    
+    /**
+     * 过滤思维链标记
+     */
+    private String filterThinkingChain(String content) {
+        if (content == null) return "";
+        
+        // 移除<think>...</think>块
+        String filtered = content.replaceAll("(?s)<think>.*?</think>", "");
+        
+        // 移除其他可能的思维链标记
+        filtered = filtered.replaceAll("(?s)```thinking.*?```", "");
+        filtered = filtered.replaceAll("(?s)\\[思考\\].*?\\[/思考\\]", "");
+        
+        return filtered.trim();
     }
     
     /**
