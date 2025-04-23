@@ -1,5 +1,7 @@
 package edu.tju.ista.llm4test.llm.tools;
 
+import java.util.List;
+
 /**
  * 工具接口，定义了Agent可以使用的工具
  * @param <T> 工具执行结果的类型

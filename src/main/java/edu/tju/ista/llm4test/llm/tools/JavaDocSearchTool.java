@@ -11,7 +11,7 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
-import java.util.stream.Collectors;
+
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.select.Elements;
@@ -92,10 +92,10 @@ public class JavaDocSearchTool implements Tool<String> {
                             docContent.append(htmlContent).append("\n\n");
                             
                             // 限制返回的文档量
-                            if (docContent.length() > 10000) {
-                                docContent.append("...文档内容过多，已截断");
-                                break;
-                            }
+//                            if (docContent.length() > 10000) {
+//                                docContent.append("...文档内容过多，已截断");
+//                                break;
+//                            }
                         }
                         
                         // 检查是否有class-use目录
@@ -110,10 +110,10 @@ public class JavaDocSearchTool implements Tool<String> {
                                     docContent.append(extractUsageSummary(htmlContent)).append("\n");
                                     
                                     // 限制返回的文档量
-                                    if (docContent.length() > 15000) {
-                                        docContent.append("...使用文档过多，已截断");
-                                        break;
-                                    }
+//                                    if (docContent.length() > 15000) {
+//                                        docContent.append("...使用文档过多，已截断");
+//                                        break;
+//                                    }
                                 }
                             }
                         }

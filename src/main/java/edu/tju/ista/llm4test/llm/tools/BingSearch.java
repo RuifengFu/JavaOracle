@@ -11,12 +11,9 @@ import java.net.Proxy;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Random;
 import java.util.logging.Level;
 import java.util.regex.Matcher;
@@ -331,20 +328,7 @@ public class BingSearch implements Tool<List<SearchResult>> {
 
     @Override
     public ToolResponse<List<SearchResult>> execute(String query) {
-        // 获取可能的代理配置
-        String proxyHost = System.getProperty("http.proxyHost");
-        String proxyPortStr = System.getProperty("http.proxyPort");
-        Integer proxyPort = null;
-        
-        if (proxyPortStr != null && !proxyPortStr.isEmpty()) {
-            try {
-                proxyPort = Integer.parseInt(proxyPortStr);
-            } catch (NumberFormatException e) {
-                LoggerUtil.logExec(Level.WARNING, "代理端口格式无效: " + proxyPortStr);
-            }
-        }
-        
-        var list = search(query, 10, proxyHost, proxyPort);
+        var list = search(query, 10);
         if (list.isEmpty()) {
             return ToolResponse.failure("无搜索结果");
         } else {
@@ -353,6 +337,7 @@ public class BingSearch implements Tool<List<SearchResult>> {
     }
 
     public static void main(String[] args) {
+        System.setProperty("java.net.useSystemProxies", "true");
         System.out.println("Bing搜索测试:");
         List<SearchResult> results = search("Java HashMap", 10);
         results.forEach(System.out::println);

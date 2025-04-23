@@ -1,5 +1,7 @@
 package edu.tju.ista.llm4test.llm.agents;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.tju.ista.llm4test.llm.OpenAI;
 import edu.tju.ista.llm4test.llm.tools.*;
 import edu.tju.ista.llm4test.execute.TestResult;
@@ -133,7 +135,7 @@ public class BugVerifyAgent extends Agent {
             Files.createDirectories(verifyContextPath);
             
             // 保存测试用例和输出
-            saveToFile(testCasePath.resolve("TestCase.java").toString(), testCase);
+            saveToFile(testCasePath.resolve(testCaseName + ".java").toString(), testCase);
             saveToFile(verifyContextPath.resolve("output.txt").toString(), testOutput);
             if (initialAnalysis != null) {
                 saveToFile(verifyContextPath.resolve("initial_analysis.txt").toString(), initialAnalysis);
@@ -183,9 +185,7 @@ public class BugVerifyAgent extends Agent {
         // 3. 形成假设
         formHypotheses();
         LoggerUtil.logExec(Level.INFO, "形成 " + hypotheses.size() + " 个假设");
-        
-        // 保存假设
-        saveHypotheses();
+
         
         // 4. 验证假设
         verifyHypotheses();
@@ -211,7 +211,7 @@ public class BugVerifyAgent extends Agent {
      * @param response LLM响应内容
      * @return 过滤后的内容
      */
-    private String filterThinkingChain(String response) {
+    private static String filterThinkingChain(String response) {
         if (response == null) return null;
         
         // 移除<think>...</think>标签及其内容
@@ -377,8 +377,11 @@ public class BugVerifyAgent extends Agent {
             if (entry.getValue() instanceof String) {
                 String content = (String) entry.getValue();
                 // 限制每项内容的长度，避免提示过长
-                if (content.length() > 2000) {
-                    content = content.substring(0, 2000) + "...(内容已截断)";
+                if (content.length() > 30000) {
+                    content = content.substring(0, 30000) + "...(内容已截断)";
+                }
+                if (infoBuilder.length() + content.length() > 100000) {
+                    break;
                 }
                 infoBuilder.append("<").append(entry.getKey()).append(">\n");
                 infoBuilder.append(content).append("\n");
@@ -430,6 +433,9 @@ public class BugVerifyAgent extends Agent {
         
         String response = llm.messageCompletion(prompt);
         hypotheses = extractJsonObjectArrayFromField(response, "hypotheses");
+        
+        // 立即保存假设
+        saveHypotheses();
     }
     
     /**
@@ -504,6 +510,9 @@ public class BugVerifyAgent extends Agent {
                 }
             }
         }
+        
+        // 立即保存验证结果
+        saveVerificationResults();
     }
     
     /**
@@ -662,7 +671,7 @@ public class BugVerifyAgent extends Agent {
                     </Information Sources>
                     
                     请生成一份完整的Bug报告，包括:
-                    1. Bug概述
+                    1. Bug概述，明确说明这是测试用例问题还是JDK BUG
                     2. 复现步骤
                     3. 根本原因分析
                     4. 建议修复方案
@@ -735,36 +744,25 @@ public class BugVerifyAgent extends Agent {
     /**
      * 从JSON中提取对象数组
      */
-    private List<String> extractJsonObjectArrayFromField(String json, String fieldName) {
+    public static List<String> extractJsonObjectArrayFromField(String json, String fieldName) {
         // 先过滤掉思维链标签
         json = filterThinkingChain(json);
         
         List<String> result = new ArrayList<>();
         try {
-            Pattern pattern = Pattern.compile("\"" + fieldName + "\"\\s*:\\s*\\[(.*?)]", Pattern.DOTALL);
-            Matcher matcher = pattern.matcher(json);
-            if (matcher.find()) {
-                String arrayContent = matcher.group(1);
-                // 分割对象
-                int depth = 0;
-                StringBuilder currentObject = new StringBuilder();
-                for (char c : arrayContent.toCharArray()) {
-                    if (c == '{') depth++;
-                    if (c == '}') depth--;
-                    
-                    currentObject.append(c);
-                    
-                    if (depth == 0 && currentObject.length() > 0) {
-                        if (currentObject.toString().trim().length() > 2) { // 不是空对象
-                            result.add(currentObject.toString().trim());
-                        }
-                        currentObject = new StringBuilder();
-                    }
+            ObjectMapper objectMapper = new ObjectMapper();
+            JsonNode rootNode = objectMapper.readTree(json);
+            JsonNode arrayNode = rootNode.path(fieldName);
+
+            if (arrayNode.isArray()) {
+                for (JsonNode node : arrayNode) {
+                    result.add(node.toString().trim());
                 }
             }
         } catch (Exception e) {
             LoggerUtil.logExec(Level.WARNING, "JSON对象数组提取失败: " + e.getMessage());
         }
+
         return result;
     }
     
@@ -788,31 +786,31 @@ public class BugVerifyAgent extends Agent {
             System.out.println("Usage: java BugVerifyAgent <javadoc_path> <source_path> <test_file> [bug_report_path]");
             return;
         }
-        
+
         String javadocPath = args[0];
         String sourcePath = args[1];
         String bugReportPath = args.length > 3 ? args[3] : "BugReport";
-        
+
         // 创建Agent
         BugVerifyAgent agent = new BugVerifyAgent(javadocPath, sourcePath, bugReportPath);
-        
+
         // 如果有测试文件，读取文件内容
         if (args.length > 2) {
             try {
                 String testCase = new String(java.nio.file.Files.readAllBytes(
                         java.nio.file.Paths.get(args[2])));
-                
+
                 // 运行测试并获取输出
                 JtregExecuteTool jtregTool = new JtregExecuteTool();
                 ToolResponse<TestResult> result = jtregTool.execute(args[2]);
-                
-                String testOutput = result.isSuccess() 
-                        ? result.getResult().getOutput() 
+
+                String testOutput = result.isSuccess()
+                        ? result.getResult().getOutput()
                         : "执行失败: " + result.getMessage();
-                
+
                 // 设置测试数据
                 agent.setTestData(testCase, testOutput, null);
-                
+
                 // 分析Bug
                 String report = agent.analyze();
                 System.out.println(report);
@@ -855,23 +853,23 @@ public class BugVerifyAgent extends Agent {
                         }
                     }
                     """;
-            
+
             String sampleOutput = """
                     Map size should be 2000: 1986
                     Exception in thread "main" java.lang.AssertionError: Map size is not 2000, it's 1986
                         at HashMapConcurrencyTest.main(HashMapConcurrencyTest.java:28)
                     """;
-            
+
             // 设置测试数据
             agent.setTestData(sampleTest, sampleOutput, "HashMap在并发环境下可能丢失条目");
-            
+
             // 分析Bug
             String report = agent.analyze();
             System.out.println(report);
             agent.close();
         }
     }
-    
+
     /**
      * 从日志文件中提取已验证的bug并生成报告
      * @param logPath 日志文件路径

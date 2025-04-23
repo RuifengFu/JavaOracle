@@ -1,7 +1,6 @@
 package edu.tju.ista.llm4test.llm.tools;
 
 import java.io.BufferedReader;
-import java.io.File;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.List;
