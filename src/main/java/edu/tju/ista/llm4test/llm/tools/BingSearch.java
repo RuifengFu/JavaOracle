@@ -97,7 +97,8 @@ public class BingSearch implements Tool<List<SearchResult>> {
                 // 执行请求
                 org.jsoup.Connection.Response response = connection.execute();
                 Document doc = response.parse();
-                
+
+//                System.out.println(doc);
                 // 注释掉保存cookies的代码
                 // cookies.putAll(response.cookies());
 
@@ -106,52 +107,108 @@ public class BingSearch implements Tool<List<SearchResult>> {
                 if (statusCode != 200) {
                     LoggerUtil.logExec(Level.WARNING, "HTTP错误 " + statusCode + ": " + response.statusMessage());
                     if (attempt < MAX_RETRIES - 1) {
+                        // Consider different retry strategies based on status code
                         continue;
+                    } else {
+                         // Last attempt failed due to HTTP error, try fallback if not already done
+                         if (attempt == MAX_RETRIES - 1) {
+                             LoggerUtil.logExec(Level.INFO, "最后尝试因HTTP错误失败，尝试使用DuckDuckGo");
+                             List<SearchResult> duckResults = fallbackToDuckDuckGo(query, maxResults, proxyHost, proxyPort);
+                             if (!duckResults.isEmpty()) {
+                                 return duckResults;
+                             }
+                         }
+                         // If fallback also fails or wasn't applicable, return empty
+                         return links;
+                    }
+                }
+                
+                // 检查是否是明确的 "无结果" 页面
+                Element noResultElement = doc.selectFirst("li.b_no h1");
+                if (noResultElement != null && noResultElement.text().contains("There are no results for")) {
+                    LoggerUtil.logExec(Level.INFO, "尝试 " + (attempt + 1) + ": Bing 返回 '无结果' 页面针对查询: " + query);
+                    if (attempt < MAX_RETRIES - 1) {
+                         // Decide if retrying makes sense for a 'no results' page
+                         // Let's continue the loop to potentially fallback based on existing logic
+                        continue; // Try next attempt or fallback
+                    } else {
+                         // If this was the last attempt and it explicitly returned "no results"
+                         LoggerUtil.logExec(Level.WARNING, "最终尝试: Bing 明确返回无结果.");
+                         // The fallback logic currently runs on attempt MAX_RETRIES - 2 if links is empty
+                         // If fallback hasn't been tried, we could try it here explicitly,
+                         // but let's stick to the current fallback trigger for now.
+                         // If the last attempt gave "No Results", and fallback wasn't triggered before,
+                         // we might still want to try it.
+                         if (attempt == MAX_RETRIES - 1) { // Ensure fallback is attempted on the very last try if needed
+                            LoggerUtil.logExec(Level.INFO, "最后尝试返回无结果，尝试使用DuckDuckGo");
+                            List<SearchResult> duckResults = fallbackToDuckDuckGo(query, maxResults, proxyHost, proxyPort);
+                            if (!duckResults.isEmpty()) {
+                                return duckResults;
+                            }
+                         }
+                         return links; // Return empty list
                     }
                 }
 
-                System.out.println(doc.html());
+                // System.out.println(doc.html()); // Replaced with logging below
 
-                // 打印HTML，用于调试
-                LoggerUtil.logExec(Level.FINE, "Bing搜索响应HTML长度: " + doc.html().length());
+                // 打印HTML，用于调试 (use appropriate level)
+                 // Log a snippet of the body's HTML to avoid overly large logs
+                 String bodyHtml = doc.select("body").html();
+                 int snippetLength = Math.min(bodyHtml.length(), 1500); // Limit log snippet size
+                 LoggerUtil.logExec(Level.FINEST, "Bing搜索响应HTML长度: " + doc.html().length() + "\nHTML Snippet:\n" + bodyHtml.substring(0, snippetLength));
+
                 // 检查页面是否包含正常搜索结果的标记
-                if (!doc.html().contains("b_algo") && !doc.html().contains("b_results")) {
-                    LoggerUtil.logExec(Level.WARNING, "未找到搜索结果标记，可能被反爬虫拦截");
-                    // 尝试备用解析方法
-                    Elements altResults = doc.select("li.b_algo, .b_results > li, .b_entityTP");
-                    if (!altResults.isEmpty()) {
-                        LoggerUtil.logExec(Level.INFO, "使用备用选择器找到结果: " + altResults.size() + " 个");
-                    } else if (attempt < MAX_RETRIES - 1) {
+                if (!doc.html().contains("b_algo") && !doc.select("li.b_algo").isEmpty() && !doc.select(".b_results > li:not(.b_no)").isEmpty()) { // Check selectors directly
+                    LoggerUtil.logExec(Level.WARNING, "未找到'b_algo' class标记，但可能存在结果结构，尝试解析");
+                    // Allow parsing to proceed using selectors below
+                } else if (doc.select("li.b_algo").isEmpty() && doc.select(".b_results > li:not(.b_no)").isEmpty()) {
+                    LoggerUtil.logExec(Level.WARNING, "未找到搜索结果标记(li.b_algo 或 .b_results > li:not(.b_no))，可能被反爬虫拦截或页面结构改变");
+                     if (attempt < MAX_RETRIES - 1) {
                         // 如果未找到结果且不是最后一次尝试，改变策略重试
-                        // cookies.clear(); // 清除cookies重新获取
+                        // cookies.clear(); // 清除cookies重新获取 (Consider if re-enabling cookies)
                         continue;
                     }
+                    // If it's the last attempt and no results found, proceed to fallback logic after the loop.
                 }
 
                 // 解析结果 - 尝试多种选择器模式
                 Elements results = doc.select("li.b_algo");
                 if (results.isEmpty()) {
-                    results = doc.select(".b_results > li");  // 备用选择器
+                    results = doc.select(".b_results > li:not(.b_no)");  // 备用选择器, explicitly exclude .b_no
                 }
 
                 for (Element result : results) {
                     if (links.size() >= maxResults) break;
                     
+                     if (result.hasClass("b_no")) { // Double check within loop
+                         continue;
+                     }
                     Element titleElement = result.selectFirst("h2 > a");
                     Element snippetElement = result.selectFirst("div.b_caption > p");
                     
-                    if (titleElement == null) {
+                    // Add stricter null checks before accessing properties
+                    if (titleElement == null || titleElement.attr("href") == null || titleElement.attr("href").isEmpty()) {
+                        LoggerUtil.logExec(Level.FINER, "跳过结果，因为标题或链接为空");
                         continue;
                     }
 
                     String url = titleElement.attr("href");
-                    if (url.isEmpty() || isAdUrl(url)) {
+                    // Check for ads slightly more robustly (optional)
+                    if (url.isEmpty() || isAdUrl(url) || result.className().toLowerCase().contains("ad") || result.html().toLowerCase().contains(" Sponso")) { // Enhanced ad check
+                        LoggerUtil.logExec(Level.FINER, "跳过广告链接: " + url);
                         continue;
                     }
                     
                     String title = titleElement.text();
-                    String snippet = snippetElement != null ? snippetElement.text() : "";
+                    // Ensure snippet element exists before getting text
+                    String snippet = (snippetElement != null) ? snippetElement.text() : "";
                     
+                    if (title == null || title.trim().isEmpty()){
+                         LoggerUtil.logExec(Level.FINER, "跳过结果，因为标题为空: " + url);
+                         continue; // Skip if title is empty even if link exists
+                    }
+
                     // 尝试提取日期（Bing有时会在搜索结果中包含日期）
                     Instant timestamp = null;
                     Element dateElement = result.selectFirst("span.news_dt");
@@ -162,6 +219,7 @@ public class BingSearch implements Tool<List<SearchResult>> {
                             // 尝试解析多种常见日期格式
                             timestamp = parseDate(dateText);
                         } catch (Exception e) {
+                            LoggerUtil.logExec(Level.FINEST, "日期解析失败: " + dateElement.text() + " - " + e.getMessage());
                             // 日期解析失败时忽略
                         }
                     }
@@ -171,22 +229,41 @@ public class BingSearch implements Tool<List<SearchResult>> {
                 
                 // 如果成功获取数据，就跳出重试循环
                 if (!links.isEmpty()) {
-                    break;
+                     LoggerUtil.logExec(Level.INFO, "成功获取 " + links.size() + " 条结果，在尝试 " + (attempt + 1) + ".");
+                    break; // Exit retry loop on success
                 } else if (attempt < MAX_RETRIES - 1) {
-                    LoggerUtil.logExec(Level.WARNING, "没有找到搜索结果，尝试更换策略");
+                    // This block is reached if parsing finished but found 0 links (and wasn't a "no results" page initially)
+                    LoggerUtil.logExec(Level.WARNING, "尝试 " + (attempt+1) + ": 解析完成但未找到有效链接，尝试更换策略");
                     // 尝试DuckDuckGo作为备选方案
-                    if (attempt == MAX_RETRIES - 2) {
+                    if (attempt == MAX_RETRIES - 2) { // Existing fallback trigger point
                         LoggerUtil.logExec(Level.INFO, "尝试使用DuckDuckGo作为备选搜索引擎");
                         List<SearchResult> duckResults = fallbackToDuckDuckGo(query, maxResults, proxyHost, proxyPort);
                         if (!duckResults.isEmpty()) {
                             return duckResults;
                         }
+                        // If fallback on attempt MAX_RETRIES-2 fails, the loop continues to the last attempt.
                     }
+                } else {
+                     // This is the last attempt, and it resulted in an empty links list (and wasn't caught by specific errors above)
+                     LoggerUtil.logExec(Level.WARNING, "最后尝试 " + (attempt + 1) + " 完成，未找到任何结果.");
+                     // Trigger fallback on the very last attempt if it hasn't succeeded yet
+                     if (attempt == MAX_RETRIES - 1) {
+                         LoggerUtil.logExec(Level.INFO, "最终尝试未找到结果，尝试使用DuckDuckGo");
+                         List<SearchResult> duckResults = fallbackToDuckDuckGo(query, maxResults, proxyHost, proxyPort);
+                         if (!duckResults.isEmpty()) {
+                             return duckResults;
+                         }
+                     }
                 }
             } catch (Exception e) {
                 LoggerUtil.logExec(Level.WARNING, "Bing搜索尝试 " + (attempt + 1) + "/" + MAX_RETRIES + " 失败: " + e.getMessage());
                 if (attempt == MAX_RETRIES - 1) {
-                    e.printStackTrace(); // 最后一次尝试失败时打印完整堆栈
+                    LoggerUtil.logExec(Level.SEVERE, "最后尝试失败，放弃 " + e.getMessage()); // Log exception stack trace on last failure
+                    // Attempt fallback on last attempt exception
+//                    List<SearchResult> duckResults = fallbackToDuckDuckGo(query, maxResults, proxyHost, proxyPort);
+//                    if (!duckResults.isEmpty()) {
+//                        return duckResults;
+//                    }
                 }
             }
             
@@ -201,6 +278,10 @@ public class BingSearch implements Tool<List<SearchResult>> {
             }
         }
 
+        // Return whatever links were collected, or an empty list if all attempts/fallbacks failed
+        if (links.isEmpty()) {
+             LoggerUtil.logExec(Level.WARNING, "所有尝试和备选方案均失败，返回空列表。");
+        }
         return links;
     }
 
@@ -339,7 +420,7 @@ public class BingSearch implements Tool<List<SearchResult>> {
     public static void main(String[] args) {
         System.setProperty("java.net.useSystemProxies", "true");
         System.out.println("Bing搜索测试:");
-        List<SearchResult> results = search("Java HashMap", 10);
+        List<SearchResult> results = search("JavaHashMap", 10);
         results.forEach(System.out::println);
 
     }

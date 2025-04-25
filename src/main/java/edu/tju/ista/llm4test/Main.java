@@ -71,7 +71,6 @@ public class Main {
             case "execute": execute(args[1]); break;
             case "generate": generate(args[1]); verifyBugs(); break;
             case "env" : testJDKenv(); break;
-
             case "verify": verifyBugs(); break;
         }
     }

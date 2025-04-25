@@ -35,6 +35,7 @@ public class OpenAI {
     private int MAX_TOKENS = 8192;
     private boolean STREAM = true;
 
+    private boolean JSON_OUTPUT = false;
 
     public String messageCompletion(String prompt) {
         return messageCompletion(prompt, 0.7);
@@ -68,11 +69,15 @@ public class OpenAI {
     }
 
     public static OpenAI R1;
+    public static OpenAI V3_json;
     public static OpenAI Doubao;
 
     static {
 
         R1 = new OpenAI();
+        V3_json = new OpenAI();
+        V3_json.MODEL = "deepseek-chat";
+        V3_json.JSON_OUTPUT = true;
         var ark_api_key = System.getenv("ARK_API_KEY");
         var ark_base_url = System.getenv("ARK_BASE_URL");
         Doubao = new OpenAI(ark_api_key, ark_base_url, "ep-20250214193558-qh465");
@@ -87,6 +92,9 @@ public class OpenAI {
 //                Map.of("role", "system", "content", systemPrompt),
                 Map.of("role", "user", "content", prompt)
         ));
+        if (this.JSON_OUTPUT) {
+            requestBody.put("response_format", Map.of("type", "json_object"));
+        }
         requestBody.put("max_tokens", MAX_TOKENS); // Limit the response length
         requestBody.put("temperature", TEMPERATURE); // Set the randomness of the output
         requestBody.put("stream", STREAM);
@@ -308,4 +316,5 @@ public class OpenAI {
         }
         return new HashMap<>();
     }
+
 }

@@ -145,12 +145,13 @@ public class DuckDuckGoSearcher implements Tool<List<SearchResult>> {
     public static void main(String[] args) {
         // 使用代理的例子
         // 请替换为实际的代理服务器地址和端口
-        System.out.println("\n使用代理的搜索结果:");
-        String proxyHost = "127.0.0.1"; // 替换为实际代理主机
-        int proxyPort = 7890; // 替换为实际代理端口
+//        System.out.println("\n使用代理的搜索结果:");
+//        String proxyHost = "127.0.0.1"; // 替换为实际代理主机
+//        int proxyPort = 7890; // 替换为实际代理端口
 
         // 使用代理进行搜索的例子
-        List<SearchResult> proxyResults = search("Elon Musk latest news", 10, proxyHost, proxyPort);
+        System.setProperty("java.net.useSystemProxies", "true");
+        List<SearchResult> proxyResults = search("Elon Musk latest news", 10);
         proxyResults.forEach(System.out::println);
     }
 
@@ -166,9 +167,7 @@ public class DuckDuckGoSearcher implements Tool<List<SearchResult>> {
 
     @Override
     public ToolResponse<List<SearchResult>> execute(String query) {
-        String proxyHost = "172.31.144.1"; // 替换为实际代理主机
-        int proxyPort = 7890; // 替换为实际代理端口
-        var list = search(query, 10, proxyHost, proxyPort);
+        var list = search(query, 10);
         if (list.isEmpty()) {
             return ToolResponse.failure("No results found.");
         } else {

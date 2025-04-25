@@ -17,8 +17,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.text.SimpleDateFormat;
-import java.util.Date;
 
 public class BugVerifyAgent extends Agent {
     // 基础提示模板
@@ -55,6 +53,7 @@ public class BugVerifyAgent extends Agent {
     
     // LLM实例
     private final OpenAI llm;
+    private final OpenAI llm_json;
     
     // 分析状态
     private String testCase;
@@ -81,6 +80,7 @@ public class BugVerifyAgent extends Agent {
      */
     public BugVerifyAgent(String javadocPath, String sourcePath) {
         this.llm = OpenAI.R1;
+        this.llm_json = OpenAI.V3_json;
         this.javadocTool = new JavaDocSearchTool(javadocPath);
         this.sourceTool = new SourceCodeSearchTool(sourcePath);
         this.webTool = new WebContentExtractor(true);
@@ -213,16 +213,23 @@ public class BugVerifyAgent extends Agent {
      */
     private static String filterThinkingChain(String response) {
         if (response == null) return null;
-        
+        LoggerUtil.logExec(Level.INFO, "过滤思维链标签\n" + response);
         // 移除<think>...</think>标签及其内容
-        String filtered = response.replaceAll("<think>[\\s\\S]*?</think>", "");
-        
-        // 移除可能的残留标签（如果标签不配对）
-        filtered = filtered.replaceAll("<think>[\\s\\S]*", "");
-        filtered = filtered.replaceAll("[\\s\\S]*</think>", "");
-        
+        String filtered = response.replaceAll("<thinking>[\\s\\S]*?</thinking>", "");
+        LoggerUtil.logExec(Level.INFO, "过滤后的内容\n" + filtered.trim());
         // 返回清理后的响应
         return filtered.trim();
+    }
+
+    /*
+        * 过滤JSON标记
+        * @param response LLM响应内容
+        * 去掉里面的 ```json 和 ``` 标签
+     */
+    private static String filiterJsonMark(String response) {
+        if (response == null) return null;
+        var filtered = response.replaceFirst("^```(json)?", "").replaceFirst("```\\s*$$", "");
+        return filtered;
     }
     
     /**
@@ -722,6 +729,7 @@ public class BugVerifyAgent extends Agent {
     private List<String> extractJsonArrayFromField(String json, String fieldName) {
         // 先过滤掉思维链标签
         json = filterThinkingChain(json);
+//        json = string2json(json);
         
         List<String> result = new ArrayList<>();
         try {
@@ -742,28 +750,79 @@ public class BugVerifyAgent extends Agent {
     }
     
     /**
-     * 从JSON中提取对象数组
+     * 使用LLM提取并格式化字符串中的JSON内容
+     * @param input 包含JSON的原始字符串
+     * @return 格式化后的JSON字符串，如果失败则返回null或原始输入
      */
-    public static List<String> extractJsonObjectArrayFromField(String json, String fieldName) {
-        // 先过滤掉思维链标签
-        json = filterThinkingChain(json);
-        
-        List<String> result = new ArrayList<>();
+    private String string2json(String input) {
+        if (input == null || input.trim().isEmpty()) {
+            return input;
+        }
+        // 先尝试直接解析，如果已经是合法JSON，则直接返回
         try {
             ObjectMapper objectMapper = new ObjectMapper();
-            JsonNode rootNode = objectMapper.readTree(json);
-            JsonNode arrayNode = rootNode.path(fieldName);
-
-            if (arrayNode.isArray()) {
-                for (JsonNode node : arrayNode) {
-                    result.add(node.toString().trim());
-                }
-            }
-        } catch (Exception e) {
-            LoggerUtil.logExec(Level.WARNING, "JSON对象数组提取失败: " + e.getMessage());
+            objectMapper.readTree(input.trim());
+            LoggerUtil.logExec(Level.FINE, "输入已经是合法JSON，直接返回");
+            return input.trim(); // Already valid JSON
+        } catch (IOException e) {
+            // Not valid JSON, proceed with LLM formatting
+            LoggerUtil.logExec(Level.FINE, "输入不是合法JSON，尝试使用LLM提取和格式化");
         }
 
-        return result;
+        String prompt = """
+                从以下文本中提取唯一的、完整的 JSON 对象或数组。
+                严格只返回提取到的 JSON 内容，不要包含任何解释、代码标记（例如 ```json ```）或其他文本。
+                确保输出是一个语法完全正确的 JSON 结构。
+
+                Example Output:
+                {
+                    "hypotheses": [
+                        {
+                            "id": "H1",
+                            "description": "JDK在MessageDigest.getInstance中使用传入的算法名称的大小写作为getAlgorithm()的返回值，而非标准化为大写形式。",
+                            "category": "JDK_BUG",
+                            "rationale": "测试失败显示实际算法名称为小写的'sha'，而预期为大写的'SHA'。若JDK未正确处理算法名称的大小写规范化，导致返回实例的算法名称与传入参数一致而非标准名称，则属于实现错误。",
+                            "verificationCode": "MessageDigest md = MessageDigest.getInstance(\"sha\");\nSystem.out.println(md.getAlgorithm()); // 观察输出是否为'SHA'"
+                        },
+                        {
+                            "id": "H2",
+                            "description": "测试用例错误地假设getAlgorithm()返回的算法名称必须为大写，而API规范允许提供者返回任意大小写形式。",
+                            "category": "TEST_ERROR",
+                            "rationale": "Java API文档未明确要求getAlgorithm()必须返回大写名称，测试用例对大小写的严格校验可能不符合规范。若提供者返回小写名称是合法的，则测试用例存在逻辑错误。",
+                            "verificationCode": "检查javadoc中MessageDigest.getAlgorithm()的规范，确认返回值是否保证标准化大小写。"
+                        },
+                        {
+                            "id": "H3",
+                            "description": "SUN提供者在特定JDK版本中将'SHA'算法注册为小写名称，导致getAlgorithm()返回'sha'。",
+                            "category": "ENVIRONMENT_ISSUE",
+                            "rationale": "若测试使用的安全提供者内部注册的算法名称实际为小写（如\"sha\"），则测试预期的大写形式'SHA'不成立，需检查提供者的注册配置。",
+                            "verificationCode": "Provider p = Security.getProvider(\"SUN\");\nSystem.out.println(p.getService(\"MessageDigest\", \"SHA\")); // 查看注册的算法名称"
+                        }
+                    ]
+                }
+
+                请直接输出提取的 JSON:
+                """.formatted(input);
+
+        try {
+            // 使用 llm_json 模型来确保返回的是 JSON 格式
+            String jsonOutput = llm_json.messageCompletion(prompt);
+
+            // 再次验证LLM返回的是否是合法JSON
+            try {
+                 ObjectMapper objectMapper = new ObjectMapper();
+                 objectMapper.readTree(jsonOutput);
+                 LoggerUtil.logExec(Level.INFO, "LLM成功返回合法JSON");
+                 return jsonOutput;
+            } catch (IOException validationError) {
+                 LoggerUtil.logExec(Level.WARNING, "LLM返回的不是合法JSON: " + validationError.getMessage() + "\n返回内容:\n" + jsonOutput);
+                 // 返回原始输入或null作为后备
+                 return null;
+            }
+        } catch (Exception e) {
+            LoggerUtil.logExec(Level.SEVERE, "调用LLM进行JSON格式化失败: " + e.getMessage());
+            return null; // Indicate failure
+        }
     }
     
     /**
@@ -993,5 +1052,46 @@ public class BugVerifyAgent extends Agent {
     
     public void close(){
         webTool.close();
+    }
+
+    /**
+     * 从JSON中提取对象数组
+     */
+    public static List<String> extractJsonObjectArrayFromField(String json, String fieldName) {
+        // 先过滤掉思维链标签
+        json = filterThinkingChain(json);
+
+        LoggerUtil.logExec(Level.INFO,"json: " + json);
+        List<String> result = new ArrayList<>();
+        try {
+            // 注意：string2json 不是静态方法，需要在调用它的地方实例化BugVerifyAgent
+            // 或者将string2json改为静态，并传入llm_json实例。
+            // 这里假设在 BugVerifyAgent 实例方法中调用，所以可以访问 string2json
+            // 如果是在静态方法如 main 或 verifyBugsFromLog 中需要此功能，需要调整。
+
+            // ObjectMapper 用于解析最终的 JSON
+            ObjectMapper objectMapper = new ObjectMapper();
+            JsonNode rootNode = objectMapper.readTree(json); // 直接解析输入的json字符串
+            JsonNode arrayNode = rootNode.path(fieldName);
+
+            if (arrayNode.isArray()) {
+                for (JsonNode node : arrayNode) {
+                    result.add(node.toString().trim());
+                }
+            } else {
+                 LoggerUtil.logExec(Level.WARNING, "字段 '" + fieldName + "' 不是一个数组或未找到.");
+            }
+        } catch (Exception e) {
+            // 如果直接解析失败，这里可以考虑调用 string2json (如果适用且能获取实例)
+            // 但目前的逻辑是假设输入已经是接近JSON的格式
+            LoggerUtil.logExec(Level.WARNING, "JSON对象数组提取失败（直接解析）: " + e.getMessage());
+            // 可以在这里添加调用 string2json 的逻辑作为后备，但这会改变方法预期
+            // 例如:
+            // String cleanedJson = new BugVerifyAgent(null, null).string2json(json); // 需要处理构造函数
+            // if (cleanedJson != null) { /* retry parsing cleanedJson */ }
+
+        }
+        LoggerUtil.logExec(Level.INFO,"result: " + result);
+        return result;
     }
 }
