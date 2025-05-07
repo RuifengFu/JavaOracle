@@ -703,48 +703,51 @@ public class BugVerifyAgent extends Agent {
     private String extractJsonFieldValue(String json, String fieldName) {
         // 先过滤掉思维链标签
         json = filterThinkingChain(json);
-        
+        if (json == null || json.trim().isEmpty()) {
+            return null;
+        }
+
         try {
-            Pattern pattern = Pattern.compile("\"" + fieldName + "\"\\s*:\\s*\"([^\"]*)\"");
-            Matcher matcher = pattern.matcher(json);
-            if (matcher.find()) {
-                return matcher.group(1);
+            ObjectMapper objectMapper = new ObjectMapper();
+            JsonNode rootNode = objectMapper.readTree(json);
+            JsonNode fieldNode = rootNode.path(fieldName);
+
+            if (!fieldNode.isMissingNode()) {
+                // 如果是文本节点，直接返回文本值；否则返回节点的字符串表示
+                return fieldNode.isValueNode() ? fieldNode.asText() : fieldNode.toString();
             }
-            
-            // 尝试匹配非字符串类型值（如数字、布尔值）
-            pattern = Pattern.compile("\"" + fieldName + "\"\\s*:\\s*([^,\\}\\]]+)");
-            matcher = pattern.matcher(json);
-            if (matcher.find()) {
-                return matcher.group(1).trim();
-            }
-        } catch (Exception e) {
-            LoggerUtil.logExec(Level.WARNING, "JSON字段提取失败: " + e.getMessage());
+        } catch (IOException e) {
+            LoggerUtil.logExec(Level.WARNING, "JSON字段提取失败 (" + fieldName + "): " + e.getMessage() + "\nJSON: " + json);
         }
         return null;
     }
     
     /**
-     * 从JSON中提取数组
+     * 从JSON中提取字符串数组
      */
     private List<String> extractJsonArrayFromField(String json, String fieldName) {
         // 先过滤掉思维链标签
         json = filterThinkingChain(json);
-//        json = string2json(json);
-        
+        if (json == null || json.trim().isEmpty()) {
+            return Collections.emptyList();
+        }
+
         List<String> result = new ArrayList<>();
         try {
-            Pattern pattern = Pattern.compile("\"" + fieldName + "\"\\s*:\\s*\\[(.*?)\\]", Pattern.DOTALL);
-            Matcher matcher = pattern.matcher(json);
-            if (matcher.find()) {
-                String arrayContent = matcher.group(1);
-                Pattern itemPattern = Pattern.compile("\"(.*?)\"");
-                Matcher itemMatcher = itemPattern.matcher(arrayContent);
-                while (itemMatcher.find()) {
-                    result.add(itemMatcher.group(1));
+            ObjectMapper objectMapper = new ObjectMapper();
+            JsonNode rootNode = objectMapper.readTree(json);
+            JsonNode arrayNode = rootNode.path(fieldName);
+
+            if (arrayNode.isArray()) {
+                for (JsonNode elementNode : arrayNode) {
+                    // 提取数组中每个元素的值作为字符串
+                    result.add(elementNode.asText());
                 }
+            } else {
+                LoggerUtil.logExec(Level.WARNING, "JSON字段 '" + fieldName + "' 不是一个数组或未找到。\nJSON: " + json);
             }
-        } catch (Exception e) {
-            LoggerUtil.logExec(Level.WARNING, "JSON数组提取失败: " + e.getMessage());
+        } catch (IOException e) {
+            LoggerUtil.logExec(Level.WARNING, "JSON数组提取失败 (" + fieldName + "): " + e.getMessage() + "\nJSON: " + json);
         }
         return result;
     }
@@ -1060,15 +1063,13 @@ public class BugVerifyAgent extends Agent {
     public static List<String> extractJsonObjectArrayFromField(String json, String fieldName) {
         // 先过滤掉思维链标签
         json = filterThinkingChain(json);
+        if (json == null || json.trim().isEmpty()) {
+            return Collections.emptyList();
+        }
 
-        LoggerUtil.logExec(Level.INFO,"json: " + json);
+        LoggerUtil.logExec(Level.INFO,"Attempting to extract JSON object array for field: " + fieldName + "\nInput JSON preview: " + (json.length() > 100 ? json.substring(0, 100) + "..." : json));
         List<String> result = new ArrayList<>();
         try {
-            // 注意：string2json 不是静态方法，需要在调用它的地方实例化BugVerifyAgent
-            // 或者将string2json改为静态，并传入llm_json实例。
-            // 这里假设在 BugVerifyAgent 实例方法中调用，所以可以访问 string2json
-            // 如果是在静态方法如 main 或 verifyBugsFromLog 中需要此功能，需要调整。
-
             // ObjectMapper 用于解析最终的 JSON
             ObjectMapper objectMapper = new ObjectMapper();
             JsonNode rootNode = objectMapper.readTree(json); // 直接解析输入的json字符串
@@ -1076,22 +1077,21 @@ public class BugVerifyAgent extends Agent {
 
             if (arrayNode.isArray()) {
                 for (JsonNode node : arrayNode) {
+                    // 将每个对象节点转换为其字符串表示形式
                     result.add(node.toString().trim());
                 }
+                LoggerUtil.logExec(Level.INFO, "Successfully extracted " + result.size() + " objects from array field '" + fieldName + "'.");
             } else {
-                 LoggerUtil.logExec(Level.WARNING, "字段 '" + fieldName + "' 不是一个数组或未找到.");
+                 LoggerUtil.logExec(Level.WARNING, "Field '" + fieldName + "' is not an array or was not found in the JSON.");
             }
-        } catch (Exception e) {
-            // 如果直接解析失败，这里可以考虑调用 string2json (如果适用且能获取实例)
-            // 但目前的逻辑是假设输入已经是接近JSON的格式
-            LoggerUtil.logExec(Level.WARNING, "JSON对象数组提取失败（直接解析）: " + e.getMessage());
+        } catch (IOException e) { // Changed Exception to IOException for specificity
+            LoggerUtil.logExec(Level.WARNING, "Failed to parse JSON or extract object array field '" + fieldName + "': " + e.getMessage());
             // 可以在这里添加调用 string2json 的逻辑作为后备，但这会改变方法预期
             // 例如:
             // String cleanedJson = new BugVerifyAgent(null, null).string2json(json); // 需要处理构造函数
             // if (cleanedJson != null) { /* retry parsing cleanedJson */ }
-
         }
-        LoggerUtil.logExec(Level.INFO,"result: " + result);
+        LoggerUtil.logExec(Level.FINE,"Resulting object strings count: " + result.size()); // Changed level to FINE for less verbose default logging
         return result;
     }
 }
