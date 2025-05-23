@@ -6,6 +6,8 @@ import org.jsoup.nodes.Document;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
 
 public class ApiDocProcessor {
     private final String baseDocPath;
@@ -16,21 +18,18 @@ public class ApiDocProcessor {
         this.extractor = new APISignatureExtractor();
     }
 
-    public String processApiDocs(File file) throws IOException {
-        StringBuilder sb = new StringBuilder();
+    public Map<String, String> processApiDocs(File file) throws IOException {
+        Map<String, String> map = new HashMap<>();
         extractor.extractSignatures(file.getPath()).forEach(signature -> {
             try {
                 Document doc = HtmlParser.getDocument(baseDocPath,
                         signature.getPackageName(),
                         signature.getClassName());
-                sb.append(signature.getSignature())
-                        .append("\n")
-                        .append(HtmlParser.getMethodDetails(doc).get(signature.getMethodName()))
-                        .append("\n");
+                map.put(signature.getSignature(), HtmlParser.getMethodDetails(doc).get(signature.getMethodName()));
             } catch (IOException e) {
                 // Handle exception
             }
         });
-        return sb.toString();
+        return map;
     }
 }

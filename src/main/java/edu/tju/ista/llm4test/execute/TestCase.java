@@ -10,6 +10,7 @@ import edu.tju.ista.llm4test.utils.LoggerUtil;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.ref.WeakReference;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -18,9 +19,12 @@ import java.util.logging.Level;
 
 public class TestCase {
 
+    public String name;
+    public String sourceCode;
     public File originFile;
     public String originTestCase;
-    public String apiDocs;
+    public Map<String, String> apiDocMap; // <sign, doc>
+    private String apiDoc;
 
     public File file;
     public TestResult result;
@@ -29,11 +33,12 @@ public class TestCase {
 
     public TestCase(File file){
         this.file = file;
+        this.name = file.getName().split(".")[0];
         this.result = new TestResult(TestResultKind.UNKNOWN);
     }
 
     public TestCase(File file, TestResult result){
-        this.file = file;
+        this(file);
         this.result = result;
     }
 
@@ -48,6 +53,21 @@ public class TestCase {
         } catch (IOException e) {
             this.originTestCase = "";
         }
+    }
+
+    public String getSourceCode() {
+        try {
+            this.sourceCode = Files.readString(file.toPath());
+        } catch (IOException e){
+            this.sourceCode = "";
+        }
+        return this.sourceCode;
+    }
+
+    public void updateApiDoc() {
+        StringBuilder sb = new StringBuilder();
+        apiDocMap.forEach((k, v) -> {sb.append(k).append("\n").append(v).append("\n--------------\n");});
+        apiDoc = sb.toString();
     }
 
     public File getFile() {
@@ -74,8 +94,9 @@ public class TestCase {
 //        verifyTestFail();mv *
     }
 
-    public void setApiDocs(String apiDocs) {
-        this.apiDocs = apiDocs;
+    public void setApiDocMap(Map<String, String> apiDocMap) {
+        this.apiDocMap = apiDocMap;
+        updateApiDoc();
     }
 
     public void verifyTestFail() {
@@ -88,7 +109,7 @@ public class TestCase {
             Map<String, Object> dataModel = new HashMap<>();
             dataModel.put("testcase", testcase);
             dataModel.put("testOutput", result.toString());
-            dataModel.put("apiDocs", apiDocs);
+            dataModel.put("apiDocs", apiDoc);
 
             String prompt = PromptGen.generatePrompt("RootCause", dataModel);
             ArrayList<FuncTool> tools = new ArrayList<>();
@@ -146,7 +167,7 @@ public class TestCase {
             dataModel.put("testcase", getTestcaseWithLineNumber());
             dataModel.put("originCase", originTestCase);
             dataModel.put("testOutput", result.toString());
-            dataModel.put("apiDocs", apiDocs);
+            dataModel.put("apiDocs", apiDoc);
             dataModel.put("rootCause", verifyMessage);
             String prompt = PromptGen.generatePrompt("FixTestCase", dataModel);
             String text = OpenAI.R1.messageCompletion(prompt);
@@ -166,7 +187,7 @@ public class TestCase {
         try {
             Map<String, Object> dataModel = new HashMap<>();
             dataModel.put("testcase", getTestcaseWithLineNumber());
-            dataModel.put("apiDocs", apiDocs);
+            dataModel.put("apiDocs", apiDoc);
             String prompt = PromptGen.generatePrompt("EnhanceTestCase", dataModel);
             String text = OpenAI.R1.messageCompletion(prompt);
             ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);

@@ -1,12 +1,10 @@
 package edu.tju.ista.llm4test;
 
 
+import edu.tju.ista.llm4test.config.ConfigUtil;
 import edu.tju.ista.llm4test.execute.*;
 import edu.tju.ista.llm4test.llm.OpenAI;
 import edu.tju.ista.llm4test.llm.agents.BugVerifyAgent;
-import edu.tju.ista.llm4test.llm.tools.JtregExecuteTool;
-import edu.tju.ista.llm4test.llm.tools.ToolResponse;
-import edu.tju.ista.llm4test.prompt.PromptGen;
 import edu.tju.ista.llm4test.utils.*;
 
 import java.io.File;
@@ -22,26 +20,7 @@ import java.util.logging.Level;
 import java.util.stream.Collectors;
 
 
-class TestStatistics {
-    private final ConcurrentEnumCounter<TestResultKind> counter = new ConcurrentEnumCounter<>(TestResultKind.class);
 
-    public void recordResult(TestResultKind result) {
-        counter.increment(result);
-    }
-
-    public void logStatistics() {
-        LoggerUtil.logResult(Level.INFO,
-                "Success: " + counter.get(TestResultKind.SUCCESS) +
-//                        "\nCompile Fail: " + counter.get(TestResultKind.COMPILE_FAIL) +
-//                        "\nTest Fail: " + counter.get(TestResultKind.TEST_FAIL) +
-                        "\nVerified Test Fail: " + counter.get(TestResultKind.VERIFIED_BUG) +
-                        "\nUnverified Test Fail " + counter.get(TestResultKind.MAYBE_TEST_FAIL) +
-                        "\nDiff: " + counter.get(TestResultKind.DIFF) +
-                        "\nTimeout: " + (counter.get(TestResultKind.COMPILE_TIMEOUT) + counter.get(TestResultKind.EXECUTE_TIMEOUT)) +
-                        "\nUnknown Fail: " + counter.get(TestResultKind.UNKNOWN) +
-                        "\nPass: " + counter.get(TestResultKind.PASS));
-    }
-}
 
 public class Main {
     private static final String TEMPLATE_MODE = "SpecTest";
@@ -98,8 +77,8 @@ public class Main {
         if (!ResultDir.exists()) {
             ResultDir.mkdirs();
         }
-        String baseDocPath = "JavaDoc/docs/api/java.base";
-        String suitePath = "jdk17u-dev/test/jdk/" + testPath; // this is the true suitePath
+        String baseDocPath = ConfigUtil.get("baseDocPath");
+        String suitePath = ConfigUtil.get("suiteBasePath") + testPath; // this is the true suitePath
         Main instance = new Main(jarPath, ResultDir, baseDocPath, suitePath);
         instance.runTestSuiteParallel2(Path.of("jdk/java/util/ArrayList"));
     }
@@ -168,7 +147,7 @@ public class Main {
         List<File> files = testCases.stream().map(File::new).toList();
         System.out.println(files);
         System.out.println("Total files: " + files.size());
-        int threadCount = Math.min(Runtime.getRuntime().availableProcessors() * 2, files.size());
+        int threadCount = Math.min(Runtime.getRuntime().availableProcessors() * 3, files.size());
 //        threadCount = 1;
         ExecutorService executor = Executors.newFixedThreadPool(threadCount);
         CountDownLatch latch = new CountDownLatch(files.size());
@@ -213,8 +192,8 @@ public class Main {
                 statistics.recordResult(TestResultKind.PASS);
                 return new TestResult(TestResultKind.PASS);
             }
-            String apiDocs = apiDocProcessor.processApiDocs(file);
-            testCase.setApiDocs(apiDocs);
+            Map<String, String> apiDocs = apiDocProcessor.processApiDocs(file);
+            testCase.setApiDocMap(apiDocs);
 
             testCase.enhance();
             testCase.verifyTestFail();

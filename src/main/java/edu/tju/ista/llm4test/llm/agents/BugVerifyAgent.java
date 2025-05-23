@@ -2,6 +2,7 @@ package edu.tju.ista.llm4test.llm.agents;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import edu.tju.ista.llm4test.execute.TestCase;
 import edu.tju.ista.llm4test.llm.OpenAI;
 import edu.tju.ista.llm4test.llm.tools.*;
 import edu.tju.ista.llm4test.execute.TestResult;
@@ -56,7 +57,8 @@ public class BugVerifyAgent extends Agent {
     private final OpenAI llm_json;
     
     // 分析状态
-    private String testCase;
+    private TestCase testCase;
+    private String testCode;
     private String testOutput;
     private String initialAnalysis;
     private Map<String, Object> collectedInfo = new HashMap<>();
@@ -101,12 +103,20 @@ public class BugVerifyAgent extends Agent {
             this.bugReportPath = bugReportPath;
         }
     }
-    
+
+
+    public void setTestData(TestCase testCase) {
+        this.testCase = testCase;
+        this.testCode = testCase.getSourceCode();
+        this.testOutput = testCase.getResult().getOutput();
+        this.initialAnalysis = testCase.verifyMessage;
+    }
+
     /**
      * 设置测试用例和输出
      */
     public void setTestData(String testCase, String testOutput, String initialAnalysis) {
-        this.testCase = testCase;
+        this.testCode = testCase;
         this.testOutput = testOutput;
         this.initialAnalysis = initialAnalysis;
         
@@ -120,7 +130,7 @@ public class BugVerifyAgent extends Agent {
     private void createVerifyContextFolder() {
         try {
             // 提取测试类名作为文件夹名称
-            testCaseName = extractClassNameFromCode(testCase);
+            testCaseName = extractClassNameFromCode(testCode);
             if (testCaseName == null) {
                 testCaseName = "UnknownTest";
             }
@@ -135,7 +145,7 @@ public class BugVerifyAgent extends Agent {
             Files.createDirectories(verifyContextPath);
             
             // 保存测试用例和输出
-            saveToFile(testCasePath.resolve(testCaseName + ".java").toString(), testCase);
+            saveToFile(testCasePath.resolve(testCaseName + ".java").toString(), testCode);
             saveToFile(verifyContextPath.resolve("output.txt").toString(), testOutput);
             if (initialAnalysis != null) {
                 saveToFile(verifyContextPath.resolve("initial_analysis.txt").toString(), initialAnalysis);
@@ -264,7 +274,7 @@ public class BugVerifyAgent extends Agent {
                   "errorLocation": "错误可能发生的代码部分",
                   "queries": ["需要查询的信息1", "需要查询的信息2"]
                 }
-                """.formatted(testCase, testOutput, initialAnalysis != null ? initialAnalysis : "无初步分析");
+                """.formatted(testCode, testOutput, initialAnalysis != null ? initialAnalysis : "无初步分析");
         
         String response = llm.messageCompletion(prompt);
         return filterThinkingChain(response);
@@ -380,21 +390,21 @@ public class BugVerifyAgent extends Agent {
     private void formHypotheses() {
         // 构建提示，包含所有收集到的信息
         StringBuilder infoBuilder = new StringBuilder();
-        for (Map.Entry<String, Object> entry : collectedInfo.entrySet()) {
-            if (entry.getValue() instanceof String) {
-                String content = (String) entry.getValue();
-                // 限制每项内容的长度，避免提示过长
-                if (content.length() > 30000) {
-                    content = content.substring(0, 30000) + "...(内容已截断)";
-                }
-                if (infoBuilder.length() + content.length() > 100000) {
-                    break;
-                }
-                infoBuilder.append("<").append(entry.getKey()).append(">\n");
-                infoBuilder.append(content).append("\n");
-                infoBuilder.append("</").append(entry.getKey()).append(">\n\n");
-            }
-        }
+//        for (Map.Entry<String, Object> entry : collectedInfo.entrySet()) {
+//            if (entry.getValue() instanceof String) {
+//                String content = (String) entry.getValue();
+//                // 限制每项内容的长度，避免提示过长
+//                if (content.length() > 30000) {
+//                    content = content.substring(0, 30000) + "...(内容已截断)";
+//                }
+//                if (infoBuilder.length() + content.length() > 100000) {
+//                    break;
+//                }
+//                infoBuilder.append("<").append(entry.getKey()).append(">\n");
+//                infoBuilder.append(content).append("\n");
+//                infoBuilder.append("</").append(entry.getKey()).append(">\n\n");
+//            }
+//        }
         
         String prompt = """
                 你是一位Java Bug分析专家。基于测试用例、测试输出和收集到的信息，形成关于问题原因的假设。
@@ -436,7 +446,7 @@ public class BugVerifyAgent extends Agent {
                     ...
                   ]
                 }
-                """.formatted(testCase, testOutput, infoBuilder.toString());
+                """.formatted(testCode, testOutput, infoBuilder.toString());
         
         String response = llm.messageCompletion(prompt);
         hypotheses = extractJsonObjectArrayFromField(response, "hypotheses");
@@ -690,7 +700,7 @@ public class BugVerifyAgent extends Agent {
                     """;
         }
         
-        String prompt = reportTemplate.formatted(testCase, testOutput, 
+        String prompt = reportTemplate.formatted(testCode, testOutput,
                 hypothesesBuilder.toString(), resultsBuilder.toString(), infoSourceBuilder.toString());
         
         conclusion = llm.messageCompletion(prompt);
