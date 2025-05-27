@@ -1,0 +1,177 @@
+Application class：
+    import java.util.GregorianCalendar;
+    import static java.util.GregorianCalendar.*;
+
+    /* Application logic */
+    public class CalendarLogic {
+        // Returns true iff cal is in a leap year
+        public static boolean isLeapYear(GregorianCalendar cal) {
+            int year = cal.get(YEAR);
+            if (year % 4 == 0) {
+                if (year % 100 == 0) {
+                    return false;
+                }
+                return true;
+            }
+            return false;
+        }
+
+        // Returns either of -1, 0, 1 depending on whether c1 is <, =, > than c2
+        public static int compare(GregorianCalendar c1, GregorianCalendar c2) {
+            int cmp;
+            cmp = Integer.compare(c1.get(YEAR), c2.get(YEAR));
+            if (cmp == 0) {
+                cmp = Integer.compare(c1.get(MONTH), c2.get(MONTH));
+                if (cmp == 0) {
+                    cmp = Integer.compare(c1.get(DAY_OF_MONTH), c2.get(DAY_OF_MONTH));
+                    if (cmp == 0) {
+                        cmp = Integer.compare(c1.get(HOUR), c2.get(HOUR));
+                        if (cmp == 0) {
+                            cmp = Integer.compare(c1.get(MINUTE), c2.get(MINUTE));
+                            if (cmp == 0) {
+                                cmp = Integer.compare(c1.get(SECOND), c2.get(SECOND));
+                                if (cmp == 0) {
+                                    cmp = Integer.compare(c1.get(MILLISECOND), c2.get(MILLISECOND));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            return cmp;
+        }
+    }
+
+    Step 1: Write a test driver
+    Here is a first draft of a JUnit-style test driver that verifies the leap-year calculation logic. Save the following in a file called CalendarTest.java.
+
+
+    import java.util.*;
+    import static java.util.GregorianCalendar.*;
+    import static org.junit.Assert.*;
+    import static org.junit.Assume.*;
+
+    public class CalendarTest {
+
+        public void testLeapYear(GregorianCalendar cal) {
+            // Assume that the date is Feb 29
+            assumeTrue(cal.get(MONTH) == FEBRUARY);
+            assumeTrue(cal.get(DAY_OF_MONTH) == 29);
+
+            // Under this assumption, validate leap year rules
+            assertTrue(cal.get(YEAR) + " should be a leap year", CalendarLogic.isLeapYear(cal));
+        }
+
+        public void testCompare(List<GregorianCalendar> cals) {
+            // Sort list of calendar objects using our custom comparator function
+            Collections.sort(cals, CalendarLogic::compare);
+
+            // If they have an ordering, then the sort should succeed
+            for (int i = 1; i < cals.size(); i++) {
+                Calendar c1 = cals.get(i-1);
+                Calendar c2 = cals.get(i);
+                assumeFalse(c1.equals(c2)); // Assume that we have distinct dates
+                assertTrue(c1 + " should be before " + c2, c1.before(c2));  // Then c1 < c2
+            }
+        }
+    }
+
+    The method testLeapYear() checks the following property: assuming that an input GregorianCalendar represents the date February 29, then it must belong to a year that is divisible by 4, but not divisible by 100. Astute readers among you would notice that this logic is wrong. We expect an AssertionError to be thrown when provided with a valid counter-example. However, we need something that can generate random instances of GregorianCalendar.
+
+    Similarly, the test method testCompare() sorts an input list of calendar objects using the comparator defined in CalendarLogic. It then asserts that every consecutive pair of items in the sorted list is indeed ordered by the before() relation. Again, there is a bug lurking in the CalendarLogic.compare method, which is only revealed by corner case inputs.
+
+    Step 2: Write an input generator
+    JQF leverages the junit-quickcheck framework to produce structured inputs. In order to generate inputs for type T, we need a class that extends Generator<T>. Such a subclass need only provide a method that can produce random instances of T using a provided source of randomness. The following is our generator for GregorianCalendar objects, in a file called CalendarGenerator.java:
+
+    import java.util.GregorianCalendar;
+    import java.util.TimeZone;
+
+    import com.pholser.junit.quickcheck.generator.GenerationStatus;
+    import com.pholser.junit.quickcheck.generator.Generator;
+    import com.pholser.junit.quickcheck.random.SourceOfRandomness;
+
+    import static java.util.GregorianCalendar.*;
+
+    public class CalendarGenerator extends Generator<GregorianCalendar> {
+
+        public CalendarGenerator() {
+            super(GregorianCalendar.class); // Register the type of objects that we can create
+        }
+
+        // This method is invoked to generate a single test case
+        @Override
+        public GregorianCalendar generate(SourceOfRandomness random, GenerationStatus __ignore__) {
+            // Initialize a calendar object
+            GregorianCalendar cal = new GregorianCalendar();
+            cal.setLenient(true); // This allows invalid dates to silently wrap (e.g. Apr 31 ==> May 1).
+
+            // Randomly pick a day, month, and year
+            cal.set(DAY_OF_MONTH, random.nextInt(31) + 1); // a number between 1 and 31 inclusive
+            cal.set(MONTH, random.nextInt(12) + 1); // a number between 1 and 12 inclusive
+            cal.set(YEAR, random.nextInt(cal.getMinimum(YEAR), cal.getMaximum(YEAR)));
+
+            // Optionally also pick a time
+            if (random.nextBoolean()) {
+                cal.set(HOUR, random.nextInt(24));
+                cal.set(MINUTE, random.nextInt(60));
+                cal.set(SECOND, random.nextInt(60));
+            }
+
+            // Let's set a timezone
+            // First, get supported timezone IDs (e.g. "America/Los_Angeles")
+            String[] allTzIds = TimeZone.getAvailableIDs();
+
+            // Next, choose one randomly from the array
+            String tzId = random.choose(allTzIds);
+            TimeZone tz = TimeZone.getTimeZone(tzId);
+
+            // Assign it to the calendar
+            cal.setTimeZone(tz);
+
+    	// Return the randomly generated calendar object
+            return cal;
+        }
+    }
+    The main entry point to the generator is the generate() method. This method takes two parameters: a pseudo-random-number generator and a status object. For now, let's ignore the latter as we do not generally need to use it. The SourceOfRandomness is a high-level API for generating random values and making random choices. In the generate() method, we make various random choices to construct and return a randomly generated instance of GregorianCalendar.
+
+    Step 3: Annotate test driver
+    Now that we have a class that can generate random instances of GregorianCalendar, we can specify in our test driver that we want to use this particular generator to create our inputs. To do this, we use the @From(CalendarGenerator.class) annotation on the cal parameter to our test method testLeapYear(). Check out the junit-quickcheck documentation for advanced ways of composing generators (e.g. automatically synthesizing generators from constructors or public fields).
+
+    We also need a couple of other annotations to make this a test driver that JQF can fuzz. First, we need to annotate the test class with @RunWith(JQF.class). This tells JUnit that we are using the JQF engine to invoke test methods. Second, we must annotate the test method with @Fuzz. This helps JQF find the methods in the test class for which it can generate inputs. Here is our updated test driver CalendarTest.java with the @RunWith, @Fuzz, and @From annotations applied:
+    import java.util.*;
+    import static java.util.GregorianCalendar.*;
+    import static org.junit.Assert.*;
+    import static org.junit.Assume.*;
+
+    import org.junit.runner.RunWith;
+    import com.pholser.junit.quickcheck.*;
+    import com.pholser.junit.quickcheck.generator.*;
+    import edu.berkeley.cs.jqf.fuzz.*;
+
+    @RunWith(JQF.class)
+    public class CalendarTest {
+
+        @Fuzz
+        public void testLeapYear(@From(CalendarGenerator.class) GregorianCalendar cal) {
+            // Assume that the date is Feb 29
+            assumeTrue(cal.get(MONTH) == FEBRUARY);
+            assumeTrue(cal.get(DAY_OF_MONTH) == 29);
+
+            // Under this assumption, validate leap year rules
+            assertTrue(cal.get(YEAR) + " should be a leap year", CalendarLogic.isLeapYear(cal));
+        }
+
+        @Fuzz
+        public void testCompare(@Size(max=100) List<@From(CalendarGenerator.class) GregorianCalendar> cals) {
+            // Sort list of calendar objects using our custom comparator function
+            Collections.sort(cals, CalendarLogic::compare);
+
+            // If they have an ordering, then the sort should succeed
+            for (int i = 1; i < cals.size(); i++) {
+                Calendar c1 = cals.get(i-1);
+                Calendar c2 = cals.get(i);
+                assumeFalse(c1.equals(c2)); // Assume that we have distinct dates
+                assertTrue(c1 + " should be before " + c2, c1.before(c2));  // Then c1 < c2
+            }
+        }
+    } 

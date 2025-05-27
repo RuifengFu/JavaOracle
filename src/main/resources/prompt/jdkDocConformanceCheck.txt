@@ -1,0 +1,20 @@
+<analysis_context>
+    <api_signature>
+    ${api_signature}
+    </api_signature>
+    <api_documentation>
+    ${api_documentation}
+    </api_documentation>
+    <implementation_details>
+    ${api_source}
+    </implementation_details>
+</analysis_context>
+
+<Task>
+Check whether JDK method implementations potentially deviate from official JavaDoc
+</Task>
+
+<Requirements>
+1. Summarize your analysis into a single function call as the output.
+2. Ensure your analysis is accurate.
+</Requirements> 

@@ -1,0 +1,44 @@
+${THINKING_CLAUDE_PROMPT}
+
+<JML Examples>
+${JMLExample}
+</JML Examples>
+
+<TestCase>
+${testcase}
+</TestCase>
+
+<API Document>
+${apiDocs}
+</API Document>
+
+<Tasks>
+1. **Task 1**: Read the provided API document and write a JML-style specification for each method in the document. Ensure your specifications are accurate and correct.
+2. **Task 2**: Based on the JML specifications you wrote, enhance the provided test case by adding assertions to augment the test oracle. Ensure that:
+   - No assertion causes a false positive.
+   - Original assertions are preserved.
+   - New assertions are marked with the comment "Enhance Test Oracle by LLM".
+   - The test case remains in jtreg format and includes all necessary import statements to avoid compile errors.
+</Tasks>
+
+<Requirements>
+1. **Code Formatting**:
+   - Include all necessary import statements in the test case.
+   - Comment out all JML specifications in Java code blocks.
+   - Ensure the test case is free of compile errors.
+2. **Test Case Content**:
+   - Only include the enhanced test case in the final output.
+   - If the test case exceeds 4,000 tokens, output "failed" without further explanation.
+3. **Assertions**:
+   - Ensure all assertions are contextually correct, even if the JML specification is not.
+   - Mark all modifications with the comment "Enhance Test Oracle by LLM".
+4. **jtreg Format**:
+   - Retain jtreg format comments in the code, including test metadata such as:
+     ```
+     /*
+      * @test
+      * @bug 4160406 4705734 4707389 6358355 7032154
+      * @summary Tests for Float.parseFloat method
+      */
+     ```
+</Requirements> 

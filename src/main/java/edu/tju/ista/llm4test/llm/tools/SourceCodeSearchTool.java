@@ -16,10 +16,12 @@ import java.util.stream.Stream;
 
 /**
  * JDK源码检索工具 - 增强版
+ * 支持分析上下文指导、内容处理、缓存机制
  */
 public class SourceCodeSearchTool implements Tool<String> {
     private final String sourceRootPath;
     private final OpenAI llm;
+    private final ContentProcessor contentProcessor;
     private Map<String, Path> classPathCache = new HashMap<>();
     
     /**
@@ -29,6 +31,7 @@ public class SourceCodeSearchTool implements Tool<String> {
     public SourceCodeSearchTool(String sourceRootPath) {
         this.sourceRootPath = sourceRootPath;
         this.llm = OpenAI.R1;
+        this.contentProcessor = new ContentProcessor(sourceRootPath + "/source_cache");
     }
     
     @Override
@@ -43,9 +46,19 @@ public class SourceCodeSearchTool implements Tool<String> {
     
     @Override
     public ToolResponse<String> execute(String input) {
+        return executeWithContext(input, null);
+    }
+    
+    /**
+     * 执行带分析上下文的源码搜索
+     * @param input 搜索输入
+     * @param analysisContext 分析上下文，用于指导搜索和内容处理
+     * @return 处理后的源码内容
+     */
+    public ToolResponse<String> executeWithContext(String input, String analysisContext) {
         try {
             // 分析输入，确定搜索策略
-            SearchContext context = analyzeSearchInput(input);
+            SearchContext context = analyzeSearchInput(input, analysisContext);
             List<Path> foundFiles = new ArrayList<>();
             
             // 首先尝试精确查找类文件
@@ -100,31 +113,43 @@ public class SourceCodeSearchTool implements Tool<String> {
                 return ToolResponse.failure("未找到与'" + input + "'相关的源代码文件");
             }
             
-            // 读取源码内容
-            StringBuilder sourceContent = new StringBuilder();
+            // 处理源码内容
+            StringBuilder finalContent = new StringBuilder();
+            List<String> processedSources = new ArrayList<>();
+            
             for (Path file : foundFiles) {
                 try {
-                    String content = Files.readString(file);
-                    
-                    // 添加文件头，包含完整路径信息
+                    String rawContent = Files.readString(file);
                     String relativePath = getRelativePath(file);
-                    sourceContent.append("=== ").append(relativePath).append(" ===\n");
                     
-                    // 如果有目标方法，高亮显示
-                    if (context.getTargetMethod() != null) {
-                        content = highlightMethod(content, context.getTargetMethod());
+                    // 如果有分析上下文，使用ContentProcessor进行智能处理
+                    if (analysisContext != null && !analysisContext.trim().isEmpty()) {
+                        List<ContentProcessor.ProcessedContentChunk> chunks = 
+                            contentProcessor.processContent("source:" + relativePath, rawContent, analysisContext);
+                        
+                        if (!chunks.isEmpty()) {
+                            finalContent.append("=== ").append(relativePath).append(" (智能处理) ===\n\n");
+                            
+                            for (ContentProcessor.ProcessedContentChunk chunk : chunks) {
+                                finalContent.append(chunk.getFormattedContent()).append("\n");
+                            }
+                            
+                            processedSources.add(relativePath + " (处理后片段: " + chunks.size() + ")");
+                            LoggerUtil.logExec(Level.INFO, "源码智能处理: " + relativePath + 
+                                              " -> " + chunks.size() + " 个相关片段");
+                        }
+                    } else {
+                        // 无分析上下文时，进行基础处理
+                        finalContent.append("=== ").append(relativePath).append(" (基础处理) ===\n");
+                        String processedContent = processBasicSourceContent(rawContent, context);
+                        finalContent.append(processedContent).append("\n\n");
+                        
+                        processedSources.add(relativePath + " (基础处理)");
                     }
-                    
-                    // 如果有错误消息，高亮显示
-                    if (context.getErrorMessage() != null) {
-                        content = highlightText(content, context.getErrorMessage());
-                    }
-                    
-                    sourceContent.append(content).append("\n\n");
                     
                     // 限制返回的源码量
-                    if (sourceContent.length() > 50000) {
-                        sourceContent.append("...源码过多，已截断");
+                    if (finalContent.length() > 50000) {
+                        finalContent.append("...源码过多，已截断");
                         break;
                     }
                 } catch (IOException e) {
@@ -136,21 +161,23 @@ public class SourceCodeSearchTool implements Tool<String> {
             StringBuilder summary = new StringBuilder();
             summary.append("## 源码搜索摘要\n\n");
             summary.append("- **搜索输入**: ").append(input).append("\n");
+            summary.append("- **分析上下文**: ").append(analysisContext != null ? "已提供" : "未提供").append("\n");
             summary.append("- **目标类**: ").append(context.getTargetClass() != null ? context.getTargetClass() : "无").append("\n");
             if (context.getTargetMethod() != null) {
                 summary.append("- **目标方法**: ").append(context.getTargetMethod()).append("\n");
             }
             summary.append("- **找到的文件**: ").append(foundFiles.size()).append("个\n");
+            summary.append("- **处理的文件**: ").append(processedSources.size()).append("个\n");
             summary.append("- **文件列表**:\n");
-            for (Path file : foundFiles) {
-                summary.append("  - ").append(getRelativePath(file)).append("\n");
+            for (String source : processedSources) {
+                summary.append("  - ").append(source).append("\n");
             }
             summary.append("\n---\n\n");
             
             // 将摘要放在返回内容的前面
-            sourceContent.insert(0, summary.toString());
+            finalContent.insert(0, summary.toString());
             
-            return ToolResponse.success(sourceContent.toString());
+            return ToolResponse.success(finalContent.toString());
         } catch (Exception e) {
             LoggerUtil.logExec(Level.SEVERE, "源码搜索失败: " + e.getMessage());
             e.printStackTrace();
@@ -161,19 +188,25 @@ public class SourceCodeSearchTool implements Tool<String> {
     /**
      * 分析输入，确定搜索上下文
      */
-    private SearchContext analyzeSearchInput(String input) {
-        String prompt = String.format(
-                "你是Java源码分析专家。请从用户查询中提取关键信息，帮助精确定位源码。\n\n" +
-                "用户查询: %s\n\n" +
-                "请提供以下信息，JSON格式返回:\n" +
-                "1. targetClass: 用户想查找的具体类名，如java.util.HashMap或HashMap，无则null\n" +
-                "2. targetMethod: 用户想查找的方法，如put或size，无则null\n" +
-                "3. keywords: 查找源码的关键词列表，至少3个\n" +
-                "4. errorMessage: 可能的错误消息片段，无则null\n" +
-                "5. bugRelated: 是否与bug分析相关，true或false\n" +
-                "6. needBroadSearch: 是否需要宽泛搜索，true或false", input);
+    private SearchContext analyzeSearchInput(String input, String analysisContext) {
+        StringBuilder promptBuilder = new StringBuilder();
+        promptBuilder.append("你是Java源码分析专家。请从用户查询中提取关键信息，帮助精确定位源码。\n\n");
+        promptBuilder.append("用户查询: ").append(input).append("\n\n");
         
-        String response = llm.messageCompletion(prompt, 0.0);
+        if (analysisContext != null && !analysisContext.trim().isEmpty()) {
+            promptBuilder.append("分析上下文: ").append(analysisContext).append("\n\n");
+            promptBuilder.append("请特别关注上下文中提到的相关类、方法和问题。\n\n");
+        }
+        
+        promptBuilder.append("请提供以下信息，JSON格式返回:\n");
+        promptBuilder.append("1. targetClass: 用户想查找的具体类名，如java.util.HashMap或HashMap，无则null\n");
+        promptBuilder.append("2. targetMethod: 用户想查找的方法，如put或size，无则null\n");
+        promptBuilder.append("3. keywords: 查找源码的关键词列表，至少3个\n");
+        promptBuilder.append("4. errorMessage: 可能的错误消息片段，无则null\n");
+        promptBuilder.append("5. bugRelated: 是否与bug分析相关，true或false\n");
+        promptBuilder.append("6. needBroadSearch: 是否需要宽泛搜索，true或false\n");
+        
+        String response = llm.messageCompletion(promptBuilder.toString(), 0.0);
         
         // 解析LLM返回的JSON
         SearchContext context = new SearchContext();
@@ -546,6 +579,61 @@ public class SourceCodeSearchTool implements Tool<String> {
     }
     
     /**
+     * 基础源码内容处理（当没有分析上下文时）
+     */
+    private String processBasicSourceContent(String content, SearchContext context) {
+        // 高亮目标方法
+        if (context.getTargetMethod() != null) {
+            content = highlightMethod(content, context.getTargetMethod());
+        }
+        
+        // 高亮错误消息
+        if (context.getErrorMessage() != null) {
+            content = highlightText(content, context.getErrorMessage());
+        }
+        
+        // 高亮关键词
+        for (String keyword : context.getKeywords()) {
+            if (keyword.length() > 2) {
+                content = content.replaceAll(
+                    "(?i)(" + Pattern.quote(keyword) + ")", 
+                    "/* 【关键词】 */ $1 /* 【关键词结束】 */"
+                );
+            }
+        }
+        
+        // 限制长度
+        if (content.length() > 8000) {
+            // 尝试找到与关键词相关的代码段
+            String[] lines = content.split("\n");
+            StringBuilder relevantContent = new StringBuilder();
+            
+            for (String line : lines) {
+                boolean isRelevant = false;
+                for (String keyword : context.getKeywords()) {
+                    if (line.toLowerCase().contains(keyword.toLowerCase())) {
+                        isRelevant = true;
+                        break;
+                    }
+                }
+                
+                if (isRelevant) {
+                    relevantContent.append(line).append("\n");
+                    if (relevantContent.length() > 6000) break;
+                }
+            }
+            
+            if (relevantContent.length() > 0) {
+                return relevantContent.toString();
+            } else {
+                return content.substring(0, 6000) + "...";
+            }
+        }
+        
+        return content;
+    }
+    
+    /**
      * 高亮显示方法定义和使用
      */
     private String highlightMethod(String content, String methodName) {
@@ -677,6 +765,52 @@ public class SourceCodeSearchTool implements Tool<String> {
                 return super.add(element);
             }
             return false;
+        }
+    }
+    
+    /**
+     * 用于测试SourceCodeSearchTool功能的main方法
+     */
+    public static void main(String[] args) {
+        String sourceRoot = args.length > 0 ? args[0] : "/path/to/source";
+        
+        // 创建工具实例
+        SourceCodeSearchTool tool = new SourceCodeSearchTool(sourceRoot);
+        
+        // 测试场景1: 搜索具体类
+        System.out.println("=== 测试具体类搜索 ===");
+        String classQuery = "HashMap put方法源码";
+        System.out.println("查询: " + classQuery);
+        ToolResponse<String> classResponse = tool.execute(classQuery);
+        System.out.println("搜索结果: " + (classResponse.isSuccess() ? "成功" : "失败"));
+        if (classResponse.isSuccess()) {
+            String result = classResponse.getResult();
+            if (result.length() > 800) {
+                System.out.println(result.substring(0, 800) + "...(更多内容省略)");
+            } else {
+                System.out.println(result);
+            }
+        } else {
+            System.out.println(classResponse.getMessage());
+        }
+        
+        // 测试场景2: 带分析上下文的搜索
+        System.out.println("\n=== 测试带上下文的搜索 ===");
+        String contextQuery = "ArrayList并发修改";
+        String analysisContext = "测试发现ArrayList在并发环境下抛出ConcurrentModificationException，需要了解相关实现机制";
+        System.out.println("查询: " + contextQuery);
+        System.out.println("上下文: " + analysisContext);
+        ToolResponse<String> contextResponse = tool.executeWithContext(contextQuery, analysisContext);
+        System.out.println("搜索结果: " + (contextResponse.isSuccess() ? "成功" : "失败"));
+        if (contextResponse.isSuccess()) {
+            String result = contextResponse.getResult();
+            if (result.length() > 1000) {
+                System.out.println(result.substring(0, 1000) + "...(更多内容省略)");
+            } else {
+                System.out.println(result);
+            }
+        } else {
+            System.out.println(contextResponse.getMessage());
         }
     }
 } 

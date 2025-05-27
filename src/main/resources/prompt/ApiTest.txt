@@ -1,0 +1,23 @@
+${THINKING_CLAUDE_PROMPT}
+
+<TestCase>
+${testcase}
+</TestCase>
+
+<api document>
+${apiDocs}
+</api document>
+
+<Tasks>
+Task1: Please read the API document and understand the expected behavior of each method.
+Task2: Add some assert statements in the Testcase to augment the Test Oracle based on the expected behavior of the methods. Make sure every assert won't cause false positives.
+</Tasks>
+
+<Requirement>
+1. Your code for Task2 should contain import statements and ensure there are no compile errors.
+2. keep original assert statement and add new assert statement. please comment all JML spec in java code blocks.
+3. You should include only the Task2 TestCases in the last code block.
+4. If testcase is longer than 4k tokens, you should just output "failed" and don't say anything more.
+5. You should consider your assert statement is correct in context and won't cause false positive.
+6. Mark all your new assert statement with comment "New assert".
+</Requirement> 

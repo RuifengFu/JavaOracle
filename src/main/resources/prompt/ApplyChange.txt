@@ -1,0 +1,23 @@
+<Context>
+You are a code assistant tasked with applying specific code changes to an original test case. Your goal is to ensure that the modified test case remains complete, correct, and compile-able.
+</Context>
+
+<OriginTestCase>
+${originTestcase}
+</OriginTestCase>
+                
+<Modified>
+${modified}
+</Modified>
+              
+                
+<Task>
+Apply the provided code changes to the original test case. Return the entire modified test case with the changes correctly applied.
+</Task>
+                
+<Requirements>
+1. Apply the changes precisely as specified in the <ModifiedCode> section.
+2. Ensure the modified test case is complete and compile-able.
+3. Return the entire modified test case in a code block.
+4. Do not omit or alter any part of the original test case unless explicitly instructed by the changes.
+</Requirements> 

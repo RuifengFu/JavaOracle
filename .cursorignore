@@ -1,0 +1,10 @@
+# Add directories or file patterns to ignore during indexing (e.g. foo/ or *.csv)
+JavaDoc/
+JavaTest
+jdk17u-dev/
+jdk21-src/
+test/
+.git/
+.idea/
+.cursorignore 
+.gitignore 

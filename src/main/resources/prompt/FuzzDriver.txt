@@ -1,0 +1,44 @@
+Please write a JQF test driver for a application class in Java.
+And try to cover all lines in application code.
+1. You should write a test driver based application class
+2. You may need write a Input Generator for test driver
+3. Annotate test driver
+
+Tutorial:
+
+${tutorial}
+
+Task:
+
+This is application class you need based:
+
+${method_info}
+
+Output Format:
+
+Write some thoughts and make sure you are ready to write a test driver for this application class.
+
+Test Driver :
+
+```java
+your test driver here
+```
+
+Input Generator:
+
+```java
+your Input Generator here
+```
+
+Annotated Test Driver:
+
+```java
+your Annotated Test Driver here
+```
+
+
+
+hints:
+1. You should write some comments before each test Method to think deeply about a right TestOracle
+2. You should make sure Input Generator can generate some inputs which followed assumption in test Method
+3. You should check Test Oracle in each testMethod and make sure they are not false positive or false negative 

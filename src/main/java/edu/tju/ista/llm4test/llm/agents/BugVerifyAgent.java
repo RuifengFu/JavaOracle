@@ -52,6 +52,10 @@ public class BugVerifyAgent extends Agent {
     private final JavaExecuteTool executeTool;
     private final JtregExecuteTool jtregTool;
     
+    // 新增的智能工具
+    private final ContentProcessor contentProcessor;
+    private final IntelligentSearchTool intelligentSearchTool;
+    
     // LLM实例
     private final OpenAI llm;
     private final OpenAI llm_json;
@@ -89,6 +93,8 @@ public class BugVerifyAgent extends Agent {
         this.searchTool = new BingSearch();
         this.executeTool = new JavaExecuteTool();
         this.jtregTool = new JtregExecuteTool();
+        this.contentProcessor = new ContentProcessor(bugReportPath + "/content_cache");
+        this.intelligentSearchTool = new IntelligentSearchTool(searchTool, webTool, contentProcessor);
     }
     
     /**
@@ -281,14 +287,30 @@ public class BugVerifyAgent extends Agent {
     }
     
     /**
-     * 信息收集阶段 - 根据初始分析收集相关信息
+     * 信息收集阶段 - 使用智能搜索工具根据初始分析收集相关信息
      */
     private void collectRelevantInformation(String initialInsight) {
-        // 解析初始分析结果中的相关类和查询
+        try {
+            // 1. 收集JavaDoc信息（基于初始分析提取的相关类）
+            collectJavaDocInformation(initialInsight);
+            
+            // 2. 收集源码信息（基于初始分析提取的相关类）
+            collectSourceCodeInformation(initialInsight);
+            
+            // 3. 使用智能搜索工具收集Web信息
+            collectWebInformation(initialInsight);
+            
+        } catch (Exception e) {
+            LoggerUtil.logExec(Level.WARNING, "信息收集过程中出现错误: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * 收集JavaDoc信息
+     */
+    private void collectJavaDocInformation(String initialInsight) {
         List<String> relevantClasses = extractJsonArrayFromField(initialInsight, "relevantClasses");
-        List<String> queries = extractJsonArrayFromField(initialInsight, "queries");
         
-        // 收集JavaDoc信息
         for (String className : relevantClasses) {
             ToolResponse<String> docResponse = javadocTool.execute(className);
             if (docResponse.isSuccess()) {
@@ -296,13 +318,31 @@ public class BugVerifyAgent extends Agent {
                 String sourcePath = "JavaDoc: " + className;
                 infoSourceMap.put(infoId, sourcePath);
                 
-                // 添加信息源标记
-                String markedContent = "[" + infoId + " 来源: " + sourcePath + "]\n" + docResponse.getResult();
-                collectedInfo.put("javadoc_" + className, markedContent);
+                // 使用内容处理器处理JavaDoc内容
+                List<ContentProcessor.ProcessedContentChunk> chunks = 
+                    contentProcessor.processContent(sourcePath, docResponse.getResult(), initialInsight);
+                
+                if (!chunks.isEmpty()) {
+                    StringBuilder processedContent = new StringBuilder();
+                    processedContent.append("[").append(infoId).append(" 来源: ").append(sourcePath).append("]\n\n");
+                    
+                    for (ContentProcessor.ProcessedContentChunk chunk : chunks) {
+                        processedContent.append(chunk.getFormattedContent()).append("\n");
+                    }
+                    
+                    collectedInfo.put("javadoc_" + className, processedContent.toString());
+                    LoggerUtil.logExec(Level.INFO, "收集JavaDoc信息: " + className + " (处理后片段: " + chunks.size() + ")");
+                }
             }
         }
+    }
+    
+    /**
+     * 收集源码信息
+     */
+    private void collectSourceCodeInformation(String initialInsight) {
+        List<String> relevantClasses = extractJsonArrayFromField(initialInsight, "relevantClasses");
         
-        // 收集源码信息
         for (String className : relevantClasses) {
             ToolResponse<String> sourceResponse = sourceTool.execute(className);
             if (sourceResponse.isSuccess()) {
@@ -310,37 +350,100 @@ public class BugVerifyAgent extends Agent {
                 String sourcePath = "源码: " + className;
                 infoSourceMap.put(infoId, sourcePath);
                 
-                // 添加信息源标记
-                String markedContent = "[" + infoId + " 来源: " + sourcePath + "]\n" + sourceResponse.getResult();
-                collectedInfo.put("source_" + className, markedContent);
+                // 使用内容处理器处理源码内容
+                List<ContentProcessor.ProcessedContentChunk> chunks = 
+                    contentProcessor.processContent(sourcePath, sourceResponse.getResult(), initialInsight);
+                
+                if (!chunks.isEmpty()) {
+                    StringBuilder processedContent = new StringBuilder();
+                    processedContent.append("[").append(infoId).append(" 来源: ").append(sourcePath).append("]\n\n");
+                    
+                    for (ContentProcessor.ProcessedContentChunk chunk : chunks) {
+                        processedContent.append(chunk.getFormattedContent()).append("\n");
+                    }
+                    
+                    collectedInfo.put("source_" + className, processedContent.toString());
+                    LoggerUtil.logExec(Level.INFO, "收集源码信息: " + className + " (处理后片段: " + chunks.size() + ")");
+                }
             }
         }
+    }
+    
+    /**
+     * 使用智能搜索工具收集Web信息
+     */
+    private void collectWebInformation(String initialInsight) {
+        try {
+            // 使用智能搜索工具进行搜索
+            List<IntelligentSearchTool.IntelligentSearchResult> searchResults = 
+                intelligentSearchTool.search(initialInsight, testCode, testOutput);
+            
+            LoggerUtil.logExec(Level.INFO, "智能搜索完成，共获得 " + searchResults.size() + " 个高质量结果");
+            
+            // 处理每个搜索结果
+            for (IntelligentSearchTool.IntelligentSearchResult result : searchResults) {
+                String infoId = "INFO_" + (++infoCounter);
+                String sourceUrl = result.getUrl();
+                infoSourceMap.put(infoId, sourceUrl);
+                
+                // 构建格式化的内容
+                StringBuilder processedContent = new StringBuilder();
+                processedContent.append("[").append(infoId).append(" 来源: ").append(sourceUrl).append("]\n");
+                processedContent.append("查询目标: ").append(result.getQueryTarget()).append("\n");
+                processedContent.append("优先级: ").append(result.getQueryPriority()).append("\n");
+                processedContent.append("总体相关性: ").append(String.format("%.2f", result.getOverallRelevanceScore())).append("\n\n");
+                processedContent.append(result.getFormattedContent());
+                
+                String key = "web_intelligent_" + infoCounter;
+                collectedInfo.put(key, processedContent.toString());
+                
+                LoggerUtil.logExec(Level.INFO, "收集智能搜索结果: " + result.getTitle() + 
+                                   " (相关性: " + String.format("%.2f", result.getOverallRelevanceScore()) + 
+                                   ", 片段: " + result.getProcessedChunks().size() + ")");
+            }
+            
+        } catch (Exception e) {
+            LoggerUtil.logExec(Level.WARNING, "智能搜索失败: " + e.getMessage());
+            // 如果智能搜索失败，回退到原始搜索方法
+            fallbackToBasicWebSearch(initialInsight);
+        }
+    }
+    
+    /**
+     * 回退到基础Web搜索（原有逻辑的简化版本）
+     */
+    private void fallbackToBasicWebSearch(String initialInsight) {
+        List<String> queries = extractJsonArrayFromField(initialInsight, "queries");
         
-        // 根据查询收集Web信息
         for (String query : queries) {
-            // 首先尝试直接在Web搜索
-            ToolResponse<List<SearchResult>> searchResponse = searchTool.execute(query + " java");
-            if (searchResponse.isSuccess() && !searchResponse.getResult().isEmpty()) {
-                // 获取前三个结果的内容
-                int count = 0;
-                for (SearchResult result : searchResponse.getResult()) {
-                    if (count >= 3) break;
-                    try {
-                        ToolResponse<String> contentResponse = webTool.execute(result.getUrl());
-                        if (contentResponse.isSuccess()) {
-                            String infoId = "INFO_" + (++infoCounter);
-                            String sourceUrl = result.getUrl();
-                            infoSourceMap.put(infoId, sourceUrl);
-                            
-                            // 添加信息源标记
-                            String markedContent = "[" + infoId + " 来源: " + sourceUrl + "]\n" + contentResponse.getResult();
-                            collectedInfo.put("web_" + query + "_" + count, markedContent);
-                            count++;
+            try {
+                ToolResponse<List<SearchResult>> searchResponse = searchTool.execute(query + " java");
+                if (searchResponse.isSuccess() && !searchResponse.getResult().isEmpty()) {
+                    // 只处理前2个结果，避免过多
+                    int count = 0;
+                    for (SearchResult result : searchResponse.getResult()) {
+                        if (count >= 2) break;
+                        
+                        try {
+                            ToolResponse<String> contentResponse = webTool.execute(result.getUrl());
+                            if (contentResponse.isSuccess()) {
+                                String infoId = "INFO_" + (++infoCounter);
+                                String sourceUrl = result.getUrl();
+                                infoSourceMap.put(infoId, sourceUrl);
+                                
+                                // 基础处理：只添加信息源标记
+                                String markedContent = "[" + infoId + " 来源: " + sourceUrl + "]\n" + 
+                                                     contentResponse.getResult();
+                                collectedInfo.put("web_fallback_" + query + "_" + count, markedContent);
+                                count++;
+                            }
+                        } catch (Exception e) {
+                            LoggerUtil.logExec(Level.FINE, "获取网页内容失败: " + result.getUrl() + " - " + e.getMessage());
                         }
-                    } catch (Exception e) {
-                        LoggerUtil.logExec(Level.WARNING, "获取网页内容失败: " + e.getMessage());
                     }
                 }
+            } catch (Exception e) {
+                LoggerUtil.logExec(Level.FINE, "基础搜索失败: " + query + " - " + e.getMessage());
             }
         }
     }

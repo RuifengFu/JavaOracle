@@ -3,6 +3,7 @@ package edu.tju.ista.llm4test.llm.tools;
 import edu.tju.ista.llm4test.llm.OpenAI;
 import edu.tju.ista.llm4test.utils.ApiDocProcessor;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
+import edu.tju.ista.llm4test.utils.ContentProcessor;
 
 import java.io.File;
 import java.nio.file.Files;
@@ -17,12 +18,14 @@ import org.jsoup.nodes.Document;
 import org.jsoup.select.Elements;
 
 /**
- * JavaDoc文档检索工具
+ * JavaDoc文档检索工具 - 增强版
+ * 支持分析上下文指导、内容处理、缓存机制
  */
 public class JavaDocSearchTool implements Tool<String> {
     private final String javadocBasePath;
     private final OpenAI llm;
     private final ApiDocProcessor docProcessor;
+    private final ContentProcessor contentProcessor;
     
     /**
      * 创建JavaDoc检索工具
@@ -32,6 +35,7 @@ public class JavaDocSearchTool implements Tool<String> {
         this.javadocBasePath = javadocBasePath;
         this.llm = OpenAI.R1;
         this.docProcessor = new ApiDocProcessor(javadocBasePath);
+        this.contentProcessor = new ContentProcessor(javadocBasePath + "/doc_cache");
     }
     
     @Override
@@ -41,11 +45,21 @@ public class JavaDocSearchTool implements Tool<String> {
     
     @Override
     public String getDescription() {
-        return "根据提供的关键词（类名、方法名等）在JavaDoc中检索相关文档";
+        return "根据提供的关键词（类名、方法名等）在JavaDoc中检索相关文档，支持智能分析和内容处理";
     }
     
     @Override
     public ToolResponse<String> execute(String input) {
+        return executeWithContext(input, null);
+    }
+    
+    /**
+     * 执行带分析上下文的搜索
+     * @param input 搜索输入
+     * @param analysisContext 分析上下文，用于指导搜索和内容处理
+     * @return 处理后的JavaDoc内容
+     */
+    public ToolResponse<String> executeWithContext(String input, String analysisContext) {
         try {
             // 查找API文档根目录
             Path apiRootPath = findApiRootDir();
@@ -54,83 +68,328 @@ public class JavaDocSearchTool implements Tool<String> {
             }
             
             // 使用LLM找到可能的JavaDoc路径并进行有效性过滤
-            List<String> potentialPaths = findPotentialPaths(input, apiRootPath.toString());
+            List<String> potentialPaths = findPotentialPaths(input, apiRootPath.toString(), analysisContext);
             
             // 检查是否找到了可能的路径
             if (potentialPaths.isEmpty()) {
                 return ToolResponse.failure("未能找到与'" + input + "'相关的JavaDoc路径");
             }
             
-            // 读取文档
-            StringBuilder docContent = new StringBuilder();
+            // 读取和处理文档
+            StringBuilder finalContent = new StringBuilder();
+            List<String> processedSources = new ArrayList<>();
             
             for (String path : potentialPaths) {
                 try {
-                    // 可能是类文件
-                    if (path.endsWith(".html")) {
-                        File docFile = new File(apiRootPath.toString(), path);
-                        if (!docFile.exists()) {
-                            // 尝试其他可能的路径变体
-                            docFile = findExistingDocFile(apiRootPath, path);
-                        }
+                    String rawContent = extractDocumentContent(apiRootPath, path);
+                    if (rawContent != null && !rawContent.trim().isEmpty()) {
                         
-                        if (docFile != null && docFile.exists()) {
-                            // 直接解析HTML
-                            String htmlContent = processHtmlFile(docFile);
-                            docContent.append("--- 来自文件: ").append(docFile.getPath()).append(" ---\n");
-                            docContent.append(htmlContent).append("\n\n");
-                        }
-                    } 
-                    // 可能是包目录
-                    else {
-                        List<File> htmlFiles = findHtmlFilesInPackage(apiRootPath, path);
-                        
-                        for (File htmlFile : htmlFiles) {
-                            // 直接解析HTML
-                            String htmlContent = processHtmlFile(htmlFile);
-                            docContent.append("--- 来自目录文件: ").append(htmlFile.getPath()).append(" ---\n");
-                            docContent.append(htmlContent).append("\n\n");
+                        // 如果有分析上下文，使用ContentProcessor进行智能处理
+                        if (analysisContext != null && !analysisContext.trim().isEmpty()) {
+                            List<ContentProcessor.ProcessedContentChunk> chunks = 
+                                contentProcessor.processContent("javadoc:" + path, rawContent, analysisContext);
                             
-                            // 限制返回的文档量
-//                            if (docContent.length() > 10000) {
-//                                docContent.append("...文档内容过多，已截断");
-//                                break;
-//                            }
+                            if (!chunks.isEmpty()) {
+                                finalContent.append("=== ").append(path).append(" (智能处理) ===\n\n");
+                                
+                                for (ContentProcessor.ProcessedContentChunk chunk : chunks) {
+                                    finalContent.append(chunk.getFormattedContent()).append("\n");
+                                }
+                                
+                                processedSources.add(path + " (处理后片段: " + chunks.size() + ")");
+                                LoggerUtil.logExec(Level.INFO, "JavaDoc智能处理: " + path + 
+                                                  " -> " + chunks.size() + " 个相关片段");
+                            }
+                        } else {
+                            // 无分析上下文时，进行基础处理
+                            finalContent.append("=== ").append(path).append(" (基础处理) ===\n");
+                            String processedContent = processBasicContent(rawContent, input);
+                            finalContent.append(processedContent).append("\n\n");
+                            
+                            processedSources.add(path + " (基础处理)");
                         }
                         
-                        // 检查是否有class-use目录
-                        File classUseDir = new File(apiRootPath.toString(), path + "/class-use");
-                        if (classUseDir.exists() && classUseDir.isDirectory()) {
-                            docContent.append("--- 相关使用文档(class-use) ---\n");
-                            File[] useFiles = classUseDir.listFiles((dir, name) -> name.endsWith(".html"));
-                            if (useFiles != null) {
-                                for (File useFile : useFiles) {
-                                    String htmlContent = processHtmlFile(useFile);
-                                    docContent.append("-- ").append(useFile.getName()).append(" --\n");
-                                    docContent.append(extractUsageSummary(htmlContent)).append("\n");
-                                    
-                                    // 限制返回的文档量
-//                                    if (docContent.length() > 15000) {
-//                                        docContent.append("...使用文档过多，已截断");
-//                                        break;
-//                                    }
-                                }
-                            }
+                        // 限制总内容长度
+                        if (finalContent.length() > 50000) {
+                            finalContent.append("...内容过多，已截断");
+                            break;
                         }
                     }
                 } catch (Exception e) {
-                    LoggerUtil.logExec(Level.WARNING, "处理文档路径时出错: " + path + " - " + e.getMessage());
+                    LoggerUtil.logExec(Level.WARNING, "处理JavaDoc路径时出错: " + path + " - " + e.getMessage());
                 }
             }
             
-            if (docContent.length() == 0) {
-                return ToolResponse.failure("找到了路径但无法读取文档内容");
+            if (finalContent.length() == 0) {
+                return ToolResponse.failure("找到了路径但无法读取或处理文档内容");
             }
             
-            return ToolResponse.success(docContent.toString());
+            // 添加搜索摘要
+            StringBuilder summary = new StringBuilder();
+            summary.append("## JavaDoc搜索摘要\n\n");
+            summary.append("- **搜索输入**: ").append(input).append("\n");
+            summary.append("- **分析上下文**: ").append(analysisContext != null ? "已提供" : "未提供").append("\n");
+            summary.append("- **处理的文档**: ").append(processedSources.size()).append("个\n");
+            summary.append("- **文档列表**:\n");
+            for (String source : processedSources) {
+                summary.append("  - ").append(source).append("\n");
+            }
+            summary.append("\n---\n\n");
+            
+            finalContent.insert(0, summary.toString());
+            
+            return ToolResponse.success(finalContent.toString());
         } catch (Exception e) {
-            return ToolResponse.failure("文档检索失败: " + e.getMessage());
+            return ToolResponse.failure("JavaDoc检索失败: " + e.getMessage());
         }
+    }
+    
+    /**
+     * 提取文档内容
+     */
+    private String extractDocumentContent(Path apiRootPath, String path) throws Exception {
+        StringBuilder content = new StringBuilder();
+        
+        // 可能是类文件
+        if (path.endsWith(".html")) {
+            File docFile = new File(apiRootPath.toString(), path);
+            if (!docFile.exists()) {
+                // 尝试其他可能的路径变体
+                docFile = findExistingDocFile(apiRootPath, path);
+            }
+            
+            if (docFile != null && docFile.exists()) {
+                // 解析HTML并转换为Markdown格式
+                String htmlContent = processHtmlFileToMarkdown(docFile);
+                content.append(htmlContent);
+            }
+        } 
+        // 可能是包目录
+        else {
+            List<File> htmlFiles = findHtmlFilesInPackage(apiRootPath, path);
+            
+            for (File htmlFile : htmlFiles) {
+                // 解析HTML并转换为Markdown格式
+                String htmlContent = processHtmlFileToMarkdown(htmlFile);
+                content.append("### ").append(htmlFile.getName()).append("\n\n");
+                content.append(htmlContent).append("\n\n");
+                
+                // 限制单个包的内容量
+                if (content.length() > 20000) {
+                    content.append("...包内容过多，已截断");
+                    break;
+                }
+            }
+            
+            // 检查是否有class-use目录
+            File classUseDir = new File(apiRootPath.toString(), path + "/class-use");
+            if (classUseDir.exists() && classUseDir.isDirectory()) {
+                content.append("## 使用示例文档\n\n");
+                File[] useFiles = classUseDir.listFiles((dir, name) -> name.endsWith(".html"));
+                if (useFiles != null) {
+                    for (File useFile : useFiles) {
+                        String htmlContent = processHtmlFileToMarkdown(useFile);
+                        content.append("### ").append(useFile.getName()).append("\n");
+                        content.append(extractUsageSummary(htmlContent)).append("\n\n");
+                        
+                        // 限制使用文档量
+                        if (content.length() > 30000) {
+                            content.append("...使用文档过多，已截断");
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        
+        return content.toString();
+    }
+    
+    /**
+     * 处理HTML文件并转换为Markdown格式（保留原始表达）
+     */
+    private String processHtmlFileToMarkdown(File htmlFile) throws Exception {
+        Document doc = Jsoup.parse(htmlFile, "UTF-8");
+        
+        // 移除导航和不必要的元素
+        doc.select("nav, .topNav, .bottomNav, .subNav, script, style, footer").remove();
+        
+        StringBuilder markdown = new StringBuilder();
+        
+        // 提取标题
+        Elements titles = doc.select("h1, h2, h3, .title");
+        if (!titles.isEmpty()) {
+            markdown.append("# ").append(titles.first().text()).append("\n\n");
+        }
+        
+        // 提取类描述
+        Elements classDesc = doc.select(".classDescription, #class-description, .block");
+        for (int i = 0; i < Math.min(classDesc.size(), 3); i++) {
+            String text = classDesc.get(i).text();
+            if (!text.trim().isEmpty() && text.length() > 20) {
+                markdown.append(text).append("\n\n");
+            }
+        }
+        
+        // 提取方法摘要
+        Elements methodSummary = doc.select(".methodSummary .memberSummary tr");
+        if (!methodSummary.isEmpty()) {
+            markdown.append("## 方法摘要\n\n");
+            for (int i = 0; i < Math.min(methodSummary.size(), 10); i++) {
+                String methodText = methodSummary.get(i).text();
+                if (!methodText.trim().isEmpty() && methodText.length() > 10) {
+                    markdown.append("- ").append(methodText).append("\n");
+                }
+            }
+            markdown.append("\n");
+        }
+        
+        // 提取详细信息
+        Elements details = doc.select(".details .memberSummary, .methodDetails .member");
+        if (!details.isEmpty()) {
+            markdown.append("## 详细信息\n\n");
+            for (int i = 0; i < Math.min(details.size(), 5); i++) {
+                String detailText = details.get(i).text();
+                if (!detailText.trim().isEmpty() && detailText.length() > 30) {
+                    markdown.append(detailText).append("\n\n");
+                }
+            }
+        }
+        
+        // 如果提取的内容太少，使用全部文本内容
+        if (markdown.length() < 200) {
+            Elements mainContent = doc.select(".contentContainer, .classDescription, .details");
+            if (!mainContent.isEmpty()) {
+                return mainContent.text();
+            } else {
+                return doc.body().text();
+            }
+        }
+        
+        return markdown.toString();
+    }
+    
+    /**
+     * 基础内容处理（当没有分析上下文时）
+     */
+    private String processBasicContent(String content, String searchInput) {
+        // 高亮搜索关键词
+        String[] keywords = searchInput.toLowerCase().split("\\s+");
+        String highlightedContent = content;
+        
+        for (String keyword : keywords) {
+            if (keyword.length() > 2) {
+                highlightedContent = highlightedContent.replaceAll(
+                    "(?i)(" + keyword + ")", 
+                    "**$1**"
+                );
+            }
+        }
+        
+        // 限制长度
+        if (highlightedContent.length() > 5000) {
+            // 尝试找到与搜索词相关的段落
+            String[] paragraphs = highlightedContent.split("\n\n");
+            StringBuilder relevantContent = new StringBuilder();
+            
+            for (String paragraph : paragraphs) {
+                boolean isRelevant = false;
+                for (String keyword : keywords) {
+                    if (paragraph.toLowerCase().contains(keyword.toLowerCase())) {
+                        isRelevant = true;
+                        break;
+                    }
+                }
+                
+                if (isRelevant) {
+                    relevantContent.append(paragraph).append("\n\n");
+                    if (relevantContent.length() > 3000) break;
+                }
+            }
+            
+            if (relevantContent.length() > 0) {
+                return relevantContent.toString();
+            } else {
+                return highlightedContent.substring(0, 3000) + "...";
+            }
+        }
+        
+        return highlightedContent;
+    }
+    
+    /**
+     * 使用LLM找到可能的JavaDoc路径并进行有效性过滤
+     */
+    private List<String> findPotentialPaths(String input, String apiRootPath, String analysisContext) {
+        StringBuilder promptBuilder = new StringBuilder();
+        promptBuilder.append("根据查询'").append(input).append("'，列出可能的JavaDoc文档路径。\n");
+        
+        if (analysisContext != null && !analysisContext.trim().isEmpty()) {
+            promptBuilder.append("\n分析上下文:\n").append(analysisContext).append("\n");
+            promptBuilder.append("请特别关注上下文中提到的相关类、API和问题。\n");
+        }
+        
+        promptBuilder.append("\nJavaDoc根目录: ").append(apiRootPath).append("\n");
+        promptBuilder.append("仅列出相对于根目录的路径，每行一个。路径必须是.html文件或有效目录。\n");
+        promptBuilder.append("优先考虑与问题最相关的文档。\n");
+        promptBuilder.append("示例格式:\njava/lang/String.html\njava/util\njava/util/HashMap.html\n");
+        
+        String rawResponse = llm.messageCompletion(promptBuilder.toString(), 0.0);
+        
+        // 1. 过滤思维链
+        rawResponse = filterThinkingChain(rawResponse);
+        
+        // 2. 分割为行并过滤有效路径
+        List<String> filteredPaths = new ArrayList<>();
+        String[] lines = rawResponse.split("\n");
+        
+        for (String line : lines) {
+            line = line.trim();
+            
+            // 忽略空行和注释
+            if (line.isEmpty() || line.startsWith("#") || line.startsWith("//") || 
+                line.startsWith("-") || line.contains(":")) continue;
+                
+            // 验证是HTML文件或看起来像目录路径
+            boolean isHtmlFile = line.endsWith(".html");
+            boolean looksLikeDirectory = !line.contains(".") && 
+                                        !line.contains("(") && 
+                                        !line.contains(" ");
+                                        
+            if (isHtmlFile || looksLikeDirectory) {
+                // 规范化路径格式
+                while (line.startsWith("/") || line.startsWith(".")) {
+                    line = line.substring(1);
+                }
+                
+                // 验证文件或目录是否存在
+                File testPath = new File(apiRootPath, line);
+                if (testPath.exists()) {
+                    filteredPaths.add(line);
+                    continue;
+                }
+                
+                // 尝试常见的变体
+                if (isHtmlFile) {
+                    String fileName = new File(line).getName();
+                    String parentPath = line.substring(0, line.length() - fileName.length());
+                    
+                    // 首字母大写变体
+                    String capitalizedName = fileName.substring(0, 1).toUpperCase() + 
+                                           fileName.substring(1);
+                    File capitalizedPath = new File(apiRootPath, parentPath + capitalizedName);
+                    if (capitalizedPath.exists()) {
+                        filteredPaths.add(parentPath + capitalizedName);
+                    }
+                }
+            }
+        }
+        
+        // 记录找到的有效路径
+        LoggerUtil.logExec(Level.INFO, "为查询'" + input + "'找到" + filteredPaths.size() + 
+                          "个有效路径" + (analysisContext != null ? " (有上下文指导)" : ""));
+        
+        return filteredPaths;
     }
     
     /**
@@ -184,7 +443,6 @@ public class JavaDocSearchTool implements Tool<String> {
         }
         
         // 如果未找到任何文件，尝试查找模块内的包
-        // JavaDoc可能使用模块结构，如java.base/java/util
         if (results.isEmpty()) {
             try {
                 // 列出所有可能的模块
@@ -248,25 +506,6 @@ public class JavaDocSearchTool implements Tool<String> {
     }
     
     /**
-     * 处理HTML文件内容，提取有用信息
-     */
-    private String processHtmlFile(File htmlFile) throws Exception {
-        Document doc = Jsoup.parse(htmlFile, "UTF-8");
-        
-        // 移除导航和不必要的元素
-        doc.select("nav, .topNav, .bottomNav, .subNav, script, style, footer, .inheritance, .memberSummary").remove();
-        
-        // 提取主要内容区域
-        Elements mainContent = doc.select(".contentContainer, .classDescription, .details, #class-description");
-        if (!mainContent.isEmpty()) {
-            return mainContent.text();
-        }
-        
-        // 如果无法提取特定区域，返回清理后的body文本
-        return doc.body().text();
-    }
-    
-    /**
      * 从使用文档中提取摘要信息
      */
     private String extractUsageSummary(String htmlContent) {
@@ -275,80 +514,6 @@ public class JavaDocSearchTool implements Tool<String> {
             return htmlContent.substring(0, 500) + "...";
         }
         return htmlContent;
-    }
-    
-    /**
-     * 使用LLM找到可能的JavaDoc路径并进行有效性过滤
-     */
-    private List<String> findPotentialPaths(String input, String apiRootPath) {
-        String prompt = String.format(
-            "根据查询'%s'，列出可能的JavaDoc文档路径。考虑类、包、方法名。\n" +
-            "JavaDoc根目录: %s\n" +
-            "仅列出相对于根目录的路径，每行一个。路径必须是.html文件或有效目录。\n" +
-            "示例格式:\njava/lang/String.html\njava/util\n",
-            input, apiRootPath
-        );
-        
-        String rawResponse = llm.messageCompletion(prompt, 0.0);
-        
-        // 1. 过滤思维链
-        rawResponse = filterThinkingChain(rawResponse);
-        
-        // 2. 分割为行并过滤有效路径
-        List<String> filteredPaths = new ArrayList<>();
-        String[] lines = rawResponse.split("\n");
-        
-        for (String line : lines) {
-            line = line.trim();
-            
-            // 忽略空行
-            if (line.isEmpty()) continue;
-            
-            // 忽略注释和非路径行
-            if (line.startsWith("#") || line.startsWith("//") || 
-                line.startsWith("-") || line.contains(":")) continue;
-                
-            // 验证是HTML文件或看起来像目录路径
-            boolean isHtmlFile = line.endsWith(".html");
-            boolean looksLikeDirectory = !line.contains(".") && 
-                                        !line.contains("(") && 
-                                        !line.contains(" ");
-                                        
-            if (isHtmlFile || looksLikeDirectory) {
-                // 规范化路径格式（去除前导/等）
-                while (line.startsWith("/") || line.startsWith(".")) {
-                    line = line.substring(1);
-                }
-                
-                // 验证文件或目录是否存在
-                File testPath = new File(apiRootPath, line);
-                if (testPath.exists()) {
-                    filteredPaths.add(line);
-                    continue;
-                }
-                
-                // 尝试常见的变体
-                if (isHtmlFile) {
-                    // 尝试不同的大小写组合
-                    String fileName = new File(line).getName();
-                    String parentPath = line.substring(0, line.length() - fileName.length());
-                    
-                    // 首字母大写变体
-                    String capitalizedName = fileName.substring(0, 1).toUpperCase() + 
-                                           fileName.substring(1);
-                    File capitalizedPath = new File(apiRootPath, parentPath + capitalizedName);
-                    if (capitalizedPath.exists()) {
-                        filteredPaths.add(parentPath + capitalizedName);
-                    }
-                }
-            }
-        }
-        
-        // 记录找到的有效路径
-        LoggerUtil.logExec(Level.INFO, "为查询'" + input + "'找到" + filteredPaths.size() + 
-                          "个有效路径");
-        
-        return filteredPaths;
     }
     
     /**
@@ -394,21 +559,23 @@ public class JavaDocSearchTool implements Tool<String> {
             System.out.println(classResponse.getMessage());
         }
         
-        // 测试场景2: 搜索包
-        System.out.println("\n=== 测试包搜索 ===");
-        String packageQuery = "java.util包中的集合类";
-        System.out.println("查询: " + packageQuery);
-        ToolResponse<String> packageResponse = tool.execute(packageQuery);
-        System.out.println("搜索结果: " + (packageResponse.isSuccess() ? "成功" : "失败"));
-        if (packageResponse.isSuccess()) {
-            String result = packageResponse.getResult();
-            if (result.length() > 500) {
-                System.out.println(result.substring(0, 500) + "...(更多内容省略)");
+        // 测试场景2: 带分析上下文的搜索
+        System.out.println("\n=== 测试带上下文的搜索 ===");
+        String contextQuery = "HashMap put方法";
+        String analysisContext = "测试发现HashMap在并发环境下可能丢失数据，需要了解put方法的线程安全性";
+        System.out.println("查询: " + contextQuery);
+        System.out.println("上下文: " + analysisContext);
+        ToolResponse<String> contextResponse = tool.executeWithContext(contextQuery, analysisContext);
+        System.out.println("搜索结果: " + (contextResponse.isSuccess() ? "成功" : "失败"));
+        if (contextResponse.isSuccess()) {
+            String result = contextResponse.getResult();
+            if (result.length() > 800) {
+                System.out.println(result.substring(0, 800) + "...(更多内容省略)");
             } else {
                 System.out.println(result);
             }
         } else {
-            System.out.println(packageResponse.getMessage());
+            System.out.println(contextResponse.getMessage());
         }
     }
 } 

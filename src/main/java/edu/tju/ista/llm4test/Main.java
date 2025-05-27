@@ -49,14 +49,16 @@ public class Main {
         switch (args[0]) {
             case "execute": execute(args[1]); break;
             case "generate": generate(args[1]); verifyBugs(); break;
-            case "env" : testJDKenv(); break;
+            case "env" : testJDKEnvironment(); break;
             case "verify": verifyBugs(); break;
         }
+
     }
 
-    private static void testJDKenv() {
+    private static void testJDKEnvironment() {
         var executor = new TestExecutor(new File(""));
-        executor.testJDKenv();
+        executor.testJDKEnvironment();
+        executor.shutdown();
     }
 
     public static void generate(String testPath) {
@@ -159,6 +161,7 @@ public class Main {
         });
         waitForCompletion(executor, latch);
         statistics.logStatistics();
+        testExecutor.clearTempDirectories();
     }
 
     public void runTestSuiteParallel2(Path rootPath) {
@@ -185,79 +188,18 @@ public class Main {
 
     private TestResult processTestFile(TestCase testCase) {
         try {
+            // 使用异步TestCase进行流水线处理
+            AsyncTestCase asyncTestCase = new AsyncTestCase(testCase.getFile());
+            asyncTestCase.setOriginFile(testCase.getOriginFile());
+            
+            // 设置API文档
             File file = testCase.getFile();
-            TestResult result = testExecutor.executeTest(file);
-            System.out.println("result " + result.getKind());
-            if (!result.isSuccess()) {
-                statistics.recordResult(TestResultKind.PASS);
-                return new TestResult(TestResultKind.PASS);
-            }
             Map<String, String> apiDocs = apiDocProcessor.processApiDocs(file);
-            testCase.setApiDocMap(apiDocs);
-
-            testCase.enhance();
-            testCase.verifyTestFail();
-            testCase.setResult(testExecutor.executeTest(file));
-            result = testCase.getResult();
-            for (int i = 0; i < 3; i++) {
-                if (!result.isFail()) {
-                    break;
-                }
-                testCase.fix();
-                testCase.setResult(testExecutor.executeTest(file));
-                result = testCase.getResult();
-            }
-            testCase.verifyTestFail();
-
-//            // 根据api信息生成assert
-//            if (!result.isSuccess()) {
-//                statistics.recordResult(result.getKind());
-//                return result;
-//            }
-//
-//            Map<String, Object> dataModel = new HashMap<>();
-//            {// setup data model
-//                dataModel.put("apiDocs", apiDocs);
-//                dataModel.put("testcase", testCase.getTestcaseWithLineNumber());
-//            }
-//
-//            String prompt = PromptGen.generatePrompt(TEMPLATE_MODE, dataModel);
-//            System.out.println("call openAI");
-//            String generatedCode = processPrompt(prompt);
-//            if (generatedCode.isEmpty()) {
-//                statistics.recordResult(TestResultKind.UNKNOWN);
-//                return new TestResult(TestResultKind.UNKNOWN);
-//            }
-//            testCase.applyChange(generatedCode);
-//
-//            result = testExecutor.executeTest(file);
-//            testCase.setResult(result);
-//
-//            for (int i = 0; i < 1; i++) {
-//                if (!result.isFail()) {
-//                    break;
-//                }
-//                testCase.fix();
-//                testCase.setResult(testExecutor.executeTest(file));
-//                result = testCase.getResult();
-//            }
-//            testCase.verifyTestFail();
-
-
-//            if (testCase.getResult().isSuccess()) {
-//                testCase.enhance();
-//                testCase.setResult(testExecutor.executeTest(file));
-//                result = testCase.getResult();
-//            }
-//            for (int i = 0; i < 1; i++) {
-//                if (!result.isFail()) {
-//                    break;
-//                }
-//                testCase.fix();
-//                testCase.setResult(testExecutor.executeTest(file));
-//                result = testCase.getResult();
-//            }
-//            testCase.verifyTestFail();
+            asyncTestCase.setApiDocMap(apiDocs);
+            
+            // 异步流水线处理
+            TestResult result = asyncTestCase.processAsync(testExecutor).join();
+            
             statistics.recordResult(result.getKind());
             return result;
         } catch (Exception e) {
