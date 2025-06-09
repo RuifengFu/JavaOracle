@@ -7,6 +7,8 @@ import edu.tju.ista.llm4test.llm.OpenAI;
 import edu.tju.ista.llm4test.llm.tools.*;
 import edu.tju.ista.llm4test.execute.TestResult;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
+import edu.tju.ista.llm4test.prompt.PromptGen;
+import freemarker.template.TemplateException;
 
 import java.util.*;
 import java.util.logging.Level;
@@ -21,29 +23,7 @@ import java.nio.file.Paths;
 
 public class BugVerifyAgent extends Agent {
     // 基础提示模板
-    private final String basePrompt = """
-                <TestCase>
-                ${testcase}
-                </TestCase>
-                
-                <Test Output>
-                ${testOutput}
-                </Test Output>
-                
-                <API docs>
-                ${apiDocs}
-                </API docs>
-                
-                <Task>
-                Analyze the reason for the test case failure and provide a root cause analysis.
-                </Task>
-                
-                <Requirements>
-                1. Summarize your analysis into a single function call as the output.
-                2. Ensure your analysis is accurate, especially for JDK functions.
-                </Requirements>
-                """;
-    
+
     // 可用的工具
     private final JavaDocSearchTool javadocTool;
     private final SourceCodeSearchTool sourceTool;
@@ -59,7 +39,7 @@ public class BugVerifyAgent extends Agent {
     // LLM实例
     private final OpenAI llm;
     private final OpenAI llm_json;
-    
+
     // 分析状态
     private TestCase testCase;
     private String testCode;
@@ -86,7 +66,7 @@ public class BugVerifyAgent extends Agent {
      */
     public BugVerifyAgent(String javadocPath, String sourcePath) {
         this.llm = OpenAI.R1;
-        this.llm_json = OpenAI.V3_json;
+        this.llm_json = OpenAI.V3;
         this.javadocTool = new JavaDocSearchTool(javadocPath);
         this.sourceTool = new SourceCodeSearchTool(sourcePath);
         this.webTool = new WebContentExtractor(true);
@@ -181,7 +161,7 @@ public class BugVerifyAgent extends Agent {
     public String analyze() {
         LoggerUtil.logExec(Level.INFO, "开始Bug验证流程");
         
-        // 1. 初始分析
+        // 1. 初始分析 
         String initialInsight = performInitialAnalysis();
         LoggerUtil.logExec(Level.INFO, "初始分析完成：" + initialInsight);
         
@@ -242,48 +222,25 @@ public class BugVerifyAgent extends Agent {
         * @param response LLM响应内容
         * 去掉里面的 ```json 和 ``` 标签
      */
-    private static String filiterJsonMark(String response) {
-        if (response == null) return null;
-        var filtered = response.replaceFirst("^```(json)?", "").replaceFirst("```\\s*$$", "");
-        return filtered;
-    }
+//    private static String filiterJsonMark(String response) {
+//        if (response == null) return null;
+//        var filtered = response.replaceFirst("^```(json)?", "").replaceFirst("```\\s*$", "");
+//        return filtered;
+//    }
     
     /**
      * 初始分析阶段 - 分析测试用例和输出，确定问题性质
      */
     private String performInitialAnalysis() {
-        String prompt = """
-                你是一位Java Bug分析专家。请分析以下测试用例和其失败输出，确定问题的性质。
-                
-                <TestCase>
-                %s
-                </TestCase>
-                
-                <Test Output>
-                %s
-                </Test Output>
-                
-                <Initial Analysis>
-                %s
-                </Initial Analysis>
-                
-                请提供关于这个Bug的初步分析:
-                1. Bug的主要症状是什么?
-                2. 可能涉及的Java类或API有哪些?
-                3. 错误可能发生在代码的哪个部分?
-                4. 需要查询哪些额外信息来深入了解这个问题?
-                
-                输出格式:
-                {
-                  "symptoms": "简要描述Bug的症状",
-                  "relevantClasses": ["类名1", "类名2"],
-                  "errorLocation": "错误可能发生的代码部分",
-                  "queries": ["需要查询的信息1", "需要查询的信息2"]
-                }
-                """.formatted(testCode, testOutput, initialAnalysis != null ? initialAnalysis : "无初步分析");
-        
-        String response = llm.messageCompletion(prompt);
-        return filterThinkingChain(response);
+        try {
+            String prompt = PromptGen.generateBugVerifyInitialAnalysisPrompt(testCode, testOutput, initialAnalysis);
+            String response = llm.messageCompletion(prompt, 0.7, true);
+            return filterThinkingChain(response);
+        } catch (TemplateException | IOException e) {
+            LoggerUtil.logExec(Level.SEVERE, "生成初始分析prompt失败: " + e.getMessage());
+            e.printStackTrace();
+            return "";
+        }
     }
     
     /**
@@ -298,7 +255,8 @@ public class BugVerifyAgent extends Agent {
             collectSourceCodeInformation(initialInsight);
             
             // 3. 使用智能搜索工具收集Web信息
-            collectWebInformation(initialInsight);
+            // TODO : 现在跑不起来
+            //collectWebInformation(initialInsight);
             
         } catch (Exception e) {
             LoggerUtil.logExec(Level.WARNING, "信息收集过程中出现错误: " + e.getMessage());
@@ -311,7 +269,7 @@ public class BugVerifyAgent extends Agent {
     private void collectJavaDocInformation(String initialInsight) {
         List<String> relevantClasses = extractJsonArrayFromField(initialInsight, "relevantClasses");
         
-        for (String className : relevantClasses) {
+        for (String className : relevantClasses.subList(0, 1)) { // 只收集一个类
             ToolResponse<String> docResponse = javadocTool.execute(className);
             if (docResponse.isSuccess()) {
                 String infoId = "INFO_" + (++infoCounter);
@@ -343,7 +301,7 @@ public class BugVerifyAgent extends Agent {
     private void collectSourceCodeInformation(String initialInsight) {
         List<String> relevantClasses = extractJsonArrayFromField(initialInsight, "relevantClasses");
         
-        for (String className : relevantClasses) {
+        for (String className : relevantClasses.subList(0, 1)) { // 只收集一个类
             ToolResponse<String> sourceResponse = sourceTool.execute(className);
             if (sourceResponse.isSuccess()) {
                 String infoId = "INFO_" + (++infoCounter);
@@ -509,53 +467,18 @@ public class BugVerifyAgent extends Agent {
 //            }
 //        }
         
-        String prompt = """
-                你是一位Java Bug分析专家。基于测试用例、测试输出和收集到的信息，形成关于问题原因的假设。
-                
-                <TestCase>
-                %s
-                </TestCase>
-                
-                <Test Output>
-                %s
-                </Test Output>
-                
-                <Collected Information>
-                %s
-                </Collected Information>
-                
-                请形成3-5个可能的假设，解释这个问题的原因。请务必考虑以下所有可能性：
-                1. JDK实现中的真正bug
-                2. 测试用例违反了API规范或使用文档
-                3. 测试用例中的逻辑错误
-                4. 测试用例期望的行为超出了API保证的范围
-                5. 环境或配置问题
-                
-                每个假设应该具体明确，并且可以通过修改代码来验证。
-                
-                在分析过程中，请明确标注你引用的信息来源，使用[INFO_X]格式引用，其中X是信息编号。
-                例如："根据[INFO_1]中的JavaDoc文档，HashMap在并发环境下不是线程安全的..."
-                
-                输出格式:
-                {
-                  "hypotheses": [
-                    {
-                      "id": "H1",
-                      "description": "假设描述",
-                      "category": "JDK_BUG|TEST_ERROR|SPEC_VIOLATION|UNDEFINED_BEHAVIOR|ENVIRONMENT_ISSUE",
-                      "rationale": "为什么这是合理的假设",
-                      "verificationCode": "可用于验证这个假设的Java测试代码"
-                    },
-                    ...
-                  ]
-                }
-                """.formatted(testCode, testOutput, infoBuilder.toString());
-        
-        String response = llm.messageCompletion(prompt);
-        hypotheses = extractJsonObjectArrayFromField(response, "hypotheses");
-        
-        // 立即保存假设
-        saveHypotheses();
+        try {
+            String prompt = PromptGen.generateBugVerifyFormHypothesesPrompt(testCode, testOutput, infoBuilder.toString());
+            String response = llm.messageCompletion(prompt, 0.7, true);
+            response = filterThinkingChain(response);
+            hypotheses = extractJsonObjectArrayFromField(response, "hypotheses");
+            
+            // 立即保存假设
+            saveHypotheses();
+        } catch (TemplateException | IOException e) {
+            LoggerUtil.logExec(Level.SEVERE, "生成假设形成prompt失败: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
     
     /**
@@ -727,87 +650,28 @@ public class BugVerifyAgent extends Agent {
         for (Map.Entry<String, String> entry : infoSourceMap.entrySet()) {
             infoSourceBuilder.append("- ").append(entry.getKey()).append(": ").append(entry.getValue()).append("\n");
         }
+        infoSourceBuilder.append(testCase.getApiDoc());
         
         // 根据是否为测试用例问题调整提示模板
-        String reportTemplate;
-        if (hasTestCaseIssueHypothesis) {
-            reportTemplate = """
-                    你是一位Java测试专家。分析表明这可能是测试用例问题而非JDK bug。请生成一份分析报告。
-                    
-                    <TestCase>
-                    %s
-                    </TestCase>
-                    
-                    <Test Output>
-                    %s
-                    </Test Output>
-                    
-                    <Hypotheses>
-                    %s
-                    </Hypotheses>
-                    
-                    <Verification Results>
-                    %s
-                    </Verification Results>
-                    
-                    <Information Sources>
-                    %s
-                    </Information Sources>
-                    
-                    请生成一份详细的测试用例问题分析报告，包括:
-                    1. 问题概述（明确指出这是测试用例问题而非JDK bug）
-                    2. 测试用例中的具体问题
-                    3. 相关API正确用法说明
-                    4. 修复测试用例的建议
-                    5. 相关文档参考
-                    
-                    在分析过程中，请明确标注你引用的信息来源，使用[INFO_X]格式引用，其中X是信息编号。
-                    
-                    请使用Markdown格式输出报告。
-                    """;
-        } else {
-            // 使用原有的Bug报告模板
-            reportTemplate = """
-                    你是一位Java Bug分析专家。请基于测试用例、初始分析和验证结果，生成一份完整的Bug报告。
-                    
-                    <TestCase>
-                    %s
-                    </TestCase>
-                    
-                    <Test Output>
-                    %s
-                    </Test Output>
-                    
-                    <Hypotheses>
-                    %s
-                    </Hypotheses>
-                    
-                    <Verification Results>
-                    %s
-                    </Verification Results>
-                    
-                    <Information Sources>
-                    %s
-                    </Information Sources>
-                    
-                    请生成一份完整的Bug报告，包括:
-                    1. Bug概述，明确说明这是测试用例问题还是JDK BUG
-                    2. 复现步骤
-                    3. 根本原因分析
-                    4. 建议修复方案
-                    5. 相关API或类的使用说明
-                    
-                    在分析过程中，请明确标注你引用的信息来源，使用[INFO_X]格式引用，其中X是信息编号。
-                    
-                    请使用Markdown格式输出报告。
-                    """;
+        try {
+            String prompt;
+            if (hasTestCaseIssueHypothesis) {
+                prompt = PromptGen.generateBugVerifyTestCaseReportPrompt(
+                    testCode, testOutput, hypothesesBuilder.toString(), 
+                    resultsBuilder.toString(), infoSourceBuilder.toString());
+            } else {
+                prompt = PromptGen.generateBugVerifyBugReportPrompt(
+                    testCode, testOutput, hypothesesBuilder.toString(), 
+                    resultsBuilder.toString(), infoSourceBuilder.toString());
+            }
+            
+            conclusion = llm.messageCompletion(prompt);
+            return conclusion;
+        } catch (TemplateException | IOException e) {
+            LoggerUtil.logExec(Level.SEVERE, "生成报告prompt失败: " + e.getMessage());
+            e.printStackTrace();
+            return "生成报告失败: " + e.getMessage();
         }
-        
-        String prompt = reportTemplate.formatted(testCode, testOutput,
-                hypothesesBuilder.toString(), resultsBuilder.toString(), infoSourceBuilder.toString());
-        
-        conclusion = llm.messageCompletion(prompt);
-        return conclusion;
     }
     
     /**
@@ -865,81 +729,53 @@ public class BugVerifyAgent extends Agent {
         return result;
     }
     
-    /**
-     * 使用LLM提取并格式化字符串中的JSON内容
-     * @param input 包含JSON的原始字符串
-     * @return 格式化后的JSON字符串，如果失败则返回null或原始输入
-     */
-    private String string2json(String input) {
-        if (input == null || input.trim().isEmpty()) {
-            return input;
-        }
-        // 先尝试直接解析，如果已经是合法JSON，则直接返回
-        try {
-            ObjectMapper objectMapper = new ObjectMapper();
-            objectMapper.readTree(input.trim());
-            LoggerUtil.logExec(Level.FINE, "输入已经是合法JSON，直接返回");
-            return input.trim(); // Already valid JSON
-        } catch (IOException e) {
-            // Not valid JSON, proceed with LLM formatting
-            LoggerUtil.logExec(Level.FINE, "输入不是合法JSON，尝试使用LLM提取和格式化");
-        }
+    // /**
+    //  * 使用LLM提取并格式化字符串中的JSON内容
+    //  * @param input 包含JSON的原始字符串
+    //  * @return 格式化后的JSON字符串，如果失败则返回null或原始输入
+    //  */
+    // private String string2json(String input) {
+    //     if (input == null || input.trim().isEmpty()) {
+    //         return input;
+    //     }
+    //     // 先尝试直接解析，如果已经是合法JSON，则直接返回
+    //     try {
+    //         ObjectMapper objectMapper = new ObjectMapper();
+    //         objectMapper.readTree(input.trim());
+    //         LoggerUtil.logExec(Level.FINE, "输入已经是合法JSON，直接返回");
+    //         return input.trim(); // Already valid JSON
+    //     } catch (IOException e) {
+    //         // Not valid JSON, proceed with LLM formatting
+    //         LoggerUtil.logExec(Level.FINE, "输入不是合法JSON，尝试使用LLM提取和格式化");
+    //     }
 
-        String prompt = """
-                从以下文本中提取唯一的、完整的 JSON 对象或数组。
-                严格只返回提取到的 JSON 内容，不要包含任何解释、代码标记（例如 ```json ```）或其他文本。
-                确保输出是一个语法完全正确的 JSON 结构。
+    //     String prompt = """
+    //             从以下文本中提取唯一的、完整的 JSON 对象或数组。
+    //             严格只返回提取到的 JSON 内容，不要包含任何解释、代码标记（例如 ```json ```）或其他文本。
+    //             确保输出是一个语法完全正确的 JSON 结构。
+    //             请直接输出提取的 JSON:
+    //             """ + input.trim() + "\n";
 
-                Example Output:
-                {
-                    "hypotheses": [
-                        {
-                            "id": "H1",
-                            "description": "JDK在MessageDigest.getInstance中使用传入的算法名称的大小写作为getAlgorithm()的返回值，而非标准化为大写形式。",
-                            "category": "JDK_BUG",
-                            "rationale": "测试失败显示实际算法名称为小写的'sha'，而预期为大写的'SHA'。若JDK未正确处理算法名称的大小写规范化，导致返回实例的算法名称与传入参数一致而非标准名称，则属于实现错误。",
-                            "verificationCode": "MessageDigest md = MessageDigest.getInstance(\"sha\");\nSystem.out.println(md.getAlgorithm()); // 观察输出是否为'SHA'"
-                        },
-                        {
-                            "id": "H2",
-                            "description": "测试用例错误地假设getAlgorithm()返回的算法名称必须为大写，而API规范允许提供者返回任意大小写形式。",
-                            "category": "TEST_ERROR",
-                            "rationale": "Java API文档未明确要求getAlgorithm()必须返回大写名称，测试用例对大小写的严格校验可能不符合规范。若提供者返回小写名称是合法的，则测试用例存在逻辑错误。",
-                            "verificationCode": "检查javadoc中MessageDigest.getAlgorithm()的规范，确认返回值是否保证标准化大小写。"
-                        },
-                        {
-                            "id": "H3",
-                            "description": "SUN提供者在特定JDK版本中将'SHA'算法注册为小写名称，导致getAlgorithm()返回'sha'。",
-                            "category": "ENVIRONMENT_ISSUE",
-                            "rationale": "若测试使用的安全提供者内部注册的算法名称实际为小写（如\"sha\"），则测试预期的大写形式'SHA'不成立，需检查提供者的注册配置。",
-                            "verificationCode": "Provider p = Security.getProvider(\"SUN\");\nSystem.out.println(p.getService(\"MessageDigest\", \"SHA\")); // 查看注册的算法名称"
-                        }
-                    ]
-                }
+    //     try {
+    //         // 使用 llm_json 模型来确保返回的是 JSON 格式
+    //         String jsonOutput = llm_json.messageCompletion(prompt);
 
-                请直接输出提取的 JSON:
-                """.formatted(input);
-
-        try {
-            // 使用 llm_json 模型来确保返回的是 JSON 格式
-            String jsonOutput = llm_json.messageCompletion(prompt);
-
-            // 再次验证LLM返回的是否是合法JSON
-            try {
-                 ObjectMapper objectMapper = new ObjectMapper();
-                 objectMapper.readTree(jsonOutput);
-                 LoggerUtil.logExec(Level.INFO, "LLM成功返回合法JSON");
-                 return jsonOutput;
-            } catch (IOException validationError) {
-                 LoggerUtil.logExec(Level.WARNING, "LLM返回的不是合法JSON: " + validationError.getMessage() + "\n返回内容:\n" + jsonOutput);
-                 // 返回原始输入或null作为后备
-                 return null;
-            }
-        } catch (Exception e) {
-            LoggerUtil.logExec(Level.SEVERE, "调用LLM进行JSON格式化失败: " + e.getMessage());
-            return null; // Indicate failure
-        }
-    }
+    //         // 再次验证LLM返回的是否是合法JSON
+    //         try {
+    //              ObjectMapper objectMapper = new ObjectMapper();
+    //              objectMapper.readTree(jsonOutput);
+    //              LoggerUtil.logExec(Level.INFO, "LLM成功返回合法JSON");
+    //              return jsonOutput;
+    //         } catch (IOException validationError) {
+    //              LoggerUtil.logExec(Level.WARNING, "LLM返回的不是合法JSON: " + validationError.getMessage() + "\n返回内容:\n" + jsonOutput);
+    //              // 返回原始输入或null作为后备
+    //              return null;
+    //         }
+    //     } catch (Exception e) {
+    //         LoggerUtil.logExec(Level.SEVERE, "调用LLM进行JSON格式化失败: " + e.getMessage());
+    //         return null; // Indicate failure
+    //     }
+    // }
     
     /**
      * 从代码中提取类名
@@ -1070,27 +906,49 @@ public class BugVerifyAgent extends Agent {
             Map<String, String> verifiedBugs = new HashMap<>();
             
             // 解析日志文件，提取已验证的bug
-            for (int i = 0; i < lines.size() - 1; i++) {
-                String line = lines.get(i);
-                if (line.contains("VERIFIED_BUG")) {
-                    // 提取文件路径
-                    int pathStart = line.indexOf(": ") + 2;
-                    int pathEnd = line.lastIndexOf(" VERIFIED_BUG");
+            for (int i = 0; i < lines.size(); i++) {
+                String line = lines.get(i).trim();
+                
+                // 匹配格式：文件路径 VERIFIED_BUG
+                if (line.contains(" VERIFIED_BUG")) {
+                    LoggerUtil.logExec(Level.FINE, "找到VERIFIED_BUG行: " + line);
                     
-                    if (pathEnd > pathStart) {
-                        String filePath = line.substring(pathStart, pathEnd);
-                        filePath = filePath.replace("jdk17u-dev/test", "test"); // 实际的测试用例放在test目录下
+                    // 从行中提取文件路径
+                    String[] parts = line.split("\\s+");
+                    String filePath = null;
+                    
+                    // 查找VERIFIED_BUG前的文件路径
+                    for (int j = 0; j < parts.length - 1; j++) {
+                        if (parts[j + 1].equals("VERIFIED_BUG") && parts[j].contains(".java")) {
+                            filePath = parts[j];
+                            break;
+                        }
+                    }
+                    
+                    if (filePath != null) {
+                        // 标准化文件路径
+                        filePath = filePath.replace("jdk17u-dev/test", "test");
+                        LoggerUtil.logExec(Level.FINE, "提取到文件路径: " + filePath);
                         
-                        // 检查下一行是否包含bug详细信息
-                        if (i + 2 < lines.size()) {
-                            String nextLine = lines.get(i + 2);
+                        // 查找后续几行中的验证消息
+                        String verifyMessage = "";
+                        for (int k = i + 1; k < Math.min(i + 3, lines.size()); k++) {
+                            String nextLine = lines.get(k).trim();
                             if (nextLine.contains("{") && nextLine.contains("}")) {
-                                String verifyMessage = nextLine.substring(nextLine.indexOf("{"));
-                                verifiedBugs.put(filePath, verifyMessage);
-                                LoggerUtil.logExec(Level.INFO, "找到已验证的bug: " + filePath);
+                                verifyMessage = nextLine;
+                                LoggerUtil.logExec(Level.FINE, "找到验证消息: " + verifyMessage);
+                                break;
                             }
                         }
-                        i += 2;
+                        
+                        if (!verifyMessage.isEmpty()) {
+                            verifiedBugs.put(filePath, verifyMessage);
+                            LoggerUtil.logExec(Level.INFO, "成功提取已验证的bug: " + filePath);
+                        } else {
+                            LoggerUtil.logExec(Level.WARNING, "未找到验证消息，文件: " + filePath);
+                        }
+                    } else {
+                        LoggerUtil.logExec(Level.WARNING, "无法从行中提取文件路径: " + line);
                     }
                 }
             }
@@ -1125,7 +983,7 @@ public class BugVerifyAgent extends Agent {
                     JtregExecuteTool jtregTool = new JtregExecuteTool();
                     ToolResponse<TestResult> response = jtregTool.execute(fileToUse.getPath());
                     
-                    String testOutput = "";
+                    String testOutput;
                     if (response.isSuccess()) {
                         testOutput = response.getResult().getOutput();
                     } else {

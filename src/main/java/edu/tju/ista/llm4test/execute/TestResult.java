@@ -121,7 +121,7 @@ public class TestResult {
         return jtregResult;
     }
 
-    @Deprecated
+
     public String toString() {
         if (!execResults.isEmpty()) {
             StringBuilder sb = new StringBuilder();

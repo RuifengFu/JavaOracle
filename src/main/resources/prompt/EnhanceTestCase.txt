@@ -1,4 +1,4 @@
-${THINKING_PROMPT}
+
 <TestCase>
 ${testcase}
 </TestCase>
@@ -114,6 +114,6 @@ You are encouraged to:
 1. First thoroughly understand the API's purpose and behavior
 2. Think about how this API interacts with Java's standard features
 3. Consider common programming patterns and potential misuse
-4. Share your reasoning about why certain tests are important
-5. Suggest tests for API interaction scenarios you think are valuable
+4. Suggest tests for API interaction scenarios you think are valuable
+5. You should contains full testcase in the last java code block.
 </Note> 

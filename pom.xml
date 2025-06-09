@@ -153,8 +153,8 @@
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
-            <version>RELEASE</version>
             <scope>compile</scope>
+            <version>5.11.4</version>
         </dependency>
 
         <dependency>
@@ -198,7 +198,7 @@
     </properties>
     <build>
         <plugins>
-            <!-- The JQF plugin, for invoking the command `mvn jqf:fuzz` -->
+<!--             The JQF plugin, for invoking the command `mvn jqf:fuzz`-->
             <plugin>
                 <groupId>edu.berkeley.cs.jqf</groupId>
                 <artifactId>jqf-maven-plugin</artifactId>
@@ -296,6 +296,10 @@
                         </goals>
                     </execution>
                 </executions>
+                <configuration>
+                    <source>16</source>
+                    <target>16</target>
+                </configuration>
             </plugin>
 
         </plugins>

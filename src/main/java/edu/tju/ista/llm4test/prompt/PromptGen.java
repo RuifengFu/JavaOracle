@@ -49,6 +49,13 @@ public class PromptGen {
             TEMPLATE_MAP.put("ApplyChange", loadResourceAsString("/prompt/ApplyChange.txt"));
             TEMPLATE_MAP.put("RootCause", loadResourceAsString("/prompt/RootCause.txt"));
             TEMPLATE_MAP.put("jdk_doc_conformance_check", loadResourceAsString("/prompt/jdkDocConformanceCheck.txt"));
+            
+            // BugVerify相关模板
+            TEMPLATE_MAP.put("BugVerifyInitialAnalysis", loadResourceAsString("/prompt/BugVerifyInitialAnalysis.txt"));
+            TEMPLATE_MAP.put("BugVerifyFormHypotheses", loadResourceAsString("/prompt/BugVerifyFormHypotheses.txt"));
+            TEMPLATE_MAP.put("BugVerifyTestCaseReport", loadResourceAsString("/prompt/BugVerifyTestCaseReport.txt"));
+            TEMPLATE_MAP.put("BugVerifyBugReport", loadResourceAsString("/prompt/BugVerifyBugReport.txt"));
+            TEMPLATE_MAP.put("BugVerifyJsonExtract", loadResourceAsString("/prompt/BugVerifyJsonExtract.txt"));
         } catch (IOException e) {
             throw new RuntimeException("Failed to load prompt templates from resources", e);
         }
@@ -109,5 +116,48 @@ public class PromptGen {
         dataModel.put("testcase", testCase);
         dataModel.put("testOutput", testOutput);
         return generatePrompt("RootCause", dataModel);
+    }
+
+    // BugVerify相关的便捷方法
+    public static String generateBugVerifyInitialAnalysisPrompt(String testCase, String testOutput, String initialAnalysis) throws TemplateException, IOException {
+        Map<String, Object> dataModel = new HashMap<>();
+        dataModel.put("testCase", testCase);
+        dataModel.put("testOutput", testOutput);
+        dataModel.put("initialAnalysis", initialAnalysis != null ? initialAnalysis : "无初步分析");
+        return generatePrompt("BugVerifyInitialAnalysis", dataModel);
+    }
+
+    public static String generateBugVerifyFormHypothesesPrompt(String testCase, String testOutput, String collectedInformation) throws TemplateException, IOException {
+        Map<String, Object> dataModel = new HashMap<>();
+        dataModel.put("testCase", testCase);
+        dataModel.put("testOutput", testOutput);
+        dataModel.put("collectedInformation", collectedInformation);
+        return generatePrompt("BugVerifyFormHypotheses", dataModel);
+    }
+
+    public static String generateBugVerifyTestCaseReportPrompt(String testCase, String testOutput, String hypotheses, String verificationResults, String informationSources) throws TemplateException, IOException {
+        Map<String, Object> dataModel = new HashMap<>();
+        dataModel.put("testCase", testCase);
+        dataModel.put("testOutput", testOutput);
+        dataModel.put("hypotheses", hypotheses);
+        dataModel.put("verificationResults", verificationResults);
+        dataModel.put("informationSources", informationSources);
+        return generatePrompt("BugVerifyTestCaseReport", dataModel);
+    }
+
+    public static String generateBugVerifyBugReportPrompt(String testCase, String testOutput, String hypotheses, String verificationResults, String informationSources) throws TemplateException, IOException {
+        Map<String, Object> dataModel = new HashMap<>();
+        dataModel.put("testCase", testCase);
+        dataModel.put("testOutput", testOutput);
+        dataModel.put("hypotheses", hypotheses);
+        dataModel.put("verificationResults", verificationResults);
+        dataModel.put("informationSources", informationSources);
+        return generatePrompt("BugVerifyBugReport", dataModel);
+    }
+
+    public static String generateBugVerifyJsonExtractPrompt(String input) throws TemplateException, IOException {
+        Map<String, Object> dataModel = new HashMap<>();
+        dataModel.put("input", input);
+        return generatePrompt("BugVerifyJsonExtract", dataModel);
     }
 }

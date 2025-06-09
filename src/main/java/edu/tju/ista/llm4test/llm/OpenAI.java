@@ -69,15 +69,15 @@ public class OpenAI {
     }
 
     public static OpenAI R1;
-    public static OpenAI V3_json;
+    public static OpenAI V3;
     public static OpenAI Doubao;
 
     static {
 
         R1 = new OpenAI();
-        V3_json = new OpenAI();
-        V3_json.MODEL = "deepseek-chat";
-        V3_json.JSON_OUTPUT = true;
+        V3 = new OpenAI();
+        V3.MODEL = "deepseek-chat";
+        V3.JSON_OUTPUT = true;
         var ark_api_key = System.getenv("ARK_API_KEY");
         var ark_base_url = System.getenv("ARK_BASE_URL");
         Doubao = new OpenAI(ark_api_key, ark_base_url, "ep-20250214193558-qh465");
@@ -227,10 +227,16 @@ public class OpenAI {
         }
     }
 
-
     public String messageCompletion(String prompt, double temperature) {
+        return messageCompletion(prompt, temperature, false);
+    }
+
+    public String messageCompletion(String prompt, double temperature, boolean jsonOutput) {
         try {
             Map<String, Object> requestBody = getBaseRequestMap(prompt);
+            if (jsonOutput) {
+                requestBody.put("response_format", Map.of("type", "json_object"));
+            }
             // update temperature
             requestBody.put("temperature", temperature);
             if (STREAM) {

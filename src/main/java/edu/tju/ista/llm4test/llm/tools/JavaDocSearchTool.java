@@ -1,9 +1,8 @@
 package edu.tju.ista.llm4test.llm.tools;
 
 import edu.tju.ista.llm4test.llm.OpenAI;
-import edu.tju.ista.llm4test.utils.ApiDocProcessor;
+import edu.tju.ista.llm4test.utils.ApiInfoProcessor;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
-import edu.tju.ista.llm4test.utils.ContentProcessor;
 
 import java.io.File;
 import java.nio.file.Files;
@@ -24,7 +23,7 @@ import org.jsoup.select.Elements;
 public class JavaDocSearchTool implements Tool<String> {
     private final String javadocBasePath;
     private final OpenAI llm;
-    private final ApiDocProcessor docProcessor;
+    private final ApiInfoProcessor docProcessor;
     private final ContentProcessor contentProcessor;
     
     /**
@@ -34,7 +33,7 @@ public class JavaDocSearchTool implements Tool<String> {
     public JavaDocSearchTool(String javadocBasePath) {
         this.javadocBasePath = javadocBasePath;
         this.llm = OpenAI.R1;
-        this.docProcessor = new ApiDocProcessor(javadocBasePath);
+        this.docProcessor = new ApiInfoProcessor(javadocBasePath);
         this.contentProcessor = new ContentProcessor(javadocBasePath + "/doc_cache");
     }
     

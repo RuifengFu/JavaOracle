@@ -1,4 +1,5 @@
 package edu.tju.ista.llm4test.javaparser;
+import com.github.javaparser.ParserConfiguration;
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.expr.MethodCallExpr;
@@ -42,7 +43,8 @@ public class APISignatureExtractor {
         try {
             // 配置符号解析器
             JavaSymbolSolver symbolSolver = new JavaSymbolSolver(typeSolver);
-            StaticJavaParser.getConfiguration().setSymbolResolver(symbolSolver);
+            StaticJavaParser.getParserConfiguration().setSymbolResolver(symbolSolver);
+            StaticJavaParser.getParserConfiguration().setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17);
 
             // 解析Java文件
             File file = new File(filePath);
@@ -82,6 +84,7 @@ public class APISignatureExtractor {
             return signatures;
 
         } catch (Exception e) {
+            e.printStackTrace();
             throw new RuntimeException("Failed to extract signatures from file: " + filePath, e);
         }
     }
