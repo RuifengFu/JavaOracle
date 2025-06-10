@@ -247,6 +247,11 @@ public class BugVerifyAgent extends Agent {
      * 信息收集阶段 - 使用智能搜索工具根据初始分析收集相关信息
      */
     private void collectRelevantInformation(String initialInsight) {
+        // 暂时跳过收集资料的过程
+        LoggerUtil.logExec(Level.INFO, "暂时跳过信息收集阶段");
+        return;
+        
+        /*
         try {
             // 1. 收集JavaDoc信息（基于初始分析提取的相关类）
             collectJavaDocInformation(initialInsight);
@@ -261,6 +266,7 @@ public class BugVerifyAgent extends Agent {
         } catch (Exception e) {
             LoggerUtil.logExec(Level.WARNING, "信息收集过程中出现错误: " + e.getMessage());
         }
+        */
     }
     
     /**
@@ -644,13 +650,23 @@ public class BugVerifyAgent extends Agent {
             }
         }
         
-        // 构建信息源映射
+        // 构建信息源映射，添加API信息和源码
         StringBuilder infoSourceBuilder = new StringBuilder();
         infoSourceBuilder.append("# 信息源映射\n\n");
         for (Map.Entry<String, String> entry : infoSourceMap.entrySet()) {
             infoSourceBuilder.append("- ").append(entry.getKey()).append(": ").append(entry.getValue()).append("\n");
         }
-        infoSourceBuilder.append(testCase.getApiDoc());
+        
+        // 添加测试用例的API文档信息
+        if (testCase != null) {
+            infoSourceBuilder.append("\n# 测试用例API信息和源码\n\n");
+            String apiInfoWithSource = testCase.getApiInfoWithSource();
+            if (apiInfoWithSource != null && !apiInfoWithSource.isEmpty()) {
+                infoSourceBuilder.append(apiInfoWithSource).append("\n");
+            } else {
+                infoSourceBuilder.append("无API信息和源码数据\n");
+            }
+        }
         
         // 根据是否为测试用例问题调整提示模板
         try {

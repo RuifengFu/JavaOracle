@@ -551,4 +551,15 @@ public class TestCase {
         }
         return file.delete();
     }
+
+    public String getApiInfoWithSource() {
+        StringBuilder sb = new StringBuilder();
+        try {
+            var map = apiInfoProcessor.getApiDocWithSource(file);
+            map.forEach((k, v) -> {sb.append(k).append("\n").append(v).append("\n--------------\n");});
+        } catch (Exception e) {
+            return "Failed to get API Info";
+        }
+        return sb.toString();
+    }
 }

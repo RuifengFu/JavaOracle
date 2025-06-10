@@ -1,6 +1,6 @@
 package edu.tju.ista.llm4test;
 
-import edu.tju.ista.llm4test.config.ApplicationConfig;
+import edu.tju.ista.llm4test.config.GlobalConfig;
 import edu.tju.ista.llm4test.service.CommandHandler;
 
 /**
@@ -11,7 +11,7 @@ public class Main {
 
     public static void main(String[] args) {
         // 设置系统属性
-        if (ApplicationConfig.isUseSystemProxies()) {
+        if (GlobalConfig.isUseSystemProxies()) {
             System.setProperty("java.net.useSystemProxies", "true");
         }
         

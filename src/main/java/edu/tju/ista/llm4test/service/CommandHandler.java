@@ -1,6 +1,6 @@
 package edu.tju.ista.llm4test.service;
 
-import edu.tju.ista.llm4test.config.ApplicationConfig;
+import edu.tju.ista.llm4test.config.GlobalConfig;
 import edu.tju.ista.llm4test.execute.TestExecutor;
 
 import java.io.File;
@@ -18,12 +18,12 @@ public class CommandHandler {
      * @param testPath 测试路径
      */
     public static void handleExecuteCommand(String testPath) {
-        File resultDir = ApplicationConfig.ensureDirectoryExists(ApplicationConfig.getTestDir());
-        String baseDocPath = ApplicationConfig.getBaseDocPath();
-        String suitePath = ApplicationConfig.getSuiteBasePath() + testPath;
+        File resultDir = GlobalConfig.ensureDirectoryExists(GlobalConfig.getTestDir());
+        String baseDocPath = GlobalConfig.getBaseDocPath();
+        String suitePath = GlobalConfig.getSuiteBasePath() + testPath;
         
         TestExecutionManager manager = new TestExecutionManager(
-            ApplicationConfig.getJarPath(), 
+            GlobalConfig.getJarPath(),
             resultDir, 
             baseDocPath, 
             suitePath
@@ -42,12 +42,12 @@ public class CommandHandler {
      * @param testPath 测试路径
      */
     public static void handleGenerateCommand(String testPath) {
-        File resultDir = ApplicationConfig.ensureDirectoryExists(ApplicationConfig.getTestDir());
-        String baseDocPath = ApplicationConfig.getBaseDocPath();
-        String suitePath = ApplicationConfig.getJdkTestPath() + "/jdk/" + testPath;
+        File resultDir = GlobalConfig.ensureDirectoryExists(GlobalConfig.getTestDir());
+        String baseDocPath = GlobalConfig.getBaseDocPath();
+        String suitePath = GlobalConfig.getJdkTestPath() + "/jdk/" + testPath;
         
         TestExecutionManager manager = new TestExecutionManager(
-            ApplicationConfig.getJarPath(), 
+            GlobalConfig.getJarPath(),
             resultDir, 
             baseDocPath, 
             suitePath

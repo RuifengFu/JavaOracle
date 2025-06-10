@@ -6,7 +6,7 @@ import java.io.File;
  * 应用程序配置管理类
  * 从config.properties文件读取所有配置项
  */
-public class ApplicationConfig {
+public class GlobalConfig {
     
     // 默认值常量（当配置文件中没有对应配置时使用）
     private static final String DEFAULT_TEST_DIR = "test";
@@ -34,6 +34,10 @@ public class ApplicationConfig {
     private static final String DEFAULT_JDK_XML_SOURCE_PATH = "jdk17u-dev/src/java.xml/share/classes";
     private static final String DEFAULT_JDK_DESKTOP_SOURCE_PATH = "jdk17u-dev/src/java.desktop/share/classes";
     private static final String DEFAULT_SOURCE_PREFIX = "java.base/share/classes";
+    
+    // 缓存相关默认配置
+    private static final String DEFAULT_VALID_TEST_CASES_PATH = "ValidTestCases.txt";
+    private static final boolean DEFAULT_USE_CACHE_MODE = false;
     
     /**
      * 获取测试目录
@@ -188,5 +192,19 @@ public class ApplicationConfig {
      */
     public static String getDefaultSourcePrefix() {
         return ConfigUtil.getOrDefault("defaultSourcePrefix", DEFAULT_SOURCE_PREFIX);
+    }
+    
+    /**
+     * 获取有效测试用例缓存文件路径
+     */
+    public static String getValidTestCasesPath() {
+        return ConfigUtil.getOrDefault("validTestCasesPath", DEFAULT_VALID_TEST_CASES_PATH);
+    }
+    
+    /**
+     * 是否使用缓存模式进行测试用例过滤
+     */
+    public static boolean isUseCacheMode() {
+        return ConfigUtil.getBoolean("useCacheMode", DEFAULT_USE_CACHE_MODE);
     }
 } 

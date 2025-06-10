@@ -2,7 +2,7 @@ package edu.tju.ista.llm4test.utils;
 
 
 import edu.tju.ista.llm4test.javaparser.APISignatureExtractor;
-import edu.tju.ista.llm4test.config.ApplicationConfig;
+import edu.tju.ista.llm4test.config.GlobalConfig;
 import org.jsoup.nodes.Document;
 import com.thoughtworks.qdox.JavaProjectBuilder;
 import com.thoughtworks.qdox.model.JavaClass;
@@ -12,15 +12,39 @@ import java.io.File;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.nio.file.Paths;
 import java.util.List;
 import java.util.Arrays;
 
 public class ApiInfoProcessor {
+    
+    /**
+     * 路径类型枚举
+     */
+    private enum PathType {
+        SOURCE(".java"),
+        DOC(".html");
+        
+        private final String extension;
+        
+        PathType(String extension) {
+            this.extension = extension;
+        }
+        
+        public String getExtension() {
+            return extension;
+        }
+    }
+    
     private final String baseDocPath;
     private final String jdkSourcePath;
     private final String defaultSourcePrefix;
     private final APISignatureExtractor extractor;
+    
+    // 缓存：类的完整标识 -> 文件路径
+    private final Map<String, String> sourcePathCache = new ConcurrentHashMap<>();
+    private final Map<String, String> docPathCache = new ConcurrentHashMap<>();
 
     public ApiInfoProcessor(String baseDocPath) {
         this.baseDocPath = baseDocPath;
@@ -29,13 +53,7 @@ public class ApiInfoProcessor {
         this.extractor = new APISignatureExtractor();
     }
     
-    public ApiInfoProcessor(String baseDocPath, String jdkSourcePath) {
-        this.baseDocPath = baseDocPath;
-        this.jdkSourcePath = jdkSourcePath;
-        this.defaultSourcePrefix = null;
-        this.extractor = new APISignatureExtractor();
-    }
-    
+
     /**
      * 支持JDK源码查找的构造函数
      */
@@ -50,9 +68,9 @@ public class ApiInfoProcessor {
      * 从配置文件创建ApiDocProcessor实例
      */
     public static ApiInfoProcessor fromConfig() {
-        String baseDocPath = ApplicationConfig.getBaseDocPath();
-        String jdkSourcePath = ApplicationConfig.getJdkSourcePath();
-        String defaultSourcePrefix = ApplicationConfig.getDefaultSourcePrefix();
+        String baseDocPath = GlobalConfig.getBaseDocPath();
+        String jdkSourcePath = GlobalConfig.getJdkSourcePath();
+        String defaultSourcePrefix = GlobalConfig.getDefaultSourcePrefix();
         
         return new ApiInfoProcessor(baseDocPath, jdkSourcePath, defaultSourcePrefix);
     }
@@ -90,15 +108,9 @@ public class ApiInfoProcessor {
             String methodKey = signature.getClassName() + "." + signature.getMethodName();
             StringBuilder methodInfo = new StringBuilder();
             
-            // 添加方法签名信息
-            methodInfo.append("=== 方法信息 ===\n");
-            methodInfo.append("完整限定名: ").append(signature.getQualifiedName()).append("\n");
-            methodInfo.append("包名: ").append(signature.getPackageName()).append("\n");
-            methodInfo.append("类名: ").append(signature.getClassName()).append("\n");
-            methodInfo.append("方法名: ").append(signature.getMethodName()).append("\n");
-            methodInfo.append("返回类型: ").append(signature.getReturnType()).append("\n");
-            methodInfo.append("完整签名: ").append(signature.getSignature()).append("\n");
-            methodInfo.append("调用行号: ").append(signature.getLineNumber()).append("\n\n");
+
+            methodInfo.append("方法签名: ").append(signature.getSignature()).append("\n");
+
             
             // 获取API源码
             String sourceCode = getMethodSourceCode(signature);
@@ -114,7 +126,7 @@ public class ApiInfoProcessor {
                 methodInfo.append(apiDoc).append("\n\n");
             }
             
-            result.put(methodKey + "_L" + signature.getLineNumber(), methodInfo.toString());
+            result.put(methodKey, methodInfo.toString());
         }
         
         // 3. 获取涉及的类的文档信息
@@ -134,66 +146,77 @@ public class ApiInfoProcessor {
     }
     
     /**
-     * 获取指定方法的源码
-     * @param signature 方法签名
-     * @return 方法源码，如果找不到返回null
+     * 统一的类路径查找方法
+     * @param packageName 包名
+     * @param className 类名
+     * @param type 路径类型（源码或文档）
+     * @return 找到的文件路径，如果未找到返回null
      */
-    private String getMethodSourceCode(APISignatureExtractor.MethodSignature signature) {
-        if (jdkSourcePath == null) {
-            return "JDK源码路径未配置";
+    private String findClassPath(String packageName, String className, PathType type) {
+        String cacheKey = packageName + "." + className;
+        Map<String, String> cache = (type == PathType.SOURCE) ? sourcePathCache : docPathCache;
+        
+        // 1. 先检查缓存
+        if (cache.containsKey(cacheKey)) {
+            return cache.get(cacheKey);
         }
         
+        String foundPath = null;
+        String fileName = className + type.getExtension();
+        String packagePath = packageName.replace('.', File.separatorChar);
+        
         try {
-            // 构建源码文件路径
-            String packagePath = signature.getPackageName().replace('.', '/');
-            String className = signature.getClassName() + ".java";
-            
-            File sourceFile = null;
-            String sourceFilePath = null;
-            
-            // 1. 优先在默认路径查找：jdkSourcePath + defaultSourcePrefix
-            if (defaultSourcePrefix != null) {
-                sourceFilePath = Paths.get(jdkSourcePath, defaultSourcePrefix, packagePath, className).toString();
-                sourceFile = new File(sourceFilePath);
-                
-                if (sourceFile.exists()) {
-                    return parseMethodFromFile(sourceFile, signature);
+            // 2. 尝试默认路径
+            if (type == PathType.SOURCE && jdkSourcePath != null && defaultSourcePrefix != null) {
+                String defaultPath = Paths.get(jdkSourcePath, defaultSourcePrefix, packagePath, fileName).toString();
+                if (new File(defaultPath).exists()) {
+                    foundPath = defaultPath;
+                }
+            } else if (type == PathType.DOC && baseDocPath != null) {
+                // 对于文档，默认路径是 baseDocPath/packagePath/className.html
+                String defaultPath = Paths.get(baseDocPath, packagePath, fileName).toString();
+                if (new File(defaultPath).exists()) {
+                    foundPath = defaultPath;
                 }
             }
             
-            // 2. 如果默认路径找不到，使用find命令动态查找
-            String foundPath = findSourceFileUsingFind(signature.getPackageName(), className);
-            if (foundPath != null) {
-                sourceFile = new File(foundPath);
-                if (sourceFile.exists()) {
-                    return parseMethodFromFile(sourceFile, signature);
-                }
+            // 3. 如果默认路径找不到，使用find命令搜索
+            if (foundPath == null) {
+                foundPath = findPathUsingFind(packageName, fileName, type);
             }
             
-            return "源码文件不存在。尝试的路径: " + sourceFilePath + 
-                   (foundPath != null ? ", find结果: " + foundPath : ", find未找到");
+            // 4. 缓存结果（包括null结果，避免重复搜索）
+            cache.put(cacheKey, foundPath);
             
         } catch (Exception e) {
-            return "获取源码失败: " + e.getMessage();
+            System.err.println("查找类路径失败: " + cacheKey + " (" + type + ") - " + e.getMessage());
+            cache.put(cacheKey, null);
         }
+        
+        return foundPath;
     }
     
     /**
-     * 使用find命令查找源码文件
+     * 使用find命令查找文件路径
      * @param packageName 包名
-     * @param className 类名（包含.java扩展名）
+     * @param fileName 文件名（包含扩展名）
+     * @param type 路径类型
      * @return 找到的文件路径，如果未找到返回null
      */
-    private String findSourceFileUsingFind(String packageName, String className) {
+    private String findPathUsingFind(String packageName, String fileName, PathType type) {
         try {
-            // 构建包路径作为搜索模式
-            String packagePath = packageName.replace('.', '/');
-            String searchPattern = "*/" + packagePath + "/" + className;
+            String packagePath = packageName.replace('.', File.separatorChar);
+            String searchPattern = "*" + File.separator + packagePath + File.separator + fileName;
+            String searchRoot = (type == PathType.SOURCE) ? jdkSourcePath : baseDocPath;
+            
+            if (searchRoot == null) {
+                return null;
+            }
             
             // 构建find命令
             List<String> command = Arrays.asList(
                 "find", 
-                jdkSourcePath, 
+                searchRoot, 
                 "-path", searchPattern,
                 "-type", "f"
             );
@@ -218,11 +241,107 @@ public class ApiInfoProcessor {
             }
             
         } catch (Exception e) {
-            // find命令失败，静默处理
             System.err.println("find命令执行失败: " + e.getMessage());
         }
         
         return null;
+    }
+    
+    /**
+     * 获取指定方法的源码
+     * @param signature 方法签名
+     * @return 方法源码，如果找不到返回null
+     */
+    private String getMethodSourceCode(APISignatureExtractor.MethodSignature signature) {
+        if (jdkSourcePath == null) {
+            return "JDK源码路径未配置";
+        }
+        
+        try {
+            // 使用统一的路径查找方法
+            String sourceFilePath = findClassPath(signature.getPackageName(), signature.getClassName(), PathType.SOURCE);
+            
+            if (sourceFilePath == null) {
+                return "源码文件不存在: " + signature.getPackageName() + "." + signature.getClassName();
+            }
+            
+            File sourceFile = new File(sourceFilePath);
+            if (!sourceFile.exists()) {
+                return "源码文件不存在: " + sourceFilePath;
+            }
+            
+            return parseMethodFromFile(sourceFile, signature);
+            
+        } catch (Exception e) {
+            return "获取源码失败: " + e.getMessage();
+        }
+    }
+    
+    /**
+     * 获取API文档
+     * @param signature 方法签名
+     * @return API文档，如果找不到返回null
+     */
+    private String getApiDocumentation(APISignatureExtractor.MethodSignature signature) {
+        try {
+            // 使用统一的路径查找方法找到HTML文档
+            String docFilePath = findClassPath(signature.getPackageName(), signature.getClassName(), PathType.DOC);
+            
+            if (docFilePath == null) {
+                return "API文档文件不存在: " + signature.getPackageName() + "." + signature.getClassName();
+            }
+            
+            File docFile = new File(docFilePath);
+            if (!docFile.exists()) {
+                return "API文档文件不存在: " + docFilePath;
+            }
+            
+            // 使用HtmlParser解析HTML文件
+            Document doc = HtmlParser.getDocumentFromFile(docFile);
+            if (doc == null) {
+                return "解析API文档失败: " + docFilePath;
+            }
+            
+            var methodDetails = HtmlParser.getMethodDetails(doc);
+            String methodDoc = methodDetails.get(signature.getMethodName());
+            
+            return methodDoc != null ? methodDoc : "未找到方法文档: " + signature.getMethodName();
+            
+        } catch (Exception e) {
+            return "获取API文档失败: " + e.getMessage();
+        }
+    }
+    
+    /**
+     * 获取类文档
+     * @param signature 方法签名（用于获取类信息）
+     * @return 类文档，如果找不到返回null
+     */
+    private String getClassDocumentation(APISignatureExtractor.MethodSignature signature) {
+        try {
+            // 使用统一的路径查找方法找到HTML文档
+            String docFilePath = findClassPath(signature.getPackageName(), signature.getClassName(), PathType.DOC);
+            
+            if (docFilePath == null) {
+                return "类文档文件不存在: " + signature.getPackageName() + "." + signature.getClassName();
+            }
+            
+            File docFile = new File(docFilePath);
+            if (!docFile.exists()) {
+                return "类文档文件不存在: " + docFilePath;
+            }
+            
+            // 使用HtmlParser解析HTML文件
+            Document doc = HtmlParser.getDocumentFromFile(docFile);
+            if (doc == null) {
+                return "解析类文档失败: " + docFilePath;
+            }
+            
+            return HtmlParser.getClassDescriptionText(doc);
+            
+        } catch (Exception e) {
+            return "获取类文档失败: " + e.getMessage();
+        }
     }
     
     /**
@@ -268,39 +387,6 @@ public class ApiInfoProcessor {
             
         } catch (Exception e) {
             return "解析源码文件失败: " + e.getMessage() + " (文件: " + sourceFile.getAbsolutePath() + ")";
-        }
-    }
-    
-    /**
-     * 获取API文档
-     * @param signature 方法签名
-     * @return API文档，如果找不到返回null
-     */
-    private String getApiDocumentation(APISignatureExtractor.MethodSignature signature) {
-        try {
-            Document doc = HtmlParser.getDocument(baseDocPath,
-                    signature.getPackageName(),
-                    signature.getClassName());
-            var methodDetails = HtmlParser.getMethodDetails(doc);
-            return methodDetails.get(signature.getMethodName());
-        } catch (Exception e) {
-            return "获取API文档失败: " + e.getMessage();
-        }
-    }
-    
-    /**
-     * 获取类文档
-     * @param signature 方法签名（用于获取类信息）
-     * @return 类文档，如果找不到返回null
-     */
-    private String getClassDocumentation(APISignatureExtractor.MethodSignature signature) {
-        try {
-            Document doc = HtmlParser.getDocument(baseDocPath,
-                    signature.getPackageName(),
-                    signature.getClassName());
-            return HtmlParser.getClassDescriptionText(doc);
-        } catch (Exception e) {
-            return "获取类文档失败: " + e.getMessage();
         }
     }
 }

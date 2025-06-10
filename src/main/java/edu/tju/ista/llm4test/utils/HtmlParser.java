@@ -62,6 +62,16 @@ public class HtmlParser {
         return Jsoup.parse(new File(file), "UTF-8");
     }
 
+    /**
+     * 从文件直接获取HTML文档
+     * @param file HTML文件
+     * @return Jsoup Document对象
+     * @throws IOException 如果文件读取失败
+     */
+    public static Document getDocumentFromFile(File file) throws IOException {
+        return Jsoup.parse(file, "UTF-8");
+    }
+
     public static void main(String[] args) {
         // Example usage
         try {

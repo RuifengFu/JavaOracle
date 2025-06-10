@@ -1,6 +1,6 @@
 package edu.tju.ista.llm4test.service;
 
-import edu.tju.ista.llm4test.config.ApplicationConfig;
+import edu.tju.ista.llm4test.config.GlobalConfig;
 import edu.tju.ista.llm4test.llm.agents.BugVerifyAgent;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
 
@@ -25,8 +25,8 @@ public class BugVerificationService {
         LoggerUtil.logResult(Level.INFO, "使用日志文件: " + logPath);
         
         // 设置路径
-        String baseDocPath = ApplicationConfig.getBaseDocPath();
-        String jdkSourcePath = ApplicationConfig.getJdkSourcePath();
+        String baseDocPath = GlobalConfig.getBaseDocPath();
+        String jdkSourcePath = GlobalConfig.getJdkSourcePath();
         
         // 创建Bug报告目录
         String bugReportPath = createBugReportDirectory();
@@ -39,7 +39,7 @@ public class BugVerificationService {
      * 使用默认日志路径验证Bug
      */
     public static void verifyBugs() {
-        verifyBugs(ApplicationConfig.getLogFile());
+        verifyBugs(GlobalConfig.getLogFile());
     }
     
     /**
@@ -49,7 +49,7 @@ public class BugVerificationService {
      */
     private static String createBugReportDirectory() {
         String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
-        String bugReportPath = ApplicationConfig.getBugReportDir() + "/" + timestamp;
+        String bugReportPath = GlobalConfig.getBugReportDir() + "/" + timestamp;
         
         File bugReportDir = new File(bugReportPath);
         if (!bugReportDir.exists()) {

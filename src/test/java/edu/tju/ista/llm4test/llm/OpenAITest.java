@@ -10,7 +10,7 @@ public class OpenAITest {
 
     @Test
     public void testCall() {
-        String res = OpenAI.Doubao.messageCompletion("write a snake game");
+        String res = OpenAI.R1.messageCompletion("write a snake game");
         System.out.println("Answer: " + res);
     }
 
