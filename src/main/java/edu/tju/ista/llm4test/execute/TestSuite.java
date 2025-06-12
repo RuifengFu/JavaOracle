@@ -109,7 +109,7 @@ public class TestSuite {
      * 从缓存文件加载成功的测试用例
      */
     private List<TestCase> loadSuccessfulTestCasesFromCache(Function<File, TestCase> testCaseFactory, TestExecutor testExecutor) {
-        String cachePath = GlobalConfig.getValidTestCasesPath();
+        String cachePath = GlobalConfig.getValidTestCasesPath(rootPath);
         Path cacheFile = Paths.get(cachePath);
         
         if (!Files.exists(cacheFile)) {
@@ -139,7 +139,7 @@ public class TestSuite {
                 }
             }
             
-            LoggerUtil.logExec(Level.INFO, "从缓存加载了 " + successfulTestCases.size() + " 个成功测试用例");
+            LoggerUtil.logExec(Level.INFO, "从缓存文件 " + cachePath + " 加载了 " + successfulTestCases.size() + " 个成功测试用例");
             return successfulTestCases;
             
         } catch (IOException e) {
@@ -196,7 +196,7 @@ public class TestSuite {
      */
     private void saveSuccessfulTestCasesToCache(List<TestCase> successfulTestCases) {
         try {
-            String cachePath = GlobalConfig.getValidTestCasesPath();
+            String cachePath = GlobalConfig.getValidTestCasesPath(rootPath);
             List<String> testCasePaths = successfulTestCases.stream()
                     .map(testCase -> {
                         String fullPath = testCase.getOriginFile().getAbsolutePath();

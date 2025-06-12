@@ -126,6 +126,7 @@ public class TestCase {
      */
     public void setApiDocProcessor(ApiInfoProcessor apiInfoProcessor) {
         this.apiInfoProcessor = apiInfoProcessor;
+        recalculateApiDocs();
     }
     
     /**
@@ -360,9 +361,9 @@ public class TestCase {
 
     public void applyChange(String change){
         try {
-            String testcase = getTestcaseWithLineNumber();
+            String testcase = getSourceCode();
             Map<String, Object> dataModel = new HashMap<>();
-            dataModel.put("originTestcase", originTestCase);
+            dataModel.put("originTestcase", testcase);
             dataModel.put("modified", change);
             String prompt = PromptGen.generatePrompt("ApplyChange", dataModel);
             String text = OpenAI.Doubao.messageCompletion(prompt);

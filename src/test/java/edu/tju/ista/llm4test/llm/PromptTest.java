@@ -1,5 +1,6 @@
 package edu.tju.ista.llm4test.llm;
 
+import edu.tju.ista.llm4test.execute.TestCase;
 import edu.tju.ista.llm4test.prompt.PromptGen;
 import edu.tju.ista.llm4test.utils.ApiInfoProcessor;
 import freemarker.template.TemplateException;
@@ -15,15 +16,16 @@ public class PromptTest {
     @Test
     public void genPrompt() throws IOException, TemplateException {
         File file = new File("jdk17u-dev/test/jdk/java/util/Calendar/bug4401223.java");
-
-        var processor = new ApiInfoProcessor("JavaDoc/docs/api/java.base");
-        var docs = processor.processApiDocs(file);
+        var testCase = new TestCase(file);
+        testCase.setOriginFile(file);
+        testCase.setApiDocProcessor(new ApiInfoProcessor("JavaDoc/docs/api/java.base"));
 
         var dataModel = new HashMap<String, Object>();
-        dataModel.put("apiDocs", docs);
-        dataModel.put("testcase", FileUtils.readFileToString(file));
+        dataModel.put("apiDocs", testCase.getApiDoc());
+        dataModel.put("testcase", testCase.getSourceCode());
 
         var prompt = PromptGen.generatePrompt("EnhanceTestCase", dataModel);
         System.out.println(prompt);
     }
+
 }

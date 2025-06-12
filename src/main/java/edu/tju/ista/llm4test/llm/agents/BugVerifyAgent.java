@@ -160,7 +160,7 @@ public class BugVerifyAgent extends Agent {
      */
     public String analyze() {
         LoggerUtil.logExec(Level.INFO, "开始Bug验证流程");
-        
+                               
         // 1. 初始分析 
         String initialInsight = performInitialAnalysis();
         LoggerUtil.logExec(Level.INFO, "初始分析完成：" + initialInsight);
@@ -671,15 +671,21 @@ public class BugVerifyAgent extends Agent {
         // 根据是否为测试用例问题调整提示模板
         try {
             String prompt;
+            String promptType;
             if (hasTestCaseIssueHypothesis) {
                 prompt = PromptGen.generateBugVerifyTestCaseReportPrompt(
                     testCode, testOutput, hypothesesBuilder.toString(), 
                     resultsBuilder.toString(), infoSourceBuilder.toString());
+                promptType = "test_case_report";
             } else {
                 prompt = PromptGen.generateBugVerifyBugReportPrompt(
                     testCode, testOutput, hypothesesBuilder.toString(), 
                     resultsBuilder.toString(), infoSourceBuilder.toString());
+                promptType = "bug_report";
             }
+            
+            // 保存完整的prompt到文件
+            savePromptToFile(prompt, promptType, hasTestCaseIssueHypothesis, testIssueHypothesisId);
             
             conclusion = llm.messageCompletion(prompt);
             return conclusion;
@@ -687,6 +693,28 @@ public class BugVerifyAgent extends Agent {
             LoggerUtil.logExec(Level.SEVERE, "生成报告prompt失败: " + e.getMessage());
             e.printStackTrace();
             return "生成报告失败: " + e.getMessage();
+        }
+    }
+    
+    /**
+     * 保存生成报告的完整prompt到文件
+     */
+    private void savePromptToFile(String prompt, String promptType, boolean hasTestCaseIssue, String testIssueHypothesisId) {
+        if (verifyContextFolder == null || testCaseName == null) return;
+        
+        try {
+            Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
+            Path promptsDir = verifyContextPath.resolve("prompts");
+            Files.createDirectories(promptsDir);
+            
+            // 直接保存prompt内容
+            String promptFileName = "generate_report_" + promptType + "_prompt.txt";
+            saveToFile(promptsDir.resolve(promptFileName).toString(), prompt);
+            
+            LoggerUtil.logExec(Level.INFO, "已保存生成报告的prompt: " + promptFileName);
+            
+        } catch (IOException e) {
+            LoggerUtil.logExec(Level.WARNING, "保存prompt失败: " + e.getMessage());
         }
     }
     
@@ -744,54 +772,6 @@ public class BugVerifyAgent extends Agent {
         }
         return result;
     }
-    
-    // /**
-    //  * 使用LLM提取并格式化字符串中的JSON内容
-    //  * @param input 包含JSON的原始字符串
-    //  * @return 格式化后的JSON字符串，如果失败则返回null或原始输入
-    //  */
-    // private String string2json(String input) {
-    //     if (input == null || input.trim().isEmpty()) {
-    //         return input;
-    //     }
-    //     // 先尝试直接解析，如果已经是合法JSON，则直接返回
-    //     try {
-    //         ObjectMapper objectMapper = new ObjectMapper();
-    //         objectMapper.readTree(input.trim());
-    //         LoggerUtil.logExec(Level.FINE, "输入已经是合法JSON，直接返回");
-    //         return input.trim(); // Already valid JSON
-    //     } catch (IOException e) {
-    //         // Not valid JSON, proceed with LLM formatting
-    //         LoggerUtil.logExec(Level.FINE, "输入不是合法JSON，尝试使用LLM提取和格式化");
-    //     }
-
-    //     String prompt = """
-    //             从以下文本中提取唯一的、完整的 JSON 对象或数组。
-    //             严格只返回提取到的 JSON 内容，不要包含任何解释、代码标记（例如 ```json ```）或其他文本。
-    //             确保输出是一个语法完全正确的 JSON 结构。
-    //             请直接输出提取的 JSON:
-    //             """ + input.trim() + "\n";
-
-    //     try {
-    //         // 使用 llm_json 模型来确保返回的是 JSON 格式
-    //         String jsonOutput = llm_json.messageCompletion(prompt);
-
-    //         // 再次验证LLM返回的是否是合法JSON
-    //         try {
-    //              ObjectMapper objectMapper = new ObjectMapper();
-    //              objectMapper.readTree(jsonOutput);
-    //              LoggerUtil.logExec(Level.INFO, "LLM成功返回合法JSON");
-    //              return jsonOutput;
-    //         } catch (IOException validationError) {
-    //              LoggerUtil.logExec(Level.WARNING, "LLM返回的不是合法JSON: " + validationError.getMessage() + "\n返回内容:\n" + jsonOutput);
-    //              // 返回原始输入或null作为后备
-    //              return null;
-    //         }
-    //     } catch (Exception e) {
-    //         LoggerUtil.logExec(Level.SEVERE, "调用LLM进行JSON格式化失败: " + e.getMessage());
-    //         return null; // Indicate failure
-    //     }
-    // }
     
     /**
      * 从代码中提取类名

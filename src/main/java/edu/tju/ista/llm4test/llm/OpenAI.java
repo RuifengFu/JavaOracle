@@ -47,7 +47,7 @@ public class OpenAI {
         BASE_URL = System.getenv("OPENAI_BASE_URL");
         MODEL = System.getenv("OPENAI_MODEL");
         if (BASE_URL == null || BASE_URL.isEmpty()) {
-            BASE_URL = "https://api.deepseek.com/beta/v1/chat/completions";
+            BASE_URL = "https://api.deepseek.com/beta/chat/completions";
         }
         if (MODEL == null || MODEL.isEmpty()) {
             MODEL = "deepseek-chat";
@@ -74,9 +74,8 @@ public class OpenAI {
 
     static {
 
-        R1 = new OpenAI();
-        V3 = new OpenAI();
-        V3.MODEL = "deepseek-chat";
+        R1 = new OpenAI("deepseek-reasoner");
+        V3 = new OpenAI("deepseek-chat");
         V3.JSON_OUTPUT = true;
         var ark_api_key = System.getenv("ARK_API_KEY");
         var ark_base_url = System.getenv("ARK_BASE_URL");
@@ -113,7 +112,6 @@ public class OpenAI {
                     .proxy(ProxySelector.of(new InetSocketAddress("172.19.135.130",5000)))
                     .build();
         }
-
 
         // Build the HTTP request
         HttpRequest request = HttpRequest.newBuilder()
@@ -154,6 +152,14 @@ public class OpenAI {
                 }
             }
         });
+        
+        // 检测空响应（服务器负载过高导致的连接关闭）
+        if (responseBody.isEmpty()) {
+            LoggerUtil.logExec(Level.WARNING, "Server returned empty response (likely overloaded), retrying...");
+            sleep(10000);
+            return getResponseBody(requestBody);
+        }
+        
         return responseBody;
     }
 
@@ -178,12 +184,16 @@ public class OpenAI {
             return;
         }
 
+        // 检测空流响应
+        boolean[] hasValidData = {false}; // array can be modified by lambda 
+        
         // 流式处理核心逻辑
         response.body().forEach(line -> {
 //            System.out.println(line);
             if (isValidDataLine(line)) {
                 try {
                     if (line.startsWith("data: [DONE]")) return; // 结束标志
+                    hasValidData[0] = true;
                     String jsonContent = extractJsonContent(line);
                     Map<String, Object> chunk = mapper.readValue(jsonContent, Map.class);
                     chunkConsumer.accept(chunk); // 通过回调函数实时输出
@@ -193,7 +203,14 @@ public class OpenAI {
             }
         });
 
-        System.out.println("Stream response completed " + response.statusCode());
+        // 如果没有接收到有效数据，可能是服务器负载过高关闭了连接
+        if (!hasValidData[0]) {
+            LoggerUtil.logExec(Level.WARNING, "Stream response was empty (likely server overloaded), retrying...");
+            sleep(10000);
+            streamResponse(requestBody, chunkConsumer);
+        } else {
+            System.out.println("Stream response completed " + response.statusCode());
+        }
     }
 
     // 提取的辅助方法

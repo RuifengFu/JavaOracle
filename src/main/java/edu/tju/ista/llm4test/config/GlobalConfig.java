@@ -36,7 +36,7 @@ public class GlobalConfig {
     private static final String DEFAULT_SOURCE_PREFIX = "java.base/share/classes";
     
     // 缓存相关默认配置
-    private static final String DEFAULT_VALID_TEST_CASES_PATH = "ValidTestCases.txt";
+    private static final String DEFAULT_VALID_TEST_CASES_DIR = "ValidTestCases";
     private static final boolean DEFAULT_USE_CACHE_MODE = false;
     
     /**
@@ -195,10 +195,36 @@ public class GlobalConfig {
     }
     
     /**
-     * 获取有效测试用例缓存文件路径
+     * 获取有效测试用例缓存目录
      */
+    public static String getValidTestCasesDir() {
+        return ConfigUtil.getOrDefault("validTestCasesDir", DEFAULT_VALID_TEST_CASES_DIR);
+    }
+    
+    /**
+     * 根据rootPath获取对应的有效测试用例缓存文件路径
+     * @param rootPath 测试套件根路径
+     * @return 缓存文件路径
+     */
+    public static String getValidTestCasesPath(String rootPath) {
+        String cacheDir = getValidTestCasesDir();
+        ensureDirectoryExists(cacheDir);
+        
+        // 将rootPath转换为文件名安全的格式
+        String fileName = rootPath.replace("/", "_").replace("\\", "_").replace(":", "_");
+        if (fileName.isEmpty()) {
+            fileName = "default";
+        }
+        return cacheDir + "/" + fileName + ".txt";
+    }
+    
+    /**
+     * 获取有效测试用例缓存文件路径（向后兼容的方法）
+     * @deprecated 使用 getValidTestCasesPath(String rootPath) 代替
+     */
+    @Deprecated
     public static String getValidTestCasesPath() {
-        return ConfigUtil.getOrDefault("validTestCasesPath", DEFAULT_VALID_TEST_CASES_PATH);
+        return getValidTestCasesPath("");
     }
     
     /**
