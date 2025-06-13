@@ -107,16 +107,16 @@ public class ConcurrentExecutionManager {
      * 创建批量处理执行器
      */
     private ExecutorService createBatchExecutor() {
-        if (virtualThreadsSupported) {
-            try {
-                // 为批量处理使用虚拟线程，轻量级且适合后台任务
-                return (ExecutorService) Executors.class
-                    .getMethod("newVirtualThreadPerTaskExecutor")
-                    .invoke(null);
-            } catch (Exception e) {
-                LoggerUtil.logExec(Level.WARNING, "创建虚拟线程批量执行器失败，使用传统线程池: " + e.getMessage());
-            }
-        }
+//        if (virtualThreadsSupported) {
+//            try {
+//                // 为批量处理使用虚拟线程，轻量级且适合后台任务
+//                return (ExecutorService) Executors.class
+//                    .getMethod("newVirtualThreadPerTaskExecutor")
+//                    .invoke(null);
+//            } catch (Exception e) {
+//                LoggerUtil.logExec(Level.WARNING, "创建虚拟线程批量执行器失败，使用传统线程池: " + e.getMessage());
+//            }
+//        }
         
         // 降级到传统线程池
         return new ThreadPoolExecutor(
@@ -355,7 +355,7 @@ public class ConcurrentExecutionManager {
         @Override
         public Thread newThread(Runnable r) {
             Thread t = new Thread(r, namePrefix + threadNumber.getAndIncrement());
-            t.setDaemon(true); // 设置为守护线程
+            // t.setDaemon(true); // 设置为守护线程
             if (t.getPriority() != Thread.NORM_PRIORITY) {
                 t.setPriority(Thread.NORM_PRIORITY);
             }

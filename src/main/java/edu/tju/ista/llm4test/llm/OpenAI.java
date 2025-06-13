@@ -52,14 +52,15 @@ public class OpenAI {
         if (MODEL == null || MODEL.isEmpty()) {
             MODEL = "deepseek-chat";
         }
-        System.out.println("BASE_URL: " + BASE_URL);
-        System.out.println("API_KEY: " + API_KEY);
-        System.out.println("MODEL: " + MODEL);
+
     }
 
     public OpenAI(String modelName) {
         this();
         MODEL = modelName;
+        System.out.println("BASE_URL: " + BASE_URL);
+        System.out.println("API_KEY: " + API_KEY);
+        System.out.println("MODEL: " + MODEL);
     }
 
     public OpenAI(String API_KEY, String BASE_URL, String modelName) {
