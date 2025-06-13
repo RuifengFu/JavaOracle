@@ -196,20 +196,24 @@ public class TestSuite {
      */
     private void saveSuccessfulTestCasesToCache(List<TestCase> successfulTestCases) {
         try {
-            String cachePath = GlobalConfig.getValidTestCasesPath(rootPath);
+            String jdkTestPath = GlobalConfig.getJdkTestPath() + "/jdk/";
+            Path jdkTestRoot = Paths.get(jdkTestPath).toAbsolutePath().normalize();
             List<String> testCasePaths = successfulTestCases.stream()
                     .map(testCase -> {
-                        String fullPath = testCase.getOriginFile().getAbsolutePath();
-                        String jdkTestPath = GlobalConfig.getJdkTestPath() + "/jdk/";
-                        if (fullPath.startsWith(jdkTestPath)) {
-                            return fullPath.substring(jdkTestPath.length());
+                        Path fullPath = testCase.getOriginFile().toPath().toAbsolutePath().normalize();
+                        Path relPath;
+                        try {
+                            relPath = jdkTestRoot.relativize(fullPath);
+                        } catch (Exception e) {
+                            // 如果无法relativize，直接用文件名
+                            relPath = fullPath.getFileName();
                         }
-                        return fullPath;
+                        return relPath.toString().replace('\\', '/');
                     })
                     .collect(Collectors.toList());
             
-            Files.write(Paths.get(cachePath), testCasePaths);
-            LoggerUtil.logExec(Level.INFO, "成功测试用例已保存到缓存文件: " + cachePath);
+            Files.write(Paths.get(GlobalConfig.getValidTestCasesPath(rootPath)), testCasePaths);
+            LoggerUtil.logExec(Level.INFO, "成功测试用例已保存到缓存文件: " + GlobalConfig.getValidTestCasesPath(rootPath));
             
         } catch (IOException e) {
             LoggerUtil.logExec(Level.WARNING, "保存缓存文件失败: " + e.getMessage());

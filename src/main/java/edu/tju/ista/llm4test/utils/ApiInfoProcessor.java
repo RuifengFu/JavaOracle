@@ -10,6 +10,7 @@ import com.thoughtworks.qdox.model.JavaMethod;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -38,6 +39,8 @@ public class ApiInfoProcessor {
     }
     
     private final String baseDocPath;
+    private final String docRootPath;
+
     private final String jdkSourcePath;
     private final String defaultSourcePrefix;
     private final APISignatureExtractor extractor;
@@ -48,6 +51,7 @@ public class ApiInfoProcessor {
 
     public ApiInfoProcessor(String baseDocPath) {
         this.baseDocPath = baseDocPath;
+        this.docRootPath = Path.of(this.baseDocPath).getParent().toString();
         this.jdkSourcePath = null;
         this.defaultSourcePrefix = null;
         this.extractor = new APISignatureExtractor();
@@ -59,6 +63,7 @@ public class ApiInfoProcessor {
      */
     public ApiInfoProcessor(String baseDocPath, String jdkSourcePath, String defaultSourcePrefix) {
         this.baseDocPath = baseDocPath;
+        this.docRootPath = Path.of(this.baseDocPath).getParent().toString();
         this.jdkSourcePath = jdkSourcePath;
         this.defaultSourcePrefix = defaultSourcePrefix;
         this.extractor = new APISignatureExtractor();
@@ -158,7 +163,9 @@ public class ApiInfoProcessor {
         
         // 1. 先检查缓存
         if (cache.containsKey(cacheKey)) {
-            return cache.get(cacheKey);
+            String cachedValue = cache.get(cacheKey);
+            // 特判NOTFOUND值，如果是NOTFOUND则返回null
+            return "NOTFOUND".equals(cachedValue) ? null : cachedValue;
         }
         
         String foundPath = null;
@@ -185,12 +192,14 @@ public class ApiInfoProcessor {
                 foundPath = findPathUsingFind(packageName, fileName, type);
             }
             
-            // 4. 缓存结果（包括null结果，避免重复搜索）
-            cache.put(cacheKey, foundPath);
+            // 4. 缓存结果（如果是null则存储NOTFOUND，避免在缓存中存储null值）
+            System.out.println(cacheKey + " " + foundPath);
+            cache.put(cacheKey, foundPath != null ? foundPath : "NOTFOUND");
             
         } catch (Exception e) {
+            e.printStackTrace();
             System.err.println("查找类路径失败: " + cacheKey + " (" + type + ") - " + e.getMessage());
-            cache.put(cacheKey, null);
+            cache.put(cacheKey, "NOTFOUND");
         }
         
         return foundPath;
@@ -207,7 +216,7 @@ public class ApiInfoProcessor {
         try {
             String packagePath = packageName.replace('.', File.separatorChar);
             String searchPattern = "*" + File.separator + packagePath + File.separator + fileName;
-            String searchRoot = (type == PathType.SOURCE) ? jdkSourcePath : baseDocPath;
+            String searchRoot = (type == PathType.SOURCE) ? jdkSourcePath : docRootPath;
             
             if (searchRoot == null) {
                 return null;

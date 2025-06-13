@@ -49,7 +49,8 @@ public class TestCaseTest {
         var testCase = new TestCase(file);
         testCase.setOriginFile(file);
         testCase.setApiDocProcessor(new ApiInfoProcessor(GlobalConfig.getBaseDocPath(), GlobalConfig.getJdkSourcePath(), GlobalConfig.getDefaultSourcePrefix()));
-        var res = testCase.getApiInfoWithSource();
+        var res = testCase.
+                getApiInfoWithSource();
         System.out.println(res);
     }
 }
