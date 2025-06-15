@@ -37,6 +37,9 @@ public class OpenAI {
 
     private boolean JSON_OUTPUT = false;
 
+    private static final int MAX_RETRIES = 3;
+    private static final int RETRY_DELAY_MS = 60000;
+
     public String messageCompletion(String prompt) {
         return messageCompletion(prompt, 0.7);
     }
@@ -101,127 +104,113 @@ public class OpenAI {
         return requestBody;
     }
 
-    private Map<String, Object> getResponseBody(Map<String, Object> requestBody) throws IOException, InterruptedException {
-        // Convert request body to JSON
-        ObjectMapper mapper = new ObjectMapper();
-        String requestBodyJson = mapper.writeValueAsString(requestBody);
-
-        // Initialize HttpClient
-        HttpClient httpClient = HttpClient.newHttpClient();
-        if (System.getProperty("os.name").toLowerCase().contains("linux")) {
-            httpClient = HttpClient.newBuilder()
-                    .proxy(ProxySelector.of(new InetSocketAddress("172.19.135.130",5000)))
-                    .build();
-        }
-
-        // Build the HTTP request
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(BASE_URL)) // Replace BASE_URL with your API endpoint
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + API_KEY)
-                .POST(HttpRequest.BodyPublishers.ofString(requestBodyJson))
-                .build();
-
-        // Send the request and receive the response
-        HttpResponse<Stream<String>> response = httpClient.send(request, HttpResponse.BodyHandlers.ofLines());
-        if (response.statusCode() != 200) {
-            if (response.statusCode() == 503 || response.statusCode() == 429) {
-                LoggerUtil.logExec(Level.WARNING, "Received HTTP error " + response.statusCode() + ", retrying...");
-                sleep(10000);
-                return getResponseBody(requestBody);
-            } else if (response.version() == HttpClient.Version.HTTP_2 && response.statusCode() == 421) {
-                LoggerUtil.logExec(Level.WARNING, "Received GOAWAY frame, retrying...");
-                sleep(10000); // Wait a bit before retrying
-                return getResponseBody(requestBody);
-            } else if (response.statusCode() == 504) {
-                LoggerUtil.logExec(Level.WARNING, "Received HTTP error " + response.statusCode() + ", retrying...");
-                sleep(10000);
-                return getResponseBody(requestBody);
-            }
-            throw new RuntimeException("HTTP error: " + response.statusCode() + "\n" + response.body().collect(Collectors.joining("\n")));
-        }
-
-        // Process the response lines
-        Map<String, Object> responseBody = new HashMap<>();
-        response.body().forEach(line -> {
-            if (!line.trim().isEmpty() && !line.startsWith(": keep-alive")) {
-                try {
-                    Map<String, Object> lineResponse = mapper.readValue(line, Map.class);
-                    responseBody.putAll(lineResponse);
-                } catch (IOException e) {
-                    LoggerUtil.logExec(Level.WARNING, "Failed to parse response line: " + line + "\n" + e.getMessage());
-                }
-            }
-        });
-        
-        // 检测空响应（服务器负载过高导致的连接关闭）
-        if (responseBody.isEmpty()) {
-            LoggerUtil.logExec(Level.WARNING, "Server returned empty response (likely overloaded), retrying...");
-            sleep(10000);
-            return getResponseBody(requestBody);
-        }
-        
-        return responseBody;
-    }
-
-
-    private void streamResponse(Map<String, Object> requestBody, Consumer<Map<String, Object>> chunkConsumer) throws IOException, InterruptedException {
-        ObjectMapper mapper = new ObjectMapper();
-        String requestBodyJson = mapper.writeValueAsString(requestBody);
-
-        HttpClient httpClient = buildHttpClient(); // 提取HTTP客户端构建逻辑
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(BASE_URL))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + API_KEY)
-                .POST(HttpRequest.BodyPublishers.ofString(requestBodyJson))
-                .build();
-
-        HttpResponse<Stream<String>> response = httpClient.send(request, HttpResponse.BodyHandlers.ofLines());
-
-        if (response.statusCode() != 200) {
-            handleErrorResponse(response); // 提取错误处理逻辑
-            return;
-        }
-
-        // 检测空流响应
-        boolean[] hasValidData = {false}; // array can be modified by lambda 
-        
-        // 流式处理核心逻辑
-        response.body().forEach(line -> {
-//            System.out.println(line);
-            if (isValidDataLine(line)) {
-                try {
-                    if (line.startsWith("data: [DONE]")) return; // 结束标志
-                    hasValidData[0] = true;
-                    String jsonContent = extractJsonContent(line);
-                    Map<String, Object> chunk = mapper.readValue(jsonContent, Map.class);
-                    chunkConsumer.accept(chunk); // 通过回调函数实时输出
-                } catch (IOException e) {
-                    LoggerUtil.logExec(Level.WARNING, "Failed to parse chunk: " + line);
-                }
-            }
-        });
-
-        // 如果没有接收到有效数据，可能是服务器负载过高关闭了连接
-        if (!hasValidData[0]) {
-            LoggerUtil.logExec(Level.WARNING, "Stream response was empty (likely server overloaded), retrying...");
-            sleep(10000);
-            streamResponse(requestBody, chunkConsumer);
-        } else {
-            System.out.println("Stream response completed " + response.statusCode());
-        }
-    }
-
-    // 提取的辅助方法
-    private static HttpClient buildHttpClient() {
+    private HttpClient buildHttpClient() {
         if (System.getProperty("os.name").toLowerCase().contains("linux")) {
             return HttpClient.newBuilder()
                     .proxy(ProxySelector.of(new InetSocketAddress("172.19.135.130", 5000)))
                     .build();
         }
         return HttpClient.newHttpClient();
+    }
+
+    private HttpRequest buildRequest(String requestBodyJson) {
+        return HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + API_KEY)
+                .POST(HttpRequest.BodyPublishers.ofString(requestBodyJson))
+                .build();
+    }
+
+    private boolean shouldRetry(int statusCode) {
+        return statusCode == 503 || statusCode == 429 || statusCode == 504 || statusCode == 421;
+    }
+
+    private <T> T executeWithRetry(String operationName, RetryableOperation<T> retryOperation) 
+            throws IOException, InterruptedException {
+        int retryCount = 0;
+        Exception lastException = null;
+
+        while (retryCount <= MAX_RETRIES) {
+            try {
+                return retryOperation.execute();
+            } catch (Exception e) {
+                lastException = e;
+                
+                // 检查是否需要重试
+                if (shouldRetry(e)) {
+                    handleRetry(operationName, retryCount);
+                    retryCount++;
+                    continue;
+                }
+                
+                // 不需要重试的错误直接抛出
+                throw e;
+            }
+        }
+
+        // 如果所有重试都失败了，抛出最后一个异常
+        throw new RuntimeException(
+            String.format("Operation '%s' failed after %d retries. Last error: %s", 
+                operationName, MAX_RETRIES, lastException.getMessage()),
+            lastException
+        );
+    }
+
+    private boolean shouldRetry(Exception e) {
+        if (!(e instanceof RuntimeException)) {
+            return false;
+        }
+
+        String message = e.getMessage();
+        if (message == null) {
+            return false;
+        }
+
+        // 检查是否是 HTTP 错误
+        if (message.contains("HTTP error")) {
+            try {
+                int statusCode = extractStatusCode(message);
+                return shouldRetry(statusCode);
+            } catch (Exception ex) {
+                return false;
+            }
+        }
+
+        // 检查是否是空响应错误
+        if (message.contains("empty response") || message.contains("Stream response was empty")) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private void handleRetry(String operationName, int retryCount) throws InterruptedException {
+        if (retryCount >= MAX_RETRIES) {
+            throw new RuntimeException(
+                String.format("Maximum retry attempts (%d) reached for operation: %s", 
+                    MAX_RETRIES, operationName)
+            );
+        }
+
+        LoggerUtil.logExec(Level.WARNING, 
+            String.format("Retry attempt %d/%d for %s after %dms", 
+                retryCount + 1, MAX_RETRIES, operationName, RETRY_DELAY_MS));
+        
+        Thread.sleep(RETRY_DELAY_MS);
+    }
+
+    private int extractStatusCode(String errorMessage) {
+        try {
+            return Integer.parseInt(errorMessage.split("HTTP error: ")[1].split("\n")[0]);
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    @FunctionalInterface
+    private interface RetryableOperation<T> {
+        T execute() throws IOException, InterruptedException;
     }
 
     private static boolean isValidDataLine(String line) {
@@ -232,17 +221,6 @@ public class OpenAI {
 
     private static String extractJsonContent(String line) {
         return line.substring(5).trim(); // 去掉"data:"前缀
-    }
-
-    private static void handleErrorResponse(HttpResponse<Stream<String>> response) throws InterruptedException {
-        String errorBody = response.body().collect(Collectors.joining("\n"));
-        if (response.statusCode() == 503 || response.statusCode() == 429 || response.statusCode() == 504) {
-            LoggerUtil.logExec(Level.WARNING, "Received HTTP error " + response.statusCode() + ", retrying...");
-            sleep(10000);
-            // 这里可以添加重试逻辑
-        } else {
-            throw new RuntimeException("HTTP error: " + response.statusCode() + "\n" + errorBody);
-        }
     }
 
     public String messageCompletion(String prompt, double temperature) {
@@ -289,6 +267,9 @@ public class OpenAI {
                 if (message != null) {
                     String content = (String) message.get("content"); // Extract "content"
                     String thinking = (String) message.get("reasoning_content");
+                    if (thinking != null && !thinking.isEmpty()) {
+                        content = "<thinking>\n" + thinking + "\n<thinking\\>\n" + content;
+                    }
                     LoggerUtil.logOpenAI(Level.FINE, "OpenAI response: \n" + content);
                     return content; // Return the extracted content
                 }
@@ -339,6 +320,79 @@ public class OpenAI {
             LoggerUtil.logExec(Level.SEVERE, "OpenAI function calling failed: " + e.getMessage());
         }
         return new HashMap<>();
+    }
+
+    private Map<String, Object> getResponseBody(Map<String, Object> requestBody) throws IOException, InterruptedException {
+        return executeWithRetry("getResponseBody", () -> {
+            ObjectMapper mapper = new ObjectMapper();
+            String requestBodyJson = mapper.writeValueAsString(requestBody);
+            HttpClient httpClient = buildHttpClient();
+            HttpRequest request = buildRequest(requestBodyJson);
+
+            HttpResponse<Stream<String>> response = httpClient.send(request, HttpResponse.BodyHandlers.ofLines());
+            
+            if (response.statusCode() != 200) {
+                throw new RuntimeException("HTTP error: " + response.statusCode() + "\n" + 
+                    response.body().collect(Collectors.joining("\n")));
+            }
+
+            Map<String, Object> responseBody = new HashMap<>();
+            response.body().forEach(line -> {
+                if (!line.trim().isEmpty() && !line.startsWith(": keep-alive")) {
+                    try {
+                        Map<String, Object> lineResponse = mapper.readValue(line, Map.class);
+                        responseBody.putAll(lineResponse);
+                    } catch (IOException e) {
+                        LoggerUtil.logExec(Level.WARNING, "Failed to parse response line: " + line + "\n" + e.getMessage());
+                    }
+                }
+            });
+
+            if (responseBody.isEmpty()) {
+                throw new RuntimeException("Server returned empty response");
+            }
+
+            return responseBody;
+        });
+    }
+
+    private void streamResponse(Map<String, Object> requestBody, Consumer<Map<String, Object>> chunkConsumer) 
+            throws IOException, InterruptedException {
+        executeWithRetry("streamResponse", () -> {
+            ObjectMapper mapper = new ObjectMapper();
+            String requestBodyJson = mapper.writeValueAsString(requestBody);
+            HttpClient httpClient = buildHttpClient();
+            HttpRequest request = buildRequest(requestBodyJson);
+
+            HttpResponse<Stream<String>> response = httpClient.send(request, HttpResponse.BodyHandlers.ofLines());
+
+            if (response.statusCode() != 200) {
+                throw new RuntimeException("HTTP error: " + response.statusCode() + "\n" + 
+                    response.body().collect(Collectors.joining("\n")));
+            }
+
+            boolean[] hasValidData = {false};
+            
+            response.body().forEach(line -> {
+                if (isValidDataLine(line)) {
+                    try {
+                        if (line.startsWith("data: [DONE]")) return;
+                        hasValidData[0] = true;
+                        String jsonContent = extractJsonContent(line);
+                        Map<String, Object> chunk = mapper.readValue(jsonContent, Map.class);
+                        chunkConsumer.accept(chunk);
+                    } catch (IOException e) {
+                        LoggerUtil.logExec(Level.WARNING, "Failed to parse chunk: " + line);
+                    }
+                }
+            });
+
+            if (!hasValidData[0]) {
+                throw new RuntimeException("Stream response was empty");
+            }
+
+            return null;
+        });
     }
 
 }

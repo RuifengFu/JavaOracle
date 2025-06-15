@@ -37,7 +37,8 @@ public class ConcurrentExecutionManager {
     
     private ConcurrentExecutionManager() {
         int cpuCores = Runtime.getRuntime().availableProcessors();
-        this.virtualThreadsSupported = isVirtualThreadsSupported();
+//        this.virtualThreadsSupported = isVirtualThreadsSupported();
+        this.virtualThreadsSupported = false;
         
         // LLM线程池：优先使用虚拟线程，轻量化处理IO密集型任务
         this.llmExecutor = createLLMExecutor();
@@ -94,10 +95,10 @@ public class ConcurrentExecutionManager {
         // 降级到传统线程池
         int cpuCores = Runtime.getRuntime().availableProcessors();
         return new ThreadPoolExecutor(
-            cpuCores * 2,                    // 核心线程数
-            cpuCores * 8,                    // 最大线程数，IO密集型可以更多  
+            Math.min(50, cpuCores * 2),      // 核心线程数，不超过50
+            50,                              // 最大线程数固定为50
             60L, TimeUnit.SECONDS,           // 空闲超时
-            new LinkedBlockingQueue<>(500),  // 更大的队列
+            new LinkedBlockingQueue<>(1000), // 更大的队列以容纳等待的任务
             new NamedThreadFactory("LLM-Worker"),
             new ThreadPoolExecutor.CallerRunsPolicy() // 背压策略
         );
