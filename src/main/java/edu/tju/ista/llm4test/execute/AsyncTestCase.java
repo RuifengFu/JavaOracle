@@ -311,49 +311,6 @@ public class AsyncTestCase {
         }
     }
 
-    /**
-     * 流水线式异步处理
-     * 
-     * 这个方法展示了如何将多个异步操作组合成一个流水线
-     */
-    public CompletableFuture<TestResult> processAsync(TestExecutor testExecutor) {
-        return CompletableFuture
-            // 1. 初始测试执行
-            .supplyAsync(() -> testExecutor.executeTest(file))
-            
-            // 2. 如果测试成功，进行增强和验证
-            .thenCompose(initialResult -> {
-                if (!initialResult.isSuccess()) {
-                    return CompletableFuture.completedFuture(initialResult);
-                }
-                
-                this.setResult(initialResult);
-                
-                // 并行执行增强和验证
-                CompletableFuture<Void> enhanceFuture = enhanceAsync();
-                CompletableFuture<Void> verifyFuture = verifyTestFailAsync();
-                
-                return CompletableFuture.allOf(enhanceFuture, verifyFuture)
-                    .thenCompose(v -> testExecutor.executeTestAsync(file));
-            })
-            
-            // 3. 修复循环（最多3次）
-            .thenCompose(result -> {
-                this.setResult(result);
-                return fixWithRetryAsync(testExecutor, 3);
-            })
-            
-            // 4. 最终验证
-            .thenCompose(result -> {
-                this.setResult(result);
-                return verifyTestFailAsync().thenApply(v -> result);
-            })
-            
-            .exceptionally(ex -> {
-                LoggerUtil.logExec(Level.SEVERE, "异步处理测试用例失败: " + file + "\n" + ex.getMessage());
-                return new TestResult(TestResultKind.UNKNOWN);
-            });
-    }
 
     /**
      * 带重试的异步修复
