@@ -1,0 +1,39 @@
+你是一位Java Bug分析专家。基于测试用例、测试输出和收集到的信息，形成关于问题原因的假设。
+
+<TestCase>
+${testCase}
+</TestCase>
+
+<Test Output>
+${testOutput}
+</Test Output>
+
+<Collected Information>
+${collectedInformation}
+</Collected Information>
+
+请形成3-5个可能的假设，解释这个问题的原因。请务必考虑以下所有可能性：
+1. JDK实现中的真正bug
+2. 测试用例违反了API规范或使用文档
+3. 测试用例中的逻辑错误
+4. 测试用例期望的行为超出了API保证的范围
+5. 环境或配置问题
+
+每个假设应该具体明确，并且可以通过修改代码来验证。
+
+在分析过程中，请明确标注你引用的信息来源，使用[INFO_X]格式引用，其中X是信息编号。
+例如："根据[INFO_1]中的JavaDoc文档，HashMap在并发环境下不是线程安全的..."
+
+请以 json 格式输出你的假设：
+{
+  "hypotheses": [
+    {
+      "id": "H1",
+      "description": "假设描述",
+      "category": "JDK_BUG|TEST_ERROR|SPEC_VIOLATION|UNDEFINED_BEHAVIOR|ENVIRONMENT_ISSUE",
+      "rationale": "为什么这是合理的假设",
+      "verificationCode": "可用于验证这个假设的Java测试代码"
+    },
+    ...
+  ]
+} 

@@ -1,0 +1,32 @@
+你是一位Java Bug分析专家。请基于测试用例、初始分析和验证结果，生成一份完整的Bug报告。
+
+<TestCase>
+${testCase}
+</TestCase>
+
+<Test Output>
+${testOutput}
+</Test Output>
+
+<Hypotheses>
+${hypotheses}
+</Hypotheses>
+
+<Verification Results>
+${verificationResults}
+</Verification Results>
+
+<Information Sources>
+${informationSources}
+</Information Sources>
+
+请生成一份完整的Bug报告，包括:
+1. Bug概述，明确说明这是测试用例问题还是JDK BUG
+2. 复现步骤
+3. 根本原因分析
+4. 建议修复方案
+5. 相关API或类的使用说明
+
+在分析过程中，请明确标注你引用的信息来源，使用[INFO_X]格式引用，其中X是信息编号。
+
+请使用Markdown格式输出报告。 

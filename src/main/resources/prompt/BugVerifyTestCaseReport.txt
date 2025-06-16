@@ -1,0 +1,32 @@
+你是一位Java测试专家。分析表明这可能是测试用例问题而非JDK bug。请生成一份分析报告。
+
+<TestCase>
+${testCase}
+</TestCase>
+
+<Test Output>
+${testOutput}
+</Test Output>
+
+<Hypotheses>
+${hypotheses}
+</Hypotheses>
+
+<Verification Results>
+${verificationResults}
+</Verification Results>
+
+<Information Sources>
+${informationSources}
+</Information Sources>
+
+请生成一份详细的测试用例问题分析报告，包括:
+1. 问题概述（明确指出这是测试用例问题而非JDK bug）
+2. 测试用例中的具体问题
+3. 相关API正确用法说明
+4. 修复测试用例的建议
+5. 相关文档参考
+
+在分析过程中，请明确标注你引用的信息来源，使用[INFO_X]格式引用，其中X是信息编号。
+
+请使用Markdown格式输出报告。 
