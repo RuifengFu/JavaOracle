@@ -40,6 +40,14 @@ public class BugVerifyAgent extends Agent {
     private final OpenAI llm;
     private final OpenAI llm_json;
 
+    public TestCase getTestCase() {
+        return testCase;
+    }
+
+    public void setTestCase(TestCase testCase) {
+        this.testCase = testCase;
+    }
+
     // 分析状态
     private TestCase testCase;
     private String testCode;
@@ -333,84 +341,9 @@ public class BugVerifyAgent extends Agent {
         }
     }
     
-    /**
-     * 使用智能搜索工具收集Web信息
-     */
-    private void collectWebInformation(String initialInsight) {
-        try {
-            // 使用智能搜索工具进行搜索
-            List<IntelligentSearchTool.IntelligentSearchResult> searchResults = 
-                intelligentSearchTool.search(initialInsight, testCode, testOutput);
-            
-            LoggerUtil.logExec(Level.INFO, "智能搜索完成，共获得 " + searchResults.size() + " 个高质量结果");
-            
-            // 处理每个搜索结果
-            for (IntelligentSearchTool.IntelligentSearchResult result : searchResults) {
-                String infoId = "INFO_" + (++infoCounter);
-                String sourceUrl = result.getUrl();
-                infoSourceMap.put(infoId, sourceUrl);
-                
-                // 构建格式化的内容
-                StringBuilder processedContent = new StringBuilder();
-                processedContent.append("[").append(infoId).append(" 来源: ").append(sourceUrl).append("]\n");
-                processedContent.append("查询目标: ").append(result.getQueryTarget()).append("\n");
-                processedContent.append("优先级: ").append(result.getQueryPriority()).append("\n");
-                processedContent.append("总体相关性: ").append(String.format("%.2f", result.getOverallRelevanceScore())).append("\n\n");
-                processedContent.append(result.getFormattedContent());
-                
-                String key = "web_intelligent_" + infoCounter;
-                collectedInfo.put(key, processedContent.toString());
-                
-                LoggerUtil.logExec(Level.INFO, "收集智能搜索结果: " + result.getTitle() + 
-                                   " (相关性: " + String.format("%.2f", result.getOverallRelevanceScore()) + 
-                                   ", 片段: " + result.getProcessedChunks().size() + ")");
-            }
-            
-        } catch (Exception e) {
-            LoggerUtil.logExec(Level.WARNING, "智能搜索失败: " + e.getMessage());
-            // 如果智能搜索失败，回退到原始搜索方法
-            fallbackToBasicWebSearch(initialInsight);
-        }
-    }
+
     
-    /**
-     * 回退到基础Web搜索（原有逻辑的简化版本）
-     */
-    private void fallbackToBasicWebSearch(String initialInsight) {
-        List<String> queries = extractJsonArrayFromField(initialInsight, "queries");
-        
-        for (String query : queries) {
-            try {
-                ToolResponse<List<SearchResult>> searchResponse = searchTool.execute(query + " java");
-                if (searchResponse.isSuccess() && !searchResponse.getResult().isEmpty()) {
-                    // 只处理前2个结果，避免过多
-                    int count = 0;
-                    for (SearchResult result : searchResponse.getResult()) {
-                        if (count >= 2) break;
-                        
-                        try {
-                            ToolResponse<String> contentResponse = webTool.execute(result.getUrl());
-                            if (contentResponse.isSuccess()) {
-                                String infoId = "INFO_" + (++infoCounter);
-                                String sourceUrl = result.getUrl();
-                                infoSourceMap.put(infoId, sourceUrl);
-                                
-                                // 基础处理：只添加信息源标记
-                                String markedContent = "[" + infoId + " 来源: " + sourceUrl + "]\n" + 
-                                                     contentResponse.getResult();
-                                collectedInfo.put("web_fallback_" + query + "_" + count, markedContent);
-                                count++;
-                            }
-                        } catch (Exception e) {
-                            LoggerUtil.logExec(Level.FINE, "获取网页内容失败: " + result.getUrl() + " - " + e.getMessage());
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                LoggerUtil.logExec(Level.FINE, "基础搜索失败: " + query + " - " + e.getMessage());
-            }
-        }
-    }
+
     
     /**
      * 保存收集到的信息
@@ -785,97 +718,7 @@ public class BugVerifyAgent extends Agent {
         return null;
     }
     
-    /**
-     * 执行Bug验证的主方法
-     */
-    public static void main(String[] args) {
-        if (args.length < 2) {
-            System.out.println("Usage: java BugVerifyAgent <javadoc_path> <source_path> <test_file> [bug_report_path]");
-            return;
-        }
 
-        String javadocPath = args[0];
-        String sourcePath = args[1];
-        String bugReportPath = args.length > 3 ? args[3] : "BugReport";
-
-        // 创建Agent
-        BugVerifyAgent agent = new BugVerifyAgent(javadocPath, sourcePath, bugReportPath);
-
-        // 如果有测试文件，读取文件内容
-        if (args.length > 2) {
-            try {
-                String testCase = new String(java.nio.file.Files.readAllBytes(
-                        java.nio.file.Paths.get(args[2])));
-
-                // 运行测试并获取输出
-                JtregExecuteTool jtregTool = new JtregExecuteTool();
-                ToolResponse<TestResult> result = jtregTool.execute(args[2]);
-
-                String testOutput = result.isSuccess()
-                        ? result.getResult().getOutput()
-                        : "执行失败: " + result.getMessage();
-
-                // 设置测试数据
-                agent.setTestData(testCase, testOutput, null);
-
-                // 分析Bug
-                String report = agent.analyze();
-                System.out.println(report);
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        } else {
-            System.out.println("示例测试:");
-            // 示例测试用例
-            String sampleTest = """
-                    /**
-                     * @test
-                     */
-                    import java.util.HashMap;
-                    import java.util.Map;
-                    
-                    public class HashMapConcurrencyTest {
-                        public static void main(String[] args) throws Exception {
-                            final Map<String, String> map = new HashMap<>();
-                            
-                            Thread t1 = new Thread(() -> {
-                                for (int i = 0; i < 1000; i++) {
-                                    map.put("Key" + i, "Value" + i);
-                                }
-                            });
-                            
-                            Thread t2 = new Thread(() -> {
-                                for (int i = 0; i < 1000; i++) {
-                                    map.put("ThreadB" + i, "Value" + i);
-                                }
-                            });
-                            
-                            t1.start();
-                            t2.start();
-                            t1.join();
-                            t2.join();
-                            
-                            System.out.println("Map size should be 2000: " + map.size());
-                            assert map.size() == 2000 : "Map size is not 2000, it's " + map.size();
-                        }
-                    }
-                    """;
-
-            String sampleOutput = """
-                    Map size should be 2000: 1986
-                    Exception in thread "main" java.lang.AssertionError: Map size is not 2000, it's 1986
-                        at HashMapConcurrencyTest.main(HashMapConcurrencyTest.java:28)
-                    """;
-
-            // 设置测试数据
-            agent.setTestData(sampleTest, sampleOutput, "HashMap在并发环境下可能丢失条目");
-
-            // 分析Bug
-            String report = agent.analyze();
-            System.out.println(report);
-            agent.close();
-        }
-    }
 
     /**
      * 从日志文件中提取已验证的bug并生成报告
@@ -923,7 +766,7 @@ public class BugVerifyAgent extends Agent {
                     
                     if (filePath != null) {
                         // 标准化文件路径
-                        filePath = filePath.replace("jdk17u-dev/test", "test");
+//                        filePath = filePath.replace("jdk17u-dev/test", "test");
                         LoggerUtil.logExec(Level.FINE, "提取到文件路径: " + filePath);
                         
                         // 查找后续几行中的验证消息
@@ -937,12 +780,7 @@ public class BugVerifyAgent extends Agent {
                             }
                         }
                         
-                        if (!verifyMessage.isEmpty()) {
-                            verifiedBugs.put(filePath, verifyMessage);
-                            LoggerUtil.logExec(Level.INFO, "成功提取已验证的bug: " + filePath);
-                        } else {
-                            LoggerUtil.logExec(Level.WARNING, "未找到验证消息，文件: " + filePath);
-                        }
+
                     } else {
                         LoggerUtil.logExec(Level.WARNING, "无法从行中提取文件路径: " + line);
                     }
@@ -960,43 +798,43 @@ public class BugVerifyAgent extends Agent {
                 File originFile = new File(filePath);
                 File testFile = new File(filePath.replace("jdk17u-dev/test", "test"));
                 
-                if (!testFile.exists() && !originFile.exists()) {
+                if (!testFile.exists()) {
                     LoggerUtil.logExec(Level.WARNING, "测试文件不存在: " + filePath);
                     continue;
                 }
                 
                 // 使用存在的文件
-                File fileToUse = testFile.exists() ? testFile : originFile;
-                
-                String testCaseName = fileToUse.getName().replace(".java", "");
+
+
+                TestCase testcase = new TestCase(testFile);
+                testcase.setOriginFile(originFile);
+                testcase.verifyMessage = verifyMessage;
+
+
+                String testCaseName = testFile.getName().replace(".java", "");
                 LoggerUtil.logExec(Level.INFO, "正在分析bug: " + testCaseName);
                 
                 try {
                     // 读取测试用例内容
-                    String testContent = Files.readString(fileToUse.toPath());
+                    String sourceCode = Files.readString(testFile.toPath());
                     
                     // 运行测试获取输出
                     JtregExecuteTool jtregTool = new JtregExecuteTool();
-                    ToolResponse<TestResult> response = jtregTool.execute(fileToUse.getPath());
+                    ToolResponse<TestResult> response = jtregTool.execute(testFile.getPath());
                     
                     String testOutput;
                     if (response.isSuccess()) {
                         testOutput = response.getResult().getOutput();
                     } else {
-                        // 如果执行失败，尝试从result文件获取输出
-                        File resultFile = new File(fileToUse.getPath() + ".result");
-                        if (resultFile.exists()) {
-                            testOutput = Files.readString(resultFile.toPath());
-                        } else {
-                            // 使用verifyMessage作为备选
-                            testOutput = "无法获取测试输出，使用验证消息作为替代: " + verifyMessage;
-                        }
+                        testOutput = "无法获取测试输出";
+                        LoggerUtil.logResult(Level.SEVERE, testcase.getFile().getAbsolutePath() + ": 无法获取测试输出");
                     }
                     
                     // 设置测试数据并分析
-                    agent.setTestData(testContent, testOutput, verifyMessage);
-                    String report = agent.analyze();
-                    
+                    agent.setTestData(sourceCode, testOutput, verifyMessage);
+                    agent.setTestCase(testcase);
+                    agent.analyze();
+
                     LoggerUtil.logExec(Level.INFO, "Bug报告已生成: " + testCaseName);
                 } catch (Exception e) {
                     LoggerUtil.logExec(Level.WARNING, "为测试用例生成报告失败: " + testCaseName);
@@ -1012,13 +850,7 @@ public class BugVerifyAgent extends Agent {
             agent.close();
         }
     }
-    
-    /**
-     * 无参数重载，使用默认路径
-     */
-    public static void verifyBugsFromLog() {
-        verifyBugsFromLog("result.log", "JavaDoc/docs/api/java.base", "jdk17u-dev/src", "BugReport");
-    }
+
     
     public void close(){
         webTool.close();
