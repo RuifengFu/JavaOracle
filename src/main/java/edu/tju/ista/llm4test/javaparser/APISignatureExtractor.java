@@ -12,6 +12,7 @@ import com.github.javaparser.symbolsolver.resolution.typesolvers.ReflectionTypeS
 import java.io.File;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 public class APISignatureExtractor {
 
@@ -80,8 +81,8 @@ public class APISignatureExtractor {
 //                    System.err.println("Failed to resolve method call: " + methodCall);
                 }
             });
-
-            return signatures;
+            var signs = signatures.stream().filter(sign -> !sign.getPackageName().isEmpty()).collect(Collectors.toSet()); // 去除本地api
+            return signs;
 
         } catch (Exception e) {
             e.printStackTrace();
