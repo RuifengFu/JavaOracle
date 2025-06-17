@@ -9,6 +9,7 @@ import edu.tju.ista.llm4test.prompt.PromptGen;
 import edu.tju.ista.llm4test.utils.CodeExtractor;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
 import edu.tju.ista.llm4test.utils.ApiInfoProcessor;
+import org.pitest.util.Log;
 
 import java.io.File;
 import java.io.IOException;
@@ -23,6 +24,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class TestCase {
 
@@ -559,7 +561,7 @@ public class TestCase {
             var map = apiInfoProcessor.getApiDocWithSource(file);
             map.forEach((k, v) -> {sb.append(k).append("\n").append(v).append("\n--------------\n");});
         } catch (Exception e) {
-            return "Failed to get API Info";
+            LoggerUtil.logExec(Level.WARNING, "测试用例获取文档出错: " + name + " " + e.getMessage());
         }
         return sb.toString();
     }

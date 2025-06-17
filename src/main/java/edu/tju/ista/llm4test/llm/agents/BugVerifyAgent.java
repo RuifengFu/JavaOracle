@@ -403,10 +403,11 @@ public class BugVerifyAgent extends Agent {
             String prompt = PromptGen.generateBugVerifyFormHypothesesPrompt(testCode, testOutput, infoBuilder.toString());
             String response = llm.messageCompletion(prompt, 0.7, true);
             response = filterThinkingChain(response);
+
             hypotheses = extractJsonObjectArrayFromField(response, "hypotheses");
             
             // 立即保存假设
-            saveHypotheses();
+            saveHypotheses(response);
         } catch (TemplateException | IOException e) {
             LoggerUtil.logExec(Level.SEVERE, "生成假设形成prompt失败: " + e.getMessage());
             e.printStackTrace();
@@ -416,7 +417,7 @@ public class BugVerifyAgent extends Agent {
     /**
      * 保存假设
      */
-    private void saveHypotheses() {
+    private void saveHypotheses(String response) {
         if (verifyContextFolder == null || testCaseName == null) return;
         
         try {
@@ -424,6 +425,8 @@ public class BugVerifyAgent extends Agent {
             Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
             Path hypothesesDir = verifyContextPath.resolve("hypotheses");
             Files.createDirectories(hypothesesDir);
+
+            saveToFile(hypothesesDir.resolve("response.txt").toString(), response);
             
             // 保存每个假设
             for (int i = 0; i < hypotheses.size(); i++) {
@@ -435,7 +438,8 @@ public class BugVerifyAgent extends Agent {
                 
 
             }
-            
+
+
             // 保存假设汇总
             StringBuilder summary = new StringBuilder();
             summary.append("# 假设汇总\n\n");

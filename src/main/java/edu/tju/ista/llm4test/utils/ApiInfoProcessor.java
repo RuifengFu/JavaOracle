@@ -17,6 +17,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.nio.file.Paths;
 import java.util.List;
 import java.util.Arrays;
+import edu.tju.ista.llm4test.utils.LoggerUtil;
+import java.util.logging.Level;
 
 public class ApiInfoProcessor {
     
@@ -90,7 +92,7 @@ public class ApiInfoProcessor {
                 map.put(signature.getSignature(), HtmlParser.getMethodDetails(doc).get(signature.getMethodName()));
                 map.put(signature.getClassName(), HtmlParser.getClassDescriptionText(doc));
             } catch (IOException e) {
-                // Handle exception
+                LoggerUtil.logExec(Level.WARNING, "解析 API 文档失败: " + e.getMessage());
             }
         });
         return map;
@@ -118,17 +120,25 @@ public class ApiInfoProcessor {
 
             
             // 获取API源码
-            String sourceCode = getMethodSourceCode(signature);
-            if (sourceCode != null && !sourceCode.isEmpty()) {
-                methodInfo.append("=== 方法源码 ===\n");
-                methodInfo.append(sourceCode).append("\n\n");
+            try {
+                String sourceCode = getMethodSourceCode(signature);
+                if (sourceCode != null && !sourceCode.isEmpty()) {
+                    methodInfo.append("=== 方法源码 ===\n");
+                    methodInfo.append(sourceCode).append("\n\n");
+                }
+            } catch (ApiInfoProcessingException e) {
+                LoggerUtil.logExec(Level.WARNING, "获取源码失败: " + e.getMessage());
             }
             
             // 获取API文档
-            String apiDoc = getApiDocumentation(signature);
-            if (apiDoc != null && !apiDoc.isEmpty()) {
-                methodInfo.append("=== API文档 ===\n");
-                methodInfo.append(apiDoc).append("\n\n");
+            try {
+                String apiDoc = getApiDocumentation(signature);
+                if (apiDoc != null && !apiDoc.isEmpty()) {
+                    methodInfo.append("=== API文档 ===\n");
+                    methodInfo.append(apiDoc).append("\n\n");
+                }
+            } catch (ApiInfoProcessingException e) {
+                LoggerUtil.logExec(Level.WARNING, "获取 API 文档失败: " + e.getMessage());
             }
             
             result.put(methodKey, methodInfo.toString());
@@ -140,9 +150,13 @@ public class ApiInfoProcessor {
             String className = signature.getClassName();
             if (!processedClasses.contains(className)) {
                 processedClasses.add(className);
-                String classDoc = getClassDocumentation(signature);
-                if (classDoc != null && !classDoc.isEmpty()) {
-                    result.put(className + "_CLASS_DOC", classDoc);
+                try {
+                    String classDoc = getClassDocumentation(signature);
+                    if (classDoc != null && !classDoc.isEmpty()) {
+                        result.put(className + "_CLASS_DOC", classDoc);
+                    }
+                } catch (ApiInfoProcessingException e) {
+                    LoggerUtil.logExec(Level.WARNING, "获取类文档失败: " + e.getMessage());
                 }
             }
         }
@@ -261,28 +275,24 @@ public class ApiInfoProcessor {
      * @param signature 方法签名
      * @return 方法源码，如果找不到返回null
      */
-    private String getMethodSourceCode(APISignatureExtractor.MethodSignature signature) {
+    private String getMethodSourceCode(APISignatureExtractor.MethodSignature signature) throws ApiInfoProcessingException {
         if (jdkSourcePath == null) {
-            return "JDK源码路径未配置";
+            throw new ApiInfoProcessingException("JDK 源码路径未配置");
         }
-        
         try {
-            // 使用统一的路径查找方法
             String sourceFilePath = findClassPath(signature.getPackageName(), signature.getClassName(), PathType.SOURCE);
-            
             if (sourceFilePath == null) {
-                return "源码文件不存在: " + signature.getPackageName() + "." + signature.getClassName();
+                throw new ApiInfoProcessingException("源码文件不存在: " + signature.getPackageName() + "." + signature.getClassName());
             }
-            
             File sourceFile = new File(sourceFilePath);
             if (!sourceFile.exists()) {
-                return "源码文件不存在: " + sourceFilePath;
+                throw new ApiInfoProcessingException("源码文件不存在: " + sourceFilePath);
             }
-            
             return parseMethodFromFile(sourceFile, signature);
-            
+        } catch (ApiInfoProcessingException e) {
+            throw e;
         } catch (Exception e) {
-            return "获取源码失败: " + e.getMessage();
+            throw new ApiInfoProcessingException("获取源码失败: " + e.getMessage(), e);
         }
     }
     
@@ -291,33 +301,30 @@ public class ApiInfoProcessor {
      * @param signature 方法签名
      * @return API文档，如果找不到返回null
      */
-    private String getApiDocumentation(APISignatureExtractor.MethodSignature signature) {
+    private String getApiDocumentation(APISignatureExtractor.MethodSignature signature) throws ApiInfoProcessingException {
         try {
-            // 使用统一的路径查找方法找到HTML文档
             String docFilePath = findClassPath(signature.getPackageName(), signature.getClassName(), PathType.DOC);
-            
             if (docFilePath == null) {
-                return "API文档文件不存在: " + signature.getPackageName() + "." + signature.getClassName();
+                throw new ApiInfoProcessingException("API 文档文件不存在: " + signature.getPackageName() + "." + signature.getClassName());
             }
-            
             File docFile = new File(docFilePath);
             if (!docFile.exists()) {
-                return "API文档文件不存在: " + docFilePath;
+                throw new ApiInfoProcessingException("API 文档文件不存在: " + docFilePath);
             }
-            
-            // 使用HtmlParser解析HTML文件
             Document doc = HtmlParser.getDocumentFromFile(docFile);
             if (doc == null) {
-                return "解析API文档失败: " + docFilePath;
+                throw new ApiInfoProcessingException("解析 API 文档失败: " + docFilePath);
             }
-            
             var methodDetails = HtmlParser.getMethodDetails(doc);
             String methodDoc = methodDetails.get(signature.getMethodName());
-            
-            return methodDoc != null ? methodDoc : "未找到方法文档: " + signature.getMethodName();
-            
+            if (methodDoc == null) {
+                throw new ApiInfoProcessingException("未找到方法文档: " + signature.getMethodName());
+            }
+            return methodDoc;
+        } catch (ApiInfoProcessingException e) {
+            throw e;
         } catch (Exception e) {
-            return "获取API文档失败: " + e.getMessage();
+            throw new ApiInfoProcessingException("获取 API 文档失败: " + e.getMessage(), e);
         }
     }
     
@@ -326,30 +333,26 @@ public class ApiInfoProcessor {
      * @param signature 方法签名（用于获取类信息）
      * @return 类文档，如果找不到返回null
      */
-    private String getClassDocumentation(APISignatureExtractor.MethodSignature signature) {
+    private String getClassDocumentation(APISignatureExtractor.MethodSignature signature) throws ApiInfoProcessingException {
         try {
-            // 使用统一的路径查找方法找到HTML文档
             String docFilePath = findClassPath(signature.getPackageName(), signature.getClassName(), PathType.DOC);
-            
             if (docFilePath == null) {
-                return "类文档文件不存在: " + signature.getPackageName() + "." + signature.getClassName();
+                throw new ApiInfoProcessingException("类文档文件不存在: " + signature.getPackageName() + "." + signature.getClassName());
             }
-            
             File docFile = new File(docFilePath);
             if (!docFile.exists()) {
-                return "类文档文件不存在: " + docFilePath;
+                throw new ApiInfoProcessingException("类文档文件不存在: " + docFilePath);
             }
-            
-            // 使用HtmlParser解析HTML文件
             Document doc = HtmlParser.getDocumentFromFile(docFile);
             if (doc == null) {
-                return "解析类文档失败: " + docFilePath;
+                throw new ApiInfoProcessingException("解析类文档失败: " + docFilePath);
             }
-            
-            return HtmlParser.getClassDescriptionText(doc);
-            
+            String classDoc = HtmlParser.getClassDescriptionText(doc);
+            return classDoc;
+        } catch (ApiInfoProcessingException e) {
+            throw e;
         } catch (Exception e) {
-            return "获取类文档失败: " + e.getMessage();
+            throw new ApiInfoProcessingException("获取类文档失败: " + e.getMessage(), e);
         }
     }
     
@@ -359,43 +362,44 @@ public class ApiInfoProcessor {
      * @param signature 方法签名
      * @return 方法源码
      */
-    private String parseMethodFromFile(File sourceFile, APISignatureExtractor.MethodSignature signature) {
+    private String parseMethodFromFile(File sourceFile, APISignatureExtractor.MethodSignature signature) throws ApiInfoProcessingException {
         try {
-            // 使用JavaParser解析源码文件
             JavaProjectBuilder builder = new JavaProjectBuilder();
             builder.addSource(sourceFile);
-            
-            // 查找对应的类和方法
             for (JavaClass javaClass : builder.getClasses()) {
                 if (javaClass.getName().equals(signature.getClassName())) {
                     for (JavaMethod method : javaClass.getMethods()) {
-                        // 简单的方法名匹配（可以根据需要改进为更精确的签名匹配）
                         if (method.getName().equals(signature.getMethodName())) {
                             StringBuilder methodSource = new StringBuilder();
-                            
-                            // 添加文件路径信息
                             methodSource.append("// 源码文件: ").append(sourceFile.getAbsolutePath()).append("\n\n");
-                            
-                            // 添加方法注释
                             if (method.getComment() != null) {
                                 methodSource.append("// 方法注释:\n");
                                 methodSource.append(method.getComment()).append("\n\n");
                             }
-                            
-                            // 添加方法源码
                             methodSource.append("// 方法实现:\n");
                             methodSource.append(method.getSourceCode());
-                            
                             return methodSource.toString();
                         }
                     }
                 }
             }
-            
-            return "在源码文件中未找到方法: " + signature.getMethodName() + " (文件: " + sourceFile.getAbsolutePath() + ")";
-            
+            throw new ApiInfoProcessingException("在源码文件中未找到方法: " + signature.getMethodName() + " (文件: " + sourceFile.getAbsolutePath() + ")");
+        } catch (ApiInfoProcessingException e) {
+            throw e;
         } catch (Exception e) {
-            return "解析源码文件失败: " + e.getMessage() + " (文件: " + sourceFile.getAbsolutePath() + ")";
+            throw new ApiInfoProcessingException("解析源码文件失败: " + e.getMessage() + " (文件: " + sourceFile.getAbsolutePath() + ")", e);
+        }
+    }
+
+    /**
+     * 自定义异常：API 信息处理过程中的异常
+     */
+    public static class ApiInfoProcessingException extends Exception {
+        public ApiInfoProcessingException(String message) {
+            super(message);
+        }
+        public ApiInfoProcessingException(String message, Throwable cause) {
+            super(message, cause);
         }
     }
 }
