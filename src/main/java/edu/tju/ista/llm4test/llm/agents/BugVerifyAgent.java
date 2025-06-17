@@ -6,6 +6,7 @@ import edu.tju.ista.llm4test.execute.TestCase;
 import edu.tju.ista.llm4test.llm.OpenAI;
 import edu.tju.ista.llm4test.llm.tools.*;
 import edu.tju.ista.llm4test.execute.TestResult;
+import edu.tju.ista.llm4test.utils.ApiInfoProcessor;
 import edu.tju.ista.llm4test.utils.CodeExtractor;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
 import edu.tju.ista.llm4test.prompt.PromptGen;
@@ -50,6 +51,12 @@ public class BugVerifyAgent extends Agent {
 
     public void setTestCase(TestCase testCase) {
         this.testCase = testCase;
+        this.testCode = testCase.getSourceCode();
+        this.testOutput = testCase.getResult().getOutput();
+        this.initialAnalysis = testCase.verifyMessage;
+
+        // 创建验证上下文文件夹
+        createVerifyContextFolder();
     }
 
     // 分析状态
@@ -102,26 +109,6 @@ public class BugVerifyAgent extends Agent {
         }
     }
 
-
-    public void setTestData(TestCase testCase) {
-        this.testCase = testCase;
-        this.testCode = testCase.getSourceCode();
-        this.testOutput = testCase.getResult().getOutput();
-        this.initialAnalysis = testCase.verifyMessage;
-    }
-
-    /**
-     * 设置测试用例和输出
-     */
-    public void setTestData(String testCase, String testOutput, String initialAnalysis) {
-        this.testCode = testCase;
-        this.testOutput = testOutput;
-        this.initialAnalysis = initialAnalysis;
-        
-        // 创建验证上下文文件夹
-        createVerifyContextFolder();
-    }
-    
     /**
      * 创建验证上下文文件夹
      */
@@ -210,7 +197,6 @@ public class BugVerifyAgent extends Agent {
      */
     private static String filterThinkingChain(String response) {
         if (response == null) return null;
-        LoggerUtil.logExec(Level.INFO, "过滤思维链标签\n" + response);
         // 移除<think>...</think>标签及其内容
         String filtered = response.replaceAll("<thinking>[\\s\\S]*?</thinking>", "");
         LoggerUtil.logExec(Level.INFO, "过滤后的内容\n" + filtered.trim());
@@ -820,6 +806,7 @@ public class BugVerifyAgent extends Agent {
                 TestCase testcase = new TestCase(testFile);
                 testcase.setOriginFile(originFile);
                 testcase.verifyMessage = verifyMessage;
+                testcase.setApiDocProcessor(ApiInfoProcessor.fromConfig());
 
 
                 String testCaseName = testFile.getName().replace(".java", "");
@@ -836,13 +823,13 @@ public class BugVerifyAgent extends Agent {
                     String testOutput;
                     if (response.isSuccess()) {
                         testOutput = response.getResult().getOutput();
+                        testcase.setResult(response.getResult());
                     } else {
                         testOutput = "无法获取测试输出";
                         LoggerUtil.logResult(Level.SEVERE, testcase.getFile().getAbsolutePath() + ": 无法获取测试输出");
                     }
                     
                     // 设置测试数据并分析
-                    agent.setTestData(sourceCode, testOutput, verifyMessage);
                     agent.setTestCase(testcase);
                     agent.analyze();
 

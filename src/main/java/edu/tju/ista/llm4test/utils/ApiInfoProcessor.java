@@ -83,19 +83,39 @@ public class ApiInfoProcessor {
     }
 
     public Map<String, String> processApiDocs(File file) throws IOException, RuntimeException {
-        Map<String, String> map = new HashMap<>();
-        extractor.extractSignatures(file.getPath()).forEach(signature -> {
-            try {
-                Document doc = HtmlParser.getDocument(baseDocPath,
-                        signature.getPackageName(),
-                        signature.getClassName());
-                map.put(signature.getSignature(), HtmlParser.getMethodDetails(doc).get(signature.getMethodName()));
-                map.put(signature.getClassName(), HtmlParser.getClassDescriptionText(doc));
-            } catch (IOException e) {
-                LoggerUtil.logExec(Level.WARNING, "解析 API 文档失败: " + e.getMessage());
-            }
-        });
-        return map;
+        Map<String, String> result = new HashMap<>();
+        
+        try {
+            var signatures = extractor.extractSignatures(file.getPath());
+            var processedClasses = new java.util.HashSet<String>();
+            
+            signatures.forEach(signature -> {
+                // 获取方法文档
+                try {
+                    String methodDoc = getApiDocumentation(signature);
+                    result.put(signature.getSignature(), methodDoc);
+                } catch (ApiInfoProcessingException e) {
+                    LoggerUtil.logExec(Level.WARNING, "获取方法文档失败: " + e.getMessage());
+                }
+                
+                // 获取类文档（避免重复）
+                String className = signature.getClassName();
+                if (processedClasses.add(className)) { // add() 返回 true 表示之前不存在
+                    try {
+                        String classDoc = getClassDocumentation(signature);
+                        result.put(className, classDoc);
+                    } catch (ApiInfoProcessingException e) {
+                        LoggerUtil.logExec(Level.WARNING, "获取类文档失败: " + e.getMessage());
+                    }
+                }
+            });
+            
+        } catch (Exception e) {
+            LoggerUtil.logExec(Level.SEVERE, "提取API签名失败: " + e.getMessage());
+            throw new RuntimeException("处理API文档失败", e);
+        }
+        
+        return result;
     }
 
     /**
