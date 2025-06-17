@@ -10,12 +10,13 @@ import org.junit.jupiter.api.Test;
 import java.io.File;
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.Map;
 
 public class PromptTest {
 
     @Test
     public void genPrompt() throws IOException, TemplateException {
-        File file = new File("jdk17u-dev/test/jdk/java/util/Calendar/bug4401223.java");
+        File file = new File("src/test/java/Comment.java");
         var testCase = new TestCase(file);
         testCase.setOriginFile(file);
         testCase.setApiDocProcessor(new ApiInfoProcessor("JavaDoc/docs/api/java.base"));
@@ -25,6 +26,26 @@ public class PromptTest {
         dataModel.put("testcase", testCase.getSourceCode());
 
         var prompt = PromptGen.generatePrompt("EnhanceTestCase", dataModel);
+        System.out.println(prompt);
+    }
+
+    @Test
+    public void fixPrompt() throws Exception {
+        var testCase = new TestCase(new File("src/test/java/Comment.java"));
+        testCase.setOriginFile(new File("JavaTest/jdk/java/util/zip/ZipFile/Comment.java"));
+        testCase.setApiDocProcessor(ApiInfoProcessor.fromConfig());
+        Map<String, Object> dataModel = new HashMap<>();
+        dataModel.put("testcase", testCase.getTestcaseWithLineNumber());
+        dataModel.put("originCase", testCase.originTestCase);
+        dataModel.put("testOutput", "Starting ZIP comment test with various lengths...\n" +
+                                    "Max comment length supported: 65535\n" +
+                                    "Testing comment length: 0\n" +
+                                    "Exception in thread \"main\" java.lang.Exception: ZIP file comment mismatch. Expected: '', but got: 'null'\n" +
+                                    "\tat Comment.verifyZipFile(Comment.java:122)\n" +
+                                    "\tat Comment.main(Comment.java:56)");
+        dataModel.put("apiDocs", testCase.getApiDoc());
+        dataModel.put("rootCause", "");
+        String prompt = PromptGen.generatePrompt("FixTestCase", dataModel);
         System.out.println(prompt);
     }
 
