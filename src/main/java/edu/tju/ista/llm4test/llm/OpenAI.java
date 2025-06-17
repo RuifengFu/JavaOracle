@@ -90,7 +90,7 @@ public class OpenAI {
     private Map<String, Object> getBaseRequestMap(String prompt) {
         // Create request body
         Map<String, Object> requestBody = new HashMap<>();
-        requestBody.put("model", MODEL); // Choose the model, e.g., "gpt-4" or "gpt-3.5-turbo"
+        requestBody.put("model", MODEL);
         requestBody.put("messages", List.of(
 //                Map.of("role", "system", "content", systemPrompt),
                 Map.of("role", "user", "content", prompt)

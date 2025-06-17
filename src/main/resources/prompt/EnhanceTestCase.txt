@@ -1,11 +1,5 @@
 
-<TestCase>
-${testcase}
-</TestCase>
 
-<api document>
-${apiDocs}
-</api document>
 
 <Tasks>
 1. **API Analysis and Interaction Study**:
@@ -49,9 +43,9 @@ ${apiDocs}
      * Handle edge cases and special scenarios
    - Focus on these characteristics:
      * Non-redundant with existing assertions
-     * Genuinely reflect correct execution
-     * Consider boundary conditions
-     * Test important API interactions
+     * Genuinely reflect correct execution based on documented behavior
+     * Consider boundary conditions and parameter limits
+     * Test important API interactions and integration points
 
 5. **Mark and Document Changes**:
    - Add comment "// Enhanced Test Oracle by LLM" before new assertions
@@ -72,10 +66,10 @@ ${apiDocs}
    - Keep basic code structure intact
 
 2. All new assertions must be:
-   - Compilation error-free
-   - Logically correct
-   - Well-documented with clear purpose
-   - Based on actual API behavior
+   - Compilation error-free and syntactically valid
+   - Logically correct and deterministic
+   - Well-documented with clear purpose and rationale
+   - Based on actual documented API behavior
 
 3. Test coverage should consider:
    - Core API functionality
@@ -117,3 +111,12 @@ You are encouraged to:
 4. Suggest tests for API interaction scenarios you think are valuable
 5. You should contains full testcase in the last java code block.
 </Note> 
+
+
+<TestCase>
+${testcase}
+</TestCase>
+
+<API Documentation>
+${apiDocs}
+</API Documentation>
