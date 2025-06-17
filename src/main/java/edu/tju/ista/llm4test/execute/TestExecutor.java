@@ -395,8 +395,11 @@ public class TestExecutor {
                 "错误输出: %s\n" +
                 "-------------------------------", 
                 exitValue, filePath, commandStr, stdoutStr, stderrStr);
-            
-            LoggerUtil.logExec(Level.SEVERE, errorMessage);
+            if (exitValue <= 3 && exitValue != 1) {
+                LoggerUtil.logExec(Level.FINE, errorMessage);
+            } else {
+                LoggerUtil.logExec(Level.SEVERE, errorMessage);
+            }
         } else {
             String filePath = file != null ? file.getPath() : "unknown";
             LoggerUtil.logExec(Level.INFO, 
