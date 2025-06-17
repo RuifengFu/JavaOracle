@@ -160,4 +160,12 @@ public class PromptGen {
         dataModel.put("input", input);
         return generatePrompt("BugVerifyJsonExtract", dataModel);
     }
+
+
+    public static String generateBugVerifyInstantiateTestCase(String testcase, String hypothesis) throws TemplateException, IOException {
+        Map<String, Object> dataModel = new HashMap<>();
+        dataModel.put("testcase", testcase);
+        dataModel.put("hypothesis", hypothesis);
+        return generatePrompt("InstantiateTestCase", dataModel);
+    }
 }

@@ -1,0 +1,14 @@
+你是一位软件测试工程师，请你根据当前的测试场景和假设。提供一个新的测试用例去验证假设。
+<TestCase>
+${testcase}
+</TestCase>
+
+<Hypothesis>
+${hypothesis}
+</Hypothesis>
+
+<Requirement>
+1. 请你保证测试用例的正确性，包含所有的import语句，避免常见的语法错误。
+2. 请你把完整的测试用例放在最后一个java代码块中。
+3. 你可以考虑Jtreg风格的测试用例或者直接提供一个可以通过java运行测试用例。
+</Requirement>

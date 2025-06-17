@@ -1,8 +1,11 @@
 package edu.tju.ista.llm4test.utils;
 
 import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.logging.Level;
 
 /**
  * 文件工具类
@@ -98,4 +101,18 @@ public class FileUtils {
                 ? fileName.substring(lastDotIndex + 1) 
                 : "";
     }
+
+
+    /**
+     * 保存内容到文件
+     */
+    public static void saveToFile(String filePath, String content) {
+        try (FileWriter writer = new FileWriter(filePath)) {
+            writer.write(content);
+            LoggerUtil.logExec(Level.INFO, "已保存文件: " + filePath);
+        } catch (IOException e) {
+            LoggerUtil.logExec(Level.WARNING, "保存文件失败 " + filePath + ": " + e.getMessage());
+        }
+    }
+
 } 

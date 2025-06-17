@@ -6,20 +6,24 @@ import edu.tju.ista.llm4test.execute.TestCase;
 import edu.tju.ista.llm4test.llm.OpenAI;
 import edu.tju.ista.llm4test.llm.tools.*;
 import edu.tju.ista.llm4test.execute.TestResult;
+import edu.tju.ista.llm4test.utils.CodeExtractor;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
 import edu.tju.ista.llm4test.prompt.PromptGen;
 import freemarker.template.TemplateException;
+import org.pitest.util.Log;
 
 import java.util.*;
 import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+
+import static edu.tju.ista.llm4test.utils.FileUtils.saveToFile;
 
 public class BugVerifyAgent extends Agent {
     // 基础提示模板
@@ -151,18 +155,7 @@ public class BugVerifyAgent extends Agent {
         }
     }
     
-    /**
-     * 保存内容到文件
-     */
-    private void saveToFile(String filePath, String content) {
-        try (FileWriter writer = new FileWriter(filePath)) {
-            writer.write(content);
-            LoggerUtil.logExec(Level.INFO, "已保存文件: " + filePath);
-        } catch (IOException e) {
-            LoggerUtil.logExec(Level.WARNING, "保存文件失败 " + filePath + ": " + e.getMessage());
-        }
-    }
-    
+
     /**
      * 执行完整的Bug验证流程
      */
@@ -440,11 +433,7 @@ public class BugVerifyAgent extends Agent {
                 
                 saveToFile(hypothesesDir.resolve(id + ".json").toString(), hypothesis);
                 
-                // 如果有验证代码，也单独保存
-                String verificationCode = extractJsonFieldValue(hypothesis, "verificationCode");
-                if (verificationCode != null && !verificationCode.isEmpty()) {
-                    saveToFile(hypothesesDir.resolve(id + "_verification.java").toString(), verificationCode);
-                }
+
             }
             
             // 保存假设汇总
@@ -470,16 +459,32 @@ public class BugVerifyAgent extends Agent {
      */
     private void verifyHypotheses() {
         for (String hypothesisJson : hypotheses) {
+
+
             String verificationCode = extractJsonFieldValue(hypothesisJson, "verificationCode");
             String hypothesisId = extractJsonFieldValue(hypothesisJson, "id");
+            try {
+                String prompt = PromptGen.generateBugVerifyInstantiateTestCase(testCode, hypothesisJson);
+                String text = filterThinkingChain(llm.messageCompletion(prompt));
+                ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
+                String code = codeBlocks.isEmpty()? "" : codeBlocks.get(codeBlocks.size() - 1);
+                if (code.isEmpty()) {
+                    LoggerUtil.logExec(Level.WARNING, "测试用例为空跳过 " + testCaseName + " " + hypothesisId);
+                    continue;
+                }
+                Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
+                Path hypothesesDir = verifyContextPath.resolve("hypotheses");
+                saveToFile(hypothesesDir.resolve(hypothesisId + "_verification.java").toString(), code);
+                verificationCode = code; // 使用实例化后的代码
+            } catch (Exception e) {
+                LoggerUtil.logExec(Level.SEVERE, "测试用例模板实例化失败 " + testCaseName + " " + hypothesisId + " " + e.getMessage());
+            }
             
             if (verificationCode != null && !verificationCode.isEmpty()) {
-                // 执行验证代码
-                ToolResponse<TestResult> result = jtregTool.execute(verificationCode);
-                if (result.isSuccess()) {
+                if (verificationCode.contains("@test")) { // 包含jtreg风格的注释。
+                    ToolResponse<TestResult> result = jtregTool.execute(verificationCode);
                     verificationResults.put(hypothesisId, result.getResult());
                 } else {
-                    // 如果jtreg执行失败，尝试使用普通Java执行
                     String className = extractClassNameFromCode(verificationCode);
                     if (className != null) {
                         ToolResponse<String> javaResult = executeTool.execute(className);
@@ -779,6 +784,8 @@ public class BugVerifyAgent extends Agent {
                                 break;
                             }
                         }
+
+                        verifiedBugs.put(filePath, verifyMessage);
                         
 
                     } else {

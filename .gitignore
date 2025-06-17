@@ -43,9 +43,8 @@ JavaDoc
 JavaTest
 jdk17u-dev
 target
-src/test/java/examples
 JTwork
-test
+./test/
 *.log
 *.jar
 /extracted_content.md

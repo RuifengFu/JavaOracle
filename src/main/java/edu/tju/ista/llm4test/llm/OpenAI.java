@@ -254,7 +254,7 @@ public class OpenAI {
                         }
                     }
                 });
-                String result = "<thinking>\n" + reasonSb + "\n<thinking\\>\n" + contentSb;
+                String result = "<thinking>\n" + reasonSb + "\n</thinking>\n" + contentSb;
                 LoggerUtil.logOpenAI(Level.INFO, "OpenAI response: \n" + result);
                 return result;
             }
@@ -268,7 +268,7 @@ public class OpenAI {
                     String content = (String) message.get("content"); // Extract "content"
                     String thinking = (String) message.get("reasoning_content");
                     if (thinking != null && !thinking.isEmpty()) {
-                        content = "<thinking>\n" + thinking + "\n<thinking\\>\n" + content;
+                        content = "<thinking>\n" + thinking + "\n</thinking>\n" + content;
                     }
                     LoggerUtil.logOpenAI(Level.FINE, "OpenAI response: \n" + content);
                     return content; // Return the extracted content
