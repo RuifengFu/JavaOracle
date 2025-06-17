@@ -56,6 +56,7 @@ public class PromptGen {
             TEMPLATE_MAP.put("BugVerifyTestCaseReport", loadResourceAsString("/prompt/BugVerifyTestCaseReport.txt"));
             TEMPLATE_MAP.put("BugVerifyBugReport", loadResourceAsString("/prompt/BugVerifyBugReport.txt"));
             TEMPLATE_MAP.put("BugVerifyJsonExtract", loadResourceAsString("/prompt/BugVerifyJsonExtract.txt"));
+            TEMPLATE_MAP.put("InstantiateTestCase", loadResourceAsString("/prompt/InstantiateTestCase.txt"));
         } catch (IOException e) {
             throw new RuntimeException("Failed to load prompt templates from resources", e);
         }

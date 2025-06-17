@@ -2,6 +2,7 @@ package edu.tju.ista.llm4test.llm.agents;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import edu.tju.ista.llm4test.concurrent.ConcurrentExecutionManager;
 import edu.tju.ista.llm4test.execute.TestCase;
 import edu.tju.ista.llm4test.llm.OpenAI;
 import edu.tju.ista.llm4test.llm.tools.*;
@@ -14,6 +15,7 @@ import freemarker.template.TemplateException;
 import org.pitest.util.Log;
 
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
@@ -726,7 +728,7 @@ public class BugVerifyAgent extends Agent {
         LoggerUtil.logExec(Level.INFO, "开始从日志文件验证bug: " + logPath);
         
         // 创建BugVerifyAgent
-        BugVerifyAgent agent = new BugVerifyAgent(javadocPath, sourcePath, bugReportPath);
+
         
         try {
             // 读取日志文件
@@ -741,6 +743,7 @@ public class BugVerifyAgent extends Agent {
             
             // 解析日志文件，提取已验证的bug
             for (int i = 0; i < lines.size(); i++) {
+
                 String line = lines.get(i).trim();
                 
                 // 匹配格式：文件路径 VERIFIED_BUG
@@ -785,68 +788,76 @@ public class BugVerifyAgent extends Agent {
             }
             
             LoggerUtil.logExec(Level.INFO, "从日志中找到 " + verifiedBugs.size() + " 个已验证的bug");
-            
+
+            var manager = ConcurrentExecutionManager.getInstance();
+            var futures = new ArrayList<CompletableFuture<Void>>();
             // 为每个bug生成报告
             for (Map.Entry<String, String> entry : verifiedBugs.entrySet()) {
-                String filePath = entry.getKey();
-                String verifyMessage = entry.getValue();
-                
-                // 从JDK路径转换到测试路径
-                File originFile = new File(filePath);
-                File testFile = new File(filePath.replace("jdk17u-dev/test", "test"));
-                
-                if (!testFile.exists()) {
-                    LoggerUtil.logExec(Level.WARNING, "测试文件不存在: " + filePath);
-                    continue;
-                }
-                
-                // 使用存在的文件
+                var future = manager.submitTestTask(() -> {
+                    BugVerifyAgent agent = new BugVerifyAgent(javadocPath, sourcePath, bugReportPath);
+                    String filePath = entry.getKey();
+                    String verifyMessage = entry.getValue();
 
+                    // 从JDK路径转换到测试路径
+                    File originFile = new File(filePath);
+                    File testFile = new File(filePath.replace("jdk17u-dev/test", "test"));
 
-                TestCase testcase = new TestCase(testFile);
-                testcase.setOriginFile(originFile);
-                testcase.verifyMessage = verifyMessage;
-                testcase.setApiDocProcessor(ApiInfoProcessor.fromConfig());
-
-
-                String testCaseName = testFile.getName().replace(".java", "");
-                LoggerUtil.logExec(Level.INFO, "正在分析bug: " + testCaseName);
-                
-                try {
-                    // 读取测试用例内容
-                    String sourceCode = Files.readString(testFile.toPath());
-                    
-                    // 运行测试获取输出
-                    JtregExecuteTool jtregTool = new JtregExecuteTool();
-                    ToolResponse<TestResult> response = jtregTool.execute(testFile.getPath());
-                    
-                    String testOutput;
-                    if (response.isSuccess()) {
-                        testOutput = response.getResult().getOutput();
-                        testcase.setResult(response.getResult());
-                    } else {
-                        testOutput = "无法获取测试输出";
-                        LoggerUtil.logResult(Level.SEVERE, testcase.getFile().getAbsolutePath() + ": 无法获取测试输出");
+                    if (!testFile.exists()) {
+                        LoggerUtil.logExec(Level.WARNING, "测试文件不存在: " + filePath);
+                        return;
                     }
-                    
-                    // 设置测试数据并分析
-                    agent.setTestCase(testcase);
-                    agent.analyze();
 
-                    LoggerUtil.logExec(Level.INFO, "Bug报告已生成: " + testCaseName);
-                } catch (Exception e) {
-                    LoggerUtil.logExec(Level.WARNING, "为测试用例生成报告失败: " + testCaseName);
-                    e.printStackTrace();
-                }
+                    // 使用存在的文件
+
+
+                    TestCase testcase = new TestCase(testFile);
+                    testcase.setOriginFile(originFile);
+                    testcase.verifyMessage = verifyMessage;
+                    testcase.setApiDocProcessor(ApiInfoProcessor.fromConfig());
+
+
+                    String testCaseName = testFile.getName().replace(".java", "");
+                    LoggerUtil.logExec(Level.INFO, "正在分析bug: " + testCaseName);
+
+                    try {
+                        // 读取测试用例内容
+                        String sourceCode = Files.readString(testFile.toPath());
+
+                        // 运行测试获取输出
+                        JtregExecuteTool jtregTool = new JtregExecuteTool();
+                        ToolResponse<TestResult> response = jtregTool.execute(testFile.getPath());
+
+                        String testOutput;
+                        if (response.isSuccess()) {
+                            testOutput = response.getResult().getOutput();
+                            testcase.setResult(response.getResult());
+                        } else {
+                            testOutput = "无法获取测试输出";
+                            LoggerUtil.logResult(Level.SEVERE, testcase.getFile().getAbsolutePath() + ": 无法获取测试输出");
+                        }
+
+                        // 设置测试数据并分析
+                        agent.setTestCase(testcase);
+                        agent.analyze();
+
+                        LoggerUtil.logExec(Level.INFO, "Bug报告已生成: " + testCaseName);
+                    } catch (Exception e) {
+                        LoggerUtil.logExec(Level.WARNING, "为测试用例生成报告失败: " + testCaseName);
+                        e.printStackTrace();
+                    } finally {
+                        agent.close();
+                    }
+                });
+
+                futures.add(future);
             }
-            
+            futures.forEach(CompletableFuture::join);
             LoggerUtil.logExec(Level.INFO, "Bug验证和报告生成完成，报告保存在: " + bugReportPath);
         } catch (Exception e) {
             LoggerUtil.logExec(Level.SEVERE, "Bug验证过程失败: " + e.getMessage());
             e.printStackTrace();
-        } finally {
-            agent.close();
         }
+
     }
 
     
