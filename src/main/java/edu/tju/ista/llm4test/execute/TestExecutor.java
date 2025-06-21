@@ -12,22 +12,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.logging.Level;
 
-/**
- * 测试执行器 - 用于执行JTreg测试并进行差异化测试
- * 
- * 主要特性：
- * - 支持多JDK差异化测试
- * - 超时控制和资源管理
- * - 自动重试机制
- * - 临时文件清理
- * 
- * 优化改进：
- * - 使用专用线程池替代协程提高性能
- * - 改进资源管理和异常处理
- * - 优化进程执行和超时控制
- * - 减少代码重复，提高可维护性
- * - 集成并发管理器，分离IO和CPU密集型任务
- */
+
 public class TestExecutor {
     private final File resultDir;
     private final ConcurrentExecutionManager concurrentManager;
