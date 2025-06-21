@@ -85,7 +85,7 @@ public class TestResult {
 
     public void mergeResults(Map<String, TestOutput> results) {
         execResults.putAll(results);
-        List<Integer> list = execResults.values().stream().map(TestOutput::getExitValue).distinct().toList();
+        List<Integer> list = execResults.values().stream().map(TestOutput::getExitValue).distinct().collect(Collectors.toList());
         if (list.size() > 1) {
             kind = TestResultKind.DIFF;
         } else {
