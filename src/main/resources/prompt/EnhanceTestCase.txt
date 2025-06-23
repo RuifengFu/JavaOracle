@@ -1,6 +1,3 @@
-
-
-
 <Tasks>
 1. **API Analysis and Interaction Study**:
    - Identify the core APIs and classes being tested

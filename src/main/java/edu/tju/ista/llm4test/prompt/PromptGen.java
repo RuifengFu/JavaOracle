@@ -43,7 +43,7 @@ public class PromptGen {
             TEMPLATE_MAP.put("default_prompt", loadResourceAsString("/prompt/defaultPrompt.txt"));
             TEMPLATE_MAP.put("FuzzDriver", loadResourceAsString("/prompt/FuzzDriver.txt"));
             TEMPLATE_MAP.put("SpecTest", loadResourceAsString("/prompt/SpecTest.txt"));
-            TEMPLATE_MAP.put("EnhanceTestCase", loadResourceAsString("/prompt/EnhanceTestCase.txt"));
+            TEMPLATE_MAP.put("EnhanceTestCase", loadResourceAsString("/prompt/EnhanceTestCaseV2.txt"));
             TEMPLATE_MAP.put("ApiTest", loadResourceAsString("/prompt/ApiTest.txt"));
             TEMPLATE_MAP.put("FixTestCase", loadResourceAsString("/prompt/FixTestCase.txt"));
             TEMPLATE_MAP.put("ApplyChange", loadResourceAsString("/prompt/ApplyChange.txt"));

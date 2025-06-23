@@ -16,7 +16,7 @@ public class PromptTest {
 
     @Test
     public void genPrompt() throws IOException, TemplateException {
-        File file = new File("src/test/java/Comment.java");
+        File file = new File("JavaTest/jdk/javax/xml/crypto/dsig/Basic.java");
         var testCase = new TestCase(file);
         testCase.setOriginFile(file);
         testCase.setApiDocProcessor(new ApiInfoProcessor("JavaDoc/docs/api/java.base"));
