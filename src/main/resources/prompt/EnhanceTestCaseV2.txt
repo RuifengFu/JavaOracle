@@ -26,7 +26,7 @@ Your primary goal is to enhance the provided test case by adding meaningful and 
    - **Add Assertions**: Write clear, precise, and deterministic assertions that verify the intended behavior.
    - **Mark Your Changes**: Prepend every new assertion or test block with the comment `// Enhanced Test Oracle by LLM`.
    - **Provide Rationale**: Immediately following the marker comment, add another comment explaining *why* the new assertion is valuable and what specific scenario it covers.
-   - **Write Rich Diagnostics**: Include descriptive error messages in assertions (e.g., `Assert.assertEquals("Expected value was X but got Y", expected, actual)`) to provide clear information on failure.
+   - **Write Rich Diagnostics**: Include descriptive error messages in assertions to provide clear information on failure, you can also print curial variables or states if necessary.
    - **Maintain Code Quality**: Ensure the final test case is complete, free of compilation errors, and follows the existing code style.
 </Tasks>
 
