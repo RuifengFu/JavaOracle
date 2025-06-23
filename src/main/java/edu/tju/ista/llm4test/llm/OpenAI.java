@@ -22,6 +22,9 @@ import java.util.stream.Stream;
 
 import static java.lang.Thread.sleep;
 
+/*
+ *  OpenAI style LLM api calling.
+ */
 public class OpenAI {
     private final String API_KEY; // Replace with your API key
 
