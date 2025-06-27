@@ -270,6 +270,7 @@ public class ApiInfoProcessor {
             // 等待命令完成（设置超时）
             boolean finished = process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS);
             if (!finished) {
+                process.destroy();
                 process.destroyForcibly();
                 return null;
             }

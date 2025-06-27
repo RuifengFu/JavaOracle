@@ -132,7 +132,7 @@ public class JtregExecuteTool implements Tool<TestResult> {
             // 创建测试执行器并执行测试 - 使用固定的工作空间结构
             File reduceWorkSpace = new File(baseWorkingDir, "ReduceWorkSpace");
             TestExecutor executor = new TestExecutor(
-                    new File(reduceWorkSpace, "test-results"));
+            );
             LoggerUtil.logExec(Level.INFO, "开始执行差分测试: " + testFile.getPath());
             TestResult result = executor.differentialTesting(testFile);
             

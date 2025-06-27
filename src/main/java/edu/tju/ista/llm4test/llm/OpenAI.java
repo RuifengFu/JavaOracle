@@ -15,6 +15,7 @@ import edu.tju.ista.llm4test.llm.functionCalling.FuncToolFactory;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
 
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
@@ -332,15 +333,16 @@ public class OpenAI {
             HttpClient httpClient = buildHttpClient();
             HttpRequest request = buildRequest(requestBodyJson);
 
-            HttpResponse<Stream<String>> response = httpClient.send(request, HttpResponse.BodyHandlers.ofLines());
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             
             if (response.statusCode() != 200) {
                 throw new RuntimeException("HTTP error: " + response.statusCode() + "\n" + 
-                    response.body().collect(Collectors.joining("\n")));
+                    response.body());
             }
 
             Map<String, Object> responseBody = new HashMap<>();
-            response.body().forEach(line -> {
+            String responseBodyString = response.body();
+            Arrays.stream(responseBodyString.split("\n")).forEach(line -> {
                 if (!line.trim().isEmpty() && !line.startsWith(": keep-alive")) {
                     try {
                         Map<String, Object> lineResponse = mapper.readValue(line, Map.class);
@@ -359,7 +361,7 @@ public class OpenAI {
         });
     }
 
-    private void streamResponse(Map<String, Object> requestBody, Consumer<Map<String, Object>> chunkConsumer) 
+    private void streamResponse(Map<String, Object> requestBody, Consumer<Map<String, Object>> chunkConsumer)
             throws IOException, InterruptedException {
         executeWithRetry("streamResponse", () -> {
             ObjectMapper mapper = new ObjectMapper();
@@ -367,33 +369,35 @@ public class OpenAI {
             HttpClient httpClient = buildHttpClient();
             HttpRequest request = buildRequest(requestBodyJson);
 
-            HttpResponse<Stream<String>> response = httpClient.send(request, HttpResponse.BodyHandlers.ofLines());
+            CompletableFuture<Void> future = httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofLines())
+                    .thenAccept(response -> {
+                        if (response.statusCode() != 200) {
+                            throw new RuntimeException("HTTP error: " + response.statusCode() + "\n" +
+                                                       response.body().collect(Collectors.joining("\n")));
+                        }
 
-            if (response.statusCode() != 200) {
-                throw new RuntimeException("HTTP error: " + response.statusCode() + "\n" + 
-                    response.body().collect(Collectors.joining("\n")));
-            }
+                        boolean[] hasValidData = {false};
 
-            boolean[] hasValidData = {false};
-            
-            response.body().forEach(line -> {
-                if (isValidDataLine(line)) {
-                    try {
-                        if (line.startsWith("data: [DONE]")) return;
-                        hasValidData[0] = true;
-                        String jsonContent = extractJsonContent(line);
-                        Map<String, Object> chunk = mapper.readValue(jsonContent, Map.class);
-                        chunkConsumer.accept(chunk);
-                    } catch (IOException e) {
-                        LoggerUtil.logExec(Level.WARNING, "Failed to parse chunk: " + line);
-                    }
-                }
-            });
+                        response.body().forEach(line -> {
+                            if (isValidDataLine(line)) {
+                                try {
+                                    if (line.startsWith("data: [DONE]")) return;
+                                    hasValidData[0] = true;
+                                    String jsonContent = extractJsonContent(line);
+                                    Map<String, Object> chunk = mapper.readValue(jsonContent, Map.class);
+                                    chunkConsumer.accept(chunk);
+                                } catch (IOException e) {
+                                    LoggerUtil.logExec(Level.WARNING, "Failed to parse chunk: " + line);
+                                }
+                            }
+                        });
 
-            if (!hasValidData[0]) {
-                throw new RuntimeException("Stream response was empty");
-            }
+                        if (!hasValidData[0]) {
+                            throw new RuntimeException("Stream response was empty");
+                        }
+                    });
 
+            future.join();
             return null;
         });
     }

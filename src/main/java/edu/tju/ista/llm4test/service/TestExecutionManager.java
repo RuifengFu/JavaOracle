@@ -28,7 +28,7 @@ public class TestExecutionManager {
 
 
     public TestExecutionManager(String jarPath, File resultDir, String baseDocPath, String suitePath) {
-        this.testExecutor = new TestExecutor(resultDir);
+        this.testExecutor = new TestExecutor();
         this.statistics = new TestStatistics();
         // 使用配置文件创建支持多模块的ApiDocProcessor
         this.apiInfoProcessor = ApiInfoProcessor.fromConfig();

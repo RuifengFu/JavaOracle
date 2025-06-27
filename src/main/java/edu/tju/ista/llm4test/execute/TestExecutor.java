@@ -6,7 +6,6 @@ import edu.tju.ista.llm4test.concurrent.ConcurrentExecutionManager;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.*;
@@ -14,7 +13,6 @@ import java.util.logging.Level;
 
 
 public class TestExecutor {
-    private final File resultDir;
     private final ConcurrentExecutionManager concurrentManager;
     
     // 配置常量
@@ -33,12 +31,9 @@ public class TestExecutor {
     
     /**
      * 构造函数
-     * @param resultDir 结果目录
      */
-    public TestExecutor(File resultDir) {
-        this.resultDir = resultDir;
+    public TestExecutor() {
         this.concurrentManager = ConcurrentExecutionManager.getInstance();
-        
         // 环境检查
         checkEnvironment();
     }
@@ -330,6 +325,7 @@ public class TestExecutor {
         try {
             finished = process.waitFor(EXECUTION_TIMEOUT_MS, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
+            process.destroy();
             process.destroyForcibly();
             String errorMsg = String.format("进程等待被中断: %s", String.join(" ", command));
             LoggerUtil.logExec(Level.WARNING, errorMsg);
@@ -338,6 +334,7 @@ public class TestExecutor {
         }
         
         if (!finished) {
+            process.destroy();
             process.destroyForcibly();
             String timeoutMsg = String.format("执行超时 (%d ms): %s", EXECUTION_TIMEOUT_MS, String.join(" ", command));
             LoggerUtil.logExec(Level.WARNING, timeoutMsg);
@@ -366,7 +363,7 @@ public class TestExecutor {
         if (exitValue != 0) {
             // 安全地处理可能为null的值
             String filePath = file != null ? file.getPath() : "unknown";
-            String commandStr = command != null ? String.join(" ", command) : "unknown";
+            String commandStr = String.join(" ", command);
             String stdoutStr = stdout != null ? 
                 (stdout.length() > 500 ? stdout.substring(0, 500) + "..." : stdout) : "";
             String stderrStr = stderr != null ? 
@@ -378,7 +375,7 @@ public class TestExecutor {
                 "命令: %s\n" +
                 "标准输出: %s\n" +
                 "错误输出: %s\n" +
-                "-------------------------------", 
+                "-------------------------------",
                 exitValue, filePath, commandStr, stdoutStr, stderrStr);
             if (exitValue <= 3 && exitValue != 1) {
                 LoggerUtil.logExec(Level.FINE, errorMessage);
@@ -390,7 +387,7 @@ public class TestExecutor {
             LoggerUtil.logExec(Level.INFO, 
                 String.format("进程执行成功: %s", filePath));
             LoggerUtil.logExec(Level.FINE, 
-                String.format("输出: %s", output != null ? output.toString() : "null"));
+                String.format("输出: %s", output.toString()));
         }
         
         return output;

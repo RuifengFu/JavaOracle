@@ -52,6 +52,7 @@ public class JavaExecuteTool implements Tool<String> {
             // 等待进程完成，设置超时
             boolean finished = process.waitFor(600, TimeUnit.SECONDS);
             if (!finished) {
+                process.destroy();
                 process.destroyForcibly();
                 return ToolResponse.failure("执行超时");
             }

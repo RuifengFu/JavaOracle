@@ -170,7 +170,7 @@ public class TestCase {
     public CompletableFuture<TestResult> executeTestAsync(TestExecutor testExecutor) {
         return concurrentManager.submitTestTask(() -> {
             LoggerUtil.logExec(Level.INFO, "执行测试用例: " + file);
-            TestResult result = testExecutor.executeTest(file);
+            TestResult result = testExecutor.executeTest(this);
             this.setResult(result);
             return result;
         });

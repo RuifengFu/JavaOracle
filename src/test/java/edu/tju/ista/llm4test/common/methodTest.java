@@ -120,7 +120,7 @@ public class methodTest {
                 "C:\\Users\\Administrator\\.m2\\repository\\org\\testng\\testng\\6.7\\testng-6.7.jar"};
         String jarPath = String.join(File.pathSeparator, jars);
         File ResultDir = new File("Results");
-        TestExecutor executor = new TestExecutor(ResultDir);
+        TestExecutor executor = new TestExecutor();
         File file = new File("Results\\SetFromMap.java");
         TestResult result = executor.executeTest(file);
 

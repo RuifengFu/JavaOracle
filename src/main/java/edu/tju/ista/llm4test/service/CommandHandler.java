@@ -66,7 +66,7 @@ public class CommandHandler {
      * 处理env命令 - 测试JDK环境
      */
     public static void handleEnvironmentCommand() {
-        TestExecutor executor = new TestExecutor(new File(""));
+        TestExecutor executor = new TestExecutor();
         try {
             executor.testJDKEnvironment();
         } finally {
