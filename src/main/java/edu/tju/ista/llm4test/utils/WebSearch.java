@@ -20,6 +20,7 @@ import java.util.logging.Level;
 public class WebSearch {
     
     private static final String API_BASE_URL = "https://api.bochaai.com/v1/web-search";
+    private static final String RERANK_API_URL = "https://api.bochaai.com/v1/rerank";
     private static final String DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
     
     // 时间范围枚举
@@ -53,6 +54,18 @@ public class WebSearch {
         private final String dateLastCrawled;
         private final int rank;
         
+        /**
+         * rerankScore，分数的范围从0到1。分数越高，表示文档与查询的语义相关性越强，越符合用户需求。
+         * <ul>
+         *   <li>0.75 ~ 1: 该文档高度相关并完全回答了问题，尽管可能包含与问题无关的额外文本。</li>
+         *   <li>0.5 ~ 0.75: 该文档与问题是相关的，但缺乏使其完整的细节。</li>
+         *   <li>0.2 ~ 0.5: 该文档与问题有一定的相关性；它部分回答了问题，或者只解决了问题的某些方面。</li>
+         *   <li>0.1 ~ 0.2: 该文档与问题相关，但仅回答了一小部分。</li>
+         *   <li>0 ~ 0.1: 该文档与问题无关紧要。</li>
+         * </ul>
+         */
+        private double relevanceScore = -1.0;
+        
         public SearchResult(WebPageValue webPage, int rank) {
             this.id = webPage.id;
             this.name = webPage.name;
@@ -82,6 +95,22 @@ public class WebSearch {
             this.rank = rank;
         }
         
+        // Copy constructor
+        private SearchResult(SearchResult original) {
+            this.id = original.id;
+            this.name = original.name;
+            this.url = original.url;
+            this.displayUrl = original.displayUrl;
+            this.snippet = original.snippet;
+            this.summary = original.summary;
+            this.siteName = original.siteName;
+            this.siteIcon = original.siteIcon;
+            this.datePublished = original.datePublished;
+            this.dateLastCrawled = original.dateLastCrawled;
+            this.rank = original.rank;
+            this.relevanceScore = original.relevanceScore;
+        }
+        
         // Getters
         public String getId() { return id; }
         public String getTitle() { return name; } // 兼容性方法
@@ -95,11 +124,20 @@ public class WebSearch {
         public String getDatePublished() { return datePublished; }
         public String getDateLastCrawled() { return dateLastCrawled; }
         public int getRank() { return rank; }
+        public double getRelevanceScore() { return relevanceScore; }
+        
+        public void setRelevanceScore(double relevanceScore) {
+            this.relevanceScore = relevanceScore;
+        }
         
         @Override
         public String toString() {
-            return String.format("SearchResult{rank=%d, name='%s', url='%s', snippet='%s'}", 
+            String base = String.format("SearchResult{rank=%d, name='%s', url='%s', snippet='%s'}",
                                rank, name, url, snippet);
+            if (relevanceScore >= 0) {
+                return base.substring(0, base.length() - 1) + String.format(", relevanceScore=%.4f}", relevanceScore);
+            }
+            return base;
         }
     }
     
@@ -347,6 +385,59 @@ public class WebSearch {
         
         @JsonProperty("datePublished")
         public String datePublished;
+    }
+    
+    // Rerank API Request
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class RerankRequest {
+        @JsonProperty("model")
+        public String model;
+
+        @JsonProperty("query")
+        public String query;
+
+        @JsonProperty("documents")
+        public List<String> documents;
+
+        @JsonProperty("top_n")
+        public Integer topN;
+
+        @JsonProperty("return_documents")
+        public Boolean returnDocuments;
+    }
+
+    // Rerank API Response
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class RerankApiResponse {
+        @JsonProperty("code")
+        public int code;
+
+        @JsonProperty("log_id")
+        public String logId;
+
+        @JsonProperty("msg")
+        public String msg;
+
+        @JsonProperty("data")
+        public RerankData data;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class RerankData {
+        @JsonProperty("model")
+        public String model;
+
+        @JsonProperty("results")
+        public List<RerankResult> results;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class RerankResult {
+        @JsonProperty("index")
+        public int index;
+
+        @JsonProperty("relevance_score")
+        public double relevanceScore;
     }
     
     // 搜索结果摘要类
@@ -736,6 +827,83 @@ public class WebSearch {
         return new WebSearch(config).search(query, maxResults);
     }
     
+    /**
+     * 对搜索结果进行重新排序
+     * @param query 查询词
+     * @param results 需要排序的搜索结果列表
+     * @return 重新排序后的搜索结果列表
+     */
+    public List<SearchResult> rerank(String query, List<SearchResult> results) {
+        return rerank(query, results, null);
+    }
+
+    /**
+     * 对搜索结果进行重新排序
+     * @param query 查询词
+     * @param results 需要排序的搜索结果列表
+     * @param topN 返回的Top文档数量
+     * @return 重新排序后的搜索结果列表
+     */
+    public List<SearchResult> rerank(String query, List<SearchResult> results, Integer topN) {
+        if (query == null || query.trim().isEmpty()) {
+            throw new IllegalArgumentException("查询关键词不能为空");
+        }
+        if (results == null || results.isEmpty()) {
+            return new ArrayList<>();
+        }
+        if (config.getApiKey() == null || config.getApiKey().trim().isEmpty()) {
+            throw new IllegalArgumentException("API Key不能为空，请在SearchConfig中设置API Key");
+        }
+
+        try {
+            RerankRequest rerankRequest = new RerankRequest();
+            rerankRequest.model = "gte-rerank";
+            rerankRequest.query = query;
+            rerankRequest.documents = results.stream().map(SearchResult::getSnippet).collect(ArrayList::new, ArrayList::add, ArrayList::addAll);
+            rerankRequest.topN = topN;
+            rerankRequest.returnDocuments = false;
+
+            String requestBody = objectMapper.writeValueAsString(rerankRequest);
+
+            HttpRequest httpRequest = HttpRequest.newBuilder()
+                    .uri(URI.create(RERANK_API_URL))
+                    .header("Authorization", "Bearer " + config.getApiKey())
+                    .header("Content-Type", "application/json")
+                    .header("User-Agent", DEFAULT_USER_AGENT)
+                    .timeout(Duration.ofSeconds(config.getTimeout()))
+                    .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() == 200) {
+                RerankApiResponse rerankApiResponse = objectMapper.readValue(response.body(), RerankApiResponse.class);
+                if (rerankApiResponse.code == 200 && rerankApiResponse.data != null && rerankApiResponse.data.results != null) {
+                    List<SearchResult> rerankedResults = new ArrayList<>();
+                    for (RerankResult rerankResult : rerankApiResponse.data.results) {
+                        if (rerankResult.index >= 0 && rerankResult.index < results.size()) {
+                            SearchResult originalResult = results.get(rerankResult.index);
+                            SearchResult newResult = originalResult;
+                            newResult.setRelevanceScore(rerankResult.relevanceScore);
+                            rerankedResults.add(newResult);
+                        }
+                    }
+                    return rerankedResults;
+                } else {
+                    throw new RuntimeException("Rerank API返回错误: " + rerankApiResponse.msg);
+                }
+            } else {
+                throw new RuntimeException("Rerank HTTP请求失败，状态码: " + response.statusCode() + ", 响应: " + response.body());
+            }
+
+        } catch (IOException | InterruptedException e) {
+            if (config.isEnableLogging()) {
+                LoggerUtil.logOpenAI(Level.SEVERE, "Rerank失败: " + e.getMessage());
+            }
+            throw new RuntimeException("Rerank请求失败: " + e.getMessage(), e);
+        }
+    }
+    
     // 测试方法
     public static void main(String[] args) {
         try {
@@ -821,6 +989,19 @@ public class WebSearch {
             System.out.println("主要域名: " + summary.getTopDomains());
             System.out.println("组合摘要: " + summary.getCombinedSnippets().substring(0, 
                 Math.min(200, summary.getCombinedSnippets().length())) + "...");
+            
+            // 测试5: Rerank功能
+            System.out.println("\n5. Rerank功能测试");
+            if (!results.isEmpty()) {
+                List<SearchResult> rerankedResults = webSearch.rerank("JTreg是什么", results, 3);
+                System.out.println("对'JTreg是什么'的查询进行Rerank (Top 3):");
+                for (SearchResult result : rerankedResults) {
+                    System.out.printf("- [分数: %.4f] %s%n", result.getRelevanceScore(), result.getName());
+                    System.out.println("  " + result.getUrl());
+                }
+            } else {
+                System.out.println("无搜索结果可用于Rerank测试。");
+            }
             
             System.out.println("\n=== 所有测试完成 ===");
             
