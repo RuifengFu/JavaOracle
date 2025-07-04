@@ -17,4 +17,5 @@ Analyze the reason for the test case failure and provide a root cause analysis.
 <Requirements>
 1. Summarize your analysis into a single function call as the output.
 2. Ensure your analysis is accurate, especially for JDK functions.
+3. If you think this is a JDK BUG, set report_bug to true.
 </Requirements> 

@@ -466,7 +466,7 @@ public class BugVerifyAgent extends Agent {
                 }
                 Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
                 Path hypothesesDir = verifyContextPath.resolve("hypotheses");
-                saveToFile(hypothesesDir.resolve(hypothesisId + "_verification.java").toString(), code);
+                saveToFile(hypothesesDir.resolve(hypothesisId + ".java").toString(), code);
                 verificationCode = code; // 使用实例化后的代码
             } catch (Exception e) {
                 LoggerUtil.logExec(Level.SEVERE, "测试用例模板实例化失败 " + testCaseName + " " + hypothesisId + " " + e.getMessage());
