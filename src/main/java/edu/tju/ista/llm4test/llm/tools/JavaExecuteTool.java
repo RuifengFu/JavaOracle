@@ -4,6 +4,7 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -21,22 +22,46 @@ public class JavaExecuteTool implements Tool<String> {
     public String getDescription() {
         return "直接使用Java命令执行指定的测试类，返回执行输出结果";
     }
-    
+
     @Override
-    public ToolResponse<String> execute(String input) {
+    public List<String> getParameters() {
+        return List.of("className");
+    }
+
+    @Override
+    public Map<String, String> getParametersDescription() {
+        return Map.of("className", "The name of the test class to execute");
+    }
+
+    @Override
+    public Map<String, String> getParametersType() {
+        return Map.of("className", "string");
+    }
+
+    @Override
+    public ToolResponse<String> execute(Map<String, Object> args) {
+        if (args == null || !args.containsKey("className") || !(args.get("className") instanceof String)) {
+            return ToolResponse.failure("参数错误，必须提供 className 且其类型为 String");
+        }
+        String className = (String) args.get("className");
+        return execute(className);
+    }
+    
+    public ToolResponse<String> execute(String className) {
         try {
-            String className = input.trim();
+            String trimmedClassName = className.trim();
             
             // 构建Java命令
             List<String> command = new ArrayList<>();
             command.add("java");
             
+            // TODO: CHECK THIS
             // 添加类路径 (根据实际情况修改)
             command.add("-cp");
             command.add("./target/classes:./target/test-classes");
             
             // 添加类名
-            command.add(className);
+            command.add(trimmedClassName);
             
             // 创建进程
             ProcessBuilder pb = new ProcessBuilder(command);

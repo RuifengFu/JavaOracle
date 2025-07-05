@@ -9,14 +9,11 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.logging.Level;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
-import com.fasterxml.jackson.annotation.JsonCreator;
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
  * 使用jtreg执行测试用例的工具
@@ -29,9 +26,6 @@ public class JtregExecuteTool implements Tool<TestResult> {
     
     // JDK配置，与TestExecutor中保持一致
     private final List<String> jdkPaths;
-    
-    // JSON解析器
-    private final ObjectMapper objectMapper;
     
     // TEST.ROOT文件内容
     private static final String TEST_ROOT_CONTENT = 
@@ -46,8 +40,6 @@ public class JtregExecuteTool implements Tool<TestResult> {
         this.jdkPaths.add("/home/Java/HotSpot/jdk-17.0.14+7");
         this.jdkPaths.add("/home/Java/HotSpot/jdk-21.0.6+7");
         
-        this.objectMapper = new ObjectMapper();
-        
         // 确保基础工作目录和结果目录存在
         baseWorkingDir.mkdirs();
         resultDir.mkdirs();
@@ -60,68 +52,52 @@ public class JtregExecuteTool implements Tool<TestResult> {
     
     @Override
     public String getDescription() {
-        return "使用jtreg执行指定的Java测试文件或Java测试代码，返回测试执行结果。" +
-               "输入可以是Java文件路径，也可以是Java源代码字符串。若输入以.java结尾且存在该文件，则视为文件路径；否则视为源代码内容。";
+        return "使用jtreg执行指定的Java测试文件或Java源代码，返回测试执行结果。" +
+               "通过 is_file_path 参数明确指定 content 是文件路径还是源代码。";
     }
-    
-    /**
-     * 执行请求的数据类
-     */
-    public static class ExecuteRequest {
-        private final String content;
-        private final boolean isFilePath;
-        private final String className;
-        
-        @JsonCreator
-        public ExecuteRequest(
-                @JsonProperty("content") String content,
-                @JsonProperty("isFilePath") boolean isFilePath,
-                @JsonProperty("className") String className) {
-            this.content = content;
-            this.isFilePath = isFilePath;
-            this.className = className;
-        }
-        
-        public String getContent() {
-            return content;
-        }
-        
-        public boolean isFilePath() {
-            return isFilePath;
-        }
-        
-        public String getClassName() {
-            return className;
-        }
-    }
-    
+
     @Override
-    public ToolResponse<TestResult> execute(String input) {
+    public List<String> getParameters() {
+        return List.of("content", "is_file_path", "class_name");
+    }
+
+    @Override
+    public Map<String, String> getParametersDescription() {
+        return Map.of(
+                "content", "Java源代码或测试文件的路径。",
+                "is_file_path", "如果 'content' 是文件路径则为 true，如果是源代码则为 false。",
+                "class_name", "（可选）当提供源代码时，指定主类名。"
+        );
+    }
+
+    @Override
+    public Map<String, String> getParametersType() {
+        return Map.of(
+                "content", "string",
+                "is_file_path", "boolean",
+                "class_name", "string"
+        );
+    }
+
+    @Override
+    public ToolResponse<TestResult> execute(Map<String, Object> args) {
+        if (args == null || !args.containsKey("content") || !args.containsKey("is_file_path")) {
+            return ToolResponse.failure("参数错误，必须提供 content 和 is_file_path");
+        }
+
+        String content = (String) args.get("content");
+        boolean isFilePath = (Boolean) args.get("is_file_path");
+        String className = (String) args.get("class_name"); // 可以为 null
+
         try {
-            ExecuteRequest request;
-            
-            if (input.contains("{")) {
-                try {
-                    request = objectMapper.readValue(input, ExecuteRequest.class);
-                } catch (Exception e) {
-                    // 如果不是JSON，则视为简单的路径或代码
-                    boolean isFilePath = input.trim().endsWith(".java") && new File(input.trim()).exists();
-                    request = new ExecuteRequest(input, isFilePath, null);
-                }
-            } else {
-                // 简单的路径或代码判断
-                boolean isFilePath = input.trim().endsWith(".java") && new File(input.trim()).exists();
-                request = new ExecuteRequest(input, isFilePath, null);
-            }
-            
             final File testFile;
             
-            if (request.isFilePath()) {
+            if (isFilePath) {
                 // 使用文件路径
-                testFile = new File(request.getContent().trim());
+                testFile = new File(content.trim());
             } else {
                 // 使用源代码内容创建临时文件
-                testFile = createTemporaryTestFile(request.getContent(), request.getClassName());
+                testFile = createTemporaryTestFile(content, className);
             }
             
             // 验证文件存在
@@ -131,8 +107,7 @@ public class JtregExecuteTool implements Tool<TestResult> {
             
             // 创建测试执行器并执行测试 - 使用固定的工作空间结构
             File reduceWorkSpace = new File(baseWorkingDir, "ReduceWorkSpace");
-            TestExecutor executor = new TestExecutor(
-            );
+            TestExecutor executor = new TestExecutor();
             LoggerUtil.logExec(Level.INFO, "开始执行差分测试: " + testFile.getPath());
             TestResult result = executor.differentialTesting(testFile);
             
@@ -271,76 +246,5 @@ public class JtregExecuteTool implements Tool<TestResult> {
         File testRootFile = new File(directory, "TEST.ROOT");
         Files.write(testRootFile.toPath(), TEST_ROOT_CONTENT.getBytes());
         LoggerUtil.logExec(Level.INFO, "创建TEST.ROOT文件: " + testRootFile.getAbsolutePath());
-    }
-
-    /**
-     * 用于测试JtregExecuteTool功能的main方法
-     */
-    public static void main(String[] args) {
-        // 创建工具实例
-        JtregExecuteTool tool = new JtregExecuteTool();
-        
-        // 测试场景1: 使用文件路径
-        if (args.length > 0 && args[0].endsWith(".java")) {
-            System.out.println("=== 测试文件路径执行 ===");
-            System.out.println("执行文件: " + args[0]);
-            ToolResponse<TestResult> response = tool.execute(args[0]);
-            System.out.println("执行结果: " + (response.isSuccess() ? "成功" : "失败"));
-            System.out.println(response.getMessage());
-            if (response.isSuccess()) {
-                System.out.println("测试结果: " + response.getResult());
-            }
-        } 
-        // 测试场景2: 使用Java源代码字符串
-        else {
-            System.out.println("=== 测试源代码执行 ===");
-            String testSource = 
-                    "/**\n" +
-                    " * @test\n" +
-                    " */\n" +
-                    "public class SimpleTest {\n" +
-                    "    public static void main(String[] args) {\n" +
-                    "        System.out.println(\"Hello from SimpleTest\");\n" +
-                    "        // 验证Java版本\n" +
-                    "        System.out.println(\"Java version: \" + System.getProperty(\"java.version\"));\n" +
-                    "    }\n" +
-                    "}\n";
-            System.out.println("源代码:\n" + testSource);
-            
-            ToolResponse<TestResult> response = tool.execute(testSource);
-            System.out.println("执行结果: " + (response.isSuccess() ? "成功" : "失败"));
-            System.out.println(response.getMessage());
-            if (response.isSuccess()) {
-                System.out.println("测试结果: " + response.getResult());
-            }
-            
-            // 测试场景3: 使用JSON请求
-            System.out.println("\n=== 测试JSON请求执行 ===");
-            try {
-                String jsonRequest = tool.objectMapper.writeValueAsString(
-                        new ExecuteRequest(
-                                "/**\n" +
-                                " * @test\n" +
-                                " */\n" +
-                                "public class JsonTest {\n" +
-                                "    public static void main(String[] args) {\n" +
-                                "        System.out.println(\"Hello from JsonTest\");\n" +
-                                "    }\n" +
-                                "}\n",
-                                false,
-                                "JsonTest"));
-                
-                System.out.println("JSON请求:\n" + jsonRequest);
-                ToolResponse<TestResult> jsonResponse = tool.execute(jsonRequest);
-                System.out.println("执行结果: " + (jsonResponse.isSuccess() ? "成功" : "失败"));
-                System.out.println(jsonResponse.getMessage());
-                if (jsonResponse.isSuccess()) {
-                    System.out.println("测试结果: " + jsonResponse.getResult());
-                }
-            } catch (Exception e) {
-                System.err.println("JSON测试异常: " + e.getMessage());
-                e.printStackTrace();
-            }
-        }
     }
 } 

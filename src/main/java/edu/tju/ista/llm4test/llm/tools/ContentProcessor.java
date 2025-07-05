@@ -4,6 +4,9 @@ import edu.tju.ista.llm4test.llm.OpenAI;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import java.io.*;
 import java.nio.file.Files;
@@ -13,13 +16,12 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.*;
 import java.util.logging.Level;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * 内容处理器 - 对网页内容进行智能分片、总结和相关性过滤
  */
-public class ContentProcessor {
+@Deprecated
+public class ContentProcessor implements Tool<String> {
     private final OpenAI llm;
     private final String cacheDir;
     private final ObjectMapper objectMapper;
@@ -40,6 +42,63 @@ public class ContentProcessor {
         } catch (IOException e) {
             LoggerUtil.logExec(Level.WARNING, "创建缓存目录失败: " + e.getMessage());
         }
+    }
+    
+    @Override
+    public String getName() {
+        return "process_and_summarize_content";
+    }
+
+    @Override
+    public String getDescription() {
+        return "Processes raw content (e.g., from a web page) by splitting it into chunks, " +
+               "filtering them for relevance against an analysis context, and summarizing the key information. " +
+               "Returns a formatted string of the processed, relevant content.";
+    }
+
+    @Override
+    public List<String> getParameters() {
+        return List.of("url", "content", "analysisContext");
+    }
+
+    @Override
+    public Map<String, String> getParametersDescription() {
+        return Map.of(
+                "url", "The original source URL of the content.",
+                "content", "The raw content (in Markdown format) to be processed.",
+                "analysisContext", "The analysis context or query to determine relevance."
+        );
+    }
+
+    @Override
+    public Map<String, String> getParametersType() {
+        return Map.of(
+                "url", "string",
+                "content", "string",
+                "analysisContext", "string"
+        );
+    }
+
+    @Override
+    public ToolResponse<String> execute(Map<String, Object> args) {
+        if (args == null || !args.containsKey("url") || !args.containsKey("content") || !args.containsKey("analysisContext")) {
+            return ToolResponse.failure("参数错误，必须提供 url, content, 和 analysisContext");
+        }
+        String url = (String) args.get("url");
+        String content = (String) args.get("content");
+        String analysisContext = (String) args.get("analysisContext");
+
+        List<ProcessedContentChunk> processedChunks = processContent(url, content, analysisContext);
+
+        if (processedChunks.isEmpty()) {
+            return ToolResponse.success("没有找到相关内容。");
+        }
+
+        String formattedResult = processedChunks.stream()
+                .map(ProcessedContentChunk::getFormattedContent)
+                .collect(Collectors.joining("\n\n---\n\n"));
+
+        return ToolResponse.success(formattedResult);
     }
     
     /**
@@ -480,10 +539,6 @@ public class ContentProcessor {
         // Getters and setters
         public String getId() { return id; }
         public void setId(String id) { this.id = id; }
-        
-        public String getOriginalContent() { return originalContent; }
-        public void setOriginalContent(String originalContent) { this.originalContent = originalContent; }
-        
         public String getSummary() { return summary; }
         public void setSummary(String summary) { this.summary = summary; }
         

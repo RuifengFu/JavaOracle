@@ -618,59 +618,41 @@ public class WebContentExtractor implements Tool<String> {
             return "page_" + System.currentTimeMillis();
         }
     }
-    
-    /**
-     * 主方法示例
-     */
-    public static void main(String[] args) {
-        // 示例URL
-        String url = "https://developers.google.com/api-client-library/java";
-        
-        // 读取命令行参数
-        if (args.length > 0) {
-            url = args[0];
-        }
-        
-        String outputPath = "extracted_content.md";
-        if (args.length > 1) {
-            outputPath = args[1];
-        }
-        
-        // 创建提取器
-        WebContentExtractor extractor = new WebContentExtractor(true);
-        
-        try {
-            // 获取内容
-            System.out.println("开始提取网页内容: " + url);
-            String markdown = extractor.extractContent(url);
-
-            // 保存到文件
-            extractor.saveToFile(markdown, outputPath);
-            System.out.println("内容已保存到: " + outputPath);
-            
-            // 可选：获取页面截图
-            String screenshotPath = outputPath.replace(".md", ".png");
-            extractor.takeScreenshot(url, screenshotPath);
-            System.out.println("截图已保存到: " + screenshotPath);
-            
-        } finally {
-            // 关闭资源
-            extractor.close();
-            System.out.println("资源已释放");
-        }
-    }
 
     @Override
     public String getName() {
-        return "Web browser";
+        return "extract_web_content";
     }
 
     @Override
     public String getDescription() {
-        return "Get content from a web page and convert it to Markdown format.";
+        return "Extracts the main content from a given URL and converts it into clean Markdown format. " +
+               "It can handle both static and dynamic (JavaScript-heavy) web pages.";
     }
 
     @Override
+    public List<String> getParameters() {
+        return List.of("url");
+    }
+
+    @Override
+    public Map<String, String> getParametersDescription() {
+        return Map.of("url", "The URL of the web page to extract content from.");
+    }
+
+    @Override
+    public Map<String, String> getParametersType() {
+        return Map.of("url", "string");
+    }
+
+    @Override
+    public ToolResponse<String> execute(Map<String, Object> args) {
+        if (args == null || !args.containsKey("url") || !(args.get("url") instanceof String url)) {
+            return ToolResponse.failure("参数错误，必须提供 url 且其类型为 String");
+        }
+        return execute(url);
+    }
+
     public ToolResponse<String> execute(String url) {
         try {
             var markdown = extractContent(url);

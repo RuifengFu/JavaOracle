@@ -12,9 +12,12 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
+import java.util.stream.Collectors;
 
-public class DuckDuckGoSearcher implements Tool<List<SearchResult>> {
+
+public class DuckDuckGoSearcher implements Tool<String> {
     private static final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36";
     private static final int MAX_RETRIES = 3;
     private static final int CONNECTION_TIMEOUT = 15000; // 15秒
@@ -25,11 +28,60 @@ public class DuckDuckGoSearcher implements Tool<List<SearchResult>> {
             "adservice", "adclick", "ads", "ad_domain", "ad_provider", "ad_type", "adgroup"
     };
 
-    public static List<SearchResult> search(String query, int maxResults) {
-        return search(query, maxResults, null, null);
+    @Override
+    public String getName() {
+        return "duckduckgo_search";
     }
 
-    public static List<SearchResult> search(String query, int maxResults, String proxyHost, Integer proxyPort) {
+    @Override
+    public String getDescription() {
+        return "Performs a web search using the DuckDuckGo search engine and returns a list of results. " +
+               "This tool is privacy-focused and provides title, URL, and a snippet for each search result.";
+    }
+
+    @Override
+    public List<String> getParameters() {
+        return List.of("query", "max_results");
+    }
+
+    @Override
+    public Map<String, String> getParametersDescription() {
+        return Map.of(
+                "query", "The search query string.",
+                "max_results", "The maximum number of search results to return."
+        );
+    }
+
+    @Override
+    public Map<String, String> getParametersType() {
+        return Map.of(
+                "query", "string",
+                "max_results", "integer"
+        );
+    }
+
+    @Override
+    public ToolResponse<String> execute(Map<String, Object> args) {
+        if (args == null || !args.containsKey("query")) {
+            return ToolResponse.failure("参数错误，必须提供 query");
+        }
+        String query = (String) args.get("query");
+        int maxResults = args.containsKey("max_results") ? (int) args.get("max_results") : 10;
+
+        List<SearchResult> results = search(query, maxResults, null, null);
+
+        if (results.isEmpty()) {
+            return ToolResponse.failure("No search results found.");
+        }
+
+        String formattedResults = results.stream()
+                .map(SearchResult::toString)
+                .collect(Collectors.joining("\n\n"));
+
+        return ToolResponse.success(formattedResults);
+    }
+
+    private static List<SearchResult> search(String query, int maxResults, String proxyHost, Integer proxyPort) {
         List<SearchResult> links = new ArrayList<>();
 
         for (int attempt = 0; attempt < MAX_RETRIES; attempt++) {
@@ -140,38 +192,5 @@ public class DuckDuckGoSearcher implements Tool<List<SearchResult>> {
             }
         }
         return false;
-    }
-
-    public static void main(String[] args) {
-        // 使用代理的例子
-        // 请替换为实际的代理服务器地址和端口
-//        System.out.println("\n使用代理的搜索结果:");
-//        String proxyHost = "127.0.0.1"; // 替换为实际代理主机
-//        int proxyPort = 7890; // 替换为实际代理端口
-
-        // 使用代理进行搜索的例子
-        System.setProperty("java.net.useSystemProxies", "true");
-        List<SearchResult> proxyResults = search("Elon Musk latest news", 10);
-        proxyResults.forEach(System.out::println);
-    }
-
-    @Override
-    public String getName() {
-        return "WebSearch";
-    }
-
-    @Override
-    public String getDescription() {
-        return "According to the query, search the web and return links.";
-    }
-
-    @Override
-    public ToolResponse<List<SearchResult>> execute(String query) {
-        var list = search(query, 10);
-        if (list.isEmpty()) {
-            return ToolResponse.failure("No results found.");
-        } else {
-            return ToolResponse.success(list);
-        }
     }
 }

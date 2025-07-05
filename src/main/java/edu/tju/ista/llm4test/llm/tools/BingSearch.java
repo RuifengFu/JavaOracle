@@ -14,12 +14,15 @@ import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.logging.Level;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
-public class BingSearch implements Tool<List<SearchResult>> {
+
+public class BingSearch implements Tool<String> {
     private static final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0";
     private static final int MAX_RETRIES = 3;
     private static final int CONNECTION_TIMEOUT = 15000; // 15秒
@@ -30,11 +33,60 @@ public class BingSearch implements Tool<List<SearchResult>> {
             "adservice", "adclick", "ads", "ad_domain", "ad_provider", "ad_type", "adgroup"
     };
 
-    public static List<SearchResult> search(String query, int maxResults) {
-        return search(query, maxResults, null, null);
+    @Override
+    public String getName() {
+        return "bing_search";
     }
 
-    public static List<SearchResult> search(String query, int maxResults, String proxyHost, Integer proxyPort) {
+    @Override
+    public String getDescription() {
+        return "Performs a web search using the Bing search engine and returns a list of results. " +
+               "It provides the title, URL, and a snippet for each search result.";
+    }
+
+    @Override
+    public List<String> getParameters() {
+        return List.of("query", "max_results");
+    }
+
+    @Override
+    public Map<String, String> getParametersDescription() {
+        return Map.of(
+                "query", "The search query string.",
+                "max_results", "The maximum number of search results to return."
+        );
+    }
+
+    @Override
+    public Map<String, String> getParametersType() {
+        return Map.of(
+                "query", "string",
+                "max_results", "integer"
+        );
+    }
+
+    @Override
+    public ToolResponse<String> execute(Map<String, Object> args) {
+        if (args == null || !args.containsKey("query")) {
+            return ToolResponse.failure("参数错误，必须提供 query");
+        }
+        String query = (String) args.get("query");
+        int maxResults = args.containsKey("max_results") ? (int) args.get("max_results") : 10;
+
+        List<SearchResult> results = search(query, maxResults, null, null);
+
+        if (results.isEmpty()) {
+            return ToolResponse.failure("No search results found.");
+        }
+
+        String formattedResults = results.stream()
+                .map(SearchResult::toString)
+                .collect(Collectors.joining("\n\n"));
+
+        return ToolResponse.success(formattedResults);
+    }
+
+    private static List<SearchResult> search(String query, int maxResults, String proxyHost, Integer proxyPort) {
         List<SearchResult> links = new ArrayList<>();
         // 注释掉cookies相关代码
         // Map<String, String> cookies = new HashMap<>();
@@ -395,33 +447,5 @@ public class BingSearch implements Tool<List<SearchResult>> {
             LoggerUtil.logExec(Level.WARNING, "DuckDuckGo备选搜索失败: " + e.getMessage());
             return new ArrayList<>();
         }
-    }
-
-    @Override
-    public String getName() {
-        return "BingSearch";
-    }
-
-    @Override
-    public String getDescription() {
-        return "使用Bing搜索引擎，根据查询内容搜索网页并返回结果链接。";
-    }
-
-    @Override
-    public ToolResponse<List<SearchResult>> execute(String query) {
-        var list = search(query, 10);
-        if (list.isEmpty()) {
-            return ToolResponse.failure("无搜索结果");
-        } else {
-            return ToolResponse.success(list);
-        }
-    }
-
-    public static void main(String[] args) {
-        System.setProperty("java.net.useSystemProxies", "true");
-        System.out.println("Bing搜索测试:");
-        List<SearchResult> results = search("JavaHashMap", 10);
-        results.forEach(System.out::println);
-
     }
 } 
