@@ -1,11 +1,11 @@
 package edu.tju.ista.llm4test.utils;
 
-import edu.tju.ista.llm4test.utils.WebSearch;
-import edu.tju.ista.llm4test.utils.WebSearch.SearchResult;
-import edu.tju.ista.llm4test.utils.WebSearch.ImageResult;
-import edu.tju.ista.llm4test.utils.WebSearch.Freshness;
-import edu.tju.ista.llm4test.utils.WebSearch.SearchConfig;
-import edu.tju.ista.llm4test.utils.WebSearch.SearchSummary;
+import edu.tju.ista.llm4test.utils.websearch.WebSearch;
+import edu.tju.ista.llm4test.utils.websearch.SearchResult;
+import edu.tju.ista.llm4test.utils.websearch.ImageResult;
+import edu.tju.ista.llm4test.utils.websearch.Freshness;
+import edu.tju.ista.llm4test.utils.websearch.SearchConfig;
+import edu.tju.ista.llm4test.utils.websearch.SearchSummary;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

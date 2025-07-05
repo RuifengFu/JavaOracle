@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.logging.Level;
 
 import org.jsoup.Jsoup;
@@ -44,12 +45,42 @@ public class JavaDocSearchTool implements Tool<String> {
     
     @Override
     public String getDescription() {
-        return "根据提供的关键词（类名、方法名等）在JavaDoc中检索相关文档，支持智能分析和内容处理";
+        return "根据提供的自然语言查询在JavaDoc中检索相关文档。可以提供一个可选的分析上下文来优化搜索结果。";
     }
-    
+
     @Override
-    public ToolResponse<String> execute(String input) {
-        return executeWithContext(input, null);
+    public List<String> getParameters() {
+        return List.of("query", "analysis_context");
+    }
+
+    @Override
+    public Map<String, String> getParametersDescription() {
+        return Map.of(
+            "query", "搜索查询，可以是类名、方法名或自然语言描述。",
+            "analysis_context", "（可选）提供额外的上下文（例如，关于一个特定的bug或特性）来查找更相关的信息。"
+        );
+    }
+
+    @Override
+    public Map<String, String> getParametersType() {
+        return Map.of(
+            "query", "string",
+            "analysis_context", "string"
+        );
+    }
+
+    @Override
+    public ToolResponse<String> execute(Map<String, Object> args) {
+        if (args == null || !args.containsKey("query")) {
+            return ToolResponse.failure("参数错误，必须提供 'query'");
+        }
+        String query = (String) args.get("query");
+
+        return executeWithContext(query, null);
+    }
+
+    public ToolResponse<String> execute(String query) {
+        return executeWithContext(query, null);
     }
     
     /**
@@ -529,52 +560,5 @@ public class JavaDocSearchTool implements Tool<String> {
         filtered = filtered.replaceAll("(?s)\\[思考\\].*?\\[/思考\\]", "");
         
         return filtered.trim();
-    }
-    
-    /**
-     * 用于测试JavaDocSearchTool功能的main方法
-     */
-    public static void main(String[] args) {
-        String javaDocRoot = args.length > 0 ? args[0] : "/path/to/javadoc";
-        
-        // 创建工具实例
-        JavaDocSearchTool tool = new JavaDocSearchTool(javaDocRoot);
-        
-        // 测试场景1: 搜索具体类
-        System.out.println("=== 测试具体类搜索 ===");
-        String classQuery = "String类的substring方法";
-        System.out.println("查询: " + classQuery);
-        ToolResponse<String> classResponse = tool.execute(classQuery);
-        System.out.println("搜索结果: " + (classResponse.isSuccess() ? "成功" : "失败"));
-        if (classResponse.isSuccess()) {
-            String result = classResponse.getResult();
-            // 限制输出长度，避免控制台输出过多
-            if (result.length() > 500) {
-                System.out.println(result.substring(0, 500) + "...(更多内容省略)");
-            } else {
-                System.out.println(result);
-            }
-        } else {
-            System.out.println(classResponse.getMessage());
-        }
-        
-        // 测试场景2: 带分析上下文的搜索
-        System.out.println("\n=== 测试带上下文的搜索 ===");
-        String contextQuery = "HashMap put方法";
-        String analysisContext = "测试发现HashMap在并发环境下可能丢失数据，需要了解put方法的线程安全性";
-        System.out.println("查询: " + contextQuery);
-        System.out.println("上下文: " + analysisContext);
-        ToolResponse<String> contextResponse = tool.executeWithContext(contextQuery, analysisContext);
-        System.out.println("搜索结果: " + (contextResponse.isSuccess() ? "成功" : "失败"));
-        if (contextResponse.isSuccess()) {
-            String result = contextResponse.getResult();
-            if (result.length() > 800) {
-                System.out.println(result.substring(0, 800) + "...(更多内容省略)");
-            } else {
-                System.out.println(result);
-            }
-        } else {
-            System.out.println(contextResponse.getMessage());
-        }
     }
 } 

@@ -57,6 +57,10 @@ public class PromptGen {
             TEMPLATE_MAP.put("BugVerifyBugReport", loadResourceAsString("/prompt/BugVerifyBugReport.txt"));
             TEMPLATE_MAP.put("BugVerifyJsonExtract", loadResourceAsString("/prompt/BugVerifyJsonExtract.txt"));
             TEMPLATE_MAP.put("InstantiateTestCase", loadResourceAsString("/prompt/InstantiateTestCase.txt"));
+            
+            // TestCaseMinimization 相关模板
+            TEMPLATE_MAP.put("TestCaseMinimizationPlan", loadResourceAsString("/prompt/TestCaseMinimizationPlan.txt"));
+            TEMPLATE_MAP.put("TestCaseMinimizationReduce", loadResourceAsString("/prompt/TestCaseMinimizationReduce.txt"));
         } catch (IOException e) {
             throw new RuntimeException("Failed to load prompt templates from resources", e);
         }
@@ -168,5 +172,21 @@ public class PromptGen {
         dataModel.put("testcase", testcase);
         dataModel.put("hypothesis", hypothesis);
         return generatePrompt("InstantiateTestCase", dataModel);
+    }
+
+    public static String generateTestCaseMinimizationPlanPrompt(String sourceCode, String testFailureOutput, String workingDirectory, String originalTestDirectory) throws TemplateException, IOException {
+        Map<String, Object> dataModel = new HashMap<>();
+        dataModel.put("source_code", sourceCode);
+        dataModel.put("test_failure_output", testFailureOutput);
+        dataModel.put("working_directory", workingDirectory);
+        dataModel.put("original_test_directory", originalTestDirectory);
+        return generatePrompt("TestCaseMinimizationPlan", dataModel);
+    }
+
+    public static String generateTestCaseMinimizationReducePrompt(String testFailureOutput, String currentCode) throws TemplateException, IOException {
+        Map<String, Object> dataModel = new HashMap<>();
+        dataModel.put("test_failure_output", testFailureOutput);
+        dataModel.put("current_code", currentCode);
+        return generatePrompt("TestCaseMinimizationReduce", dataModel);
     }
 }

@@ -41,7 +41,10 @@ public class BugVerifyAgent extends Agent {
     
     // 新增的智能工具
     private final ContentProcessor contentProcessor;
-    private final IntelligentSearchTool intelligentSearchTool;
+
+    
+    // Agent for test case minimization
+    private final TestCaseMinimizationAgent minimizationAgent;
     
     // LLM实例
     private final OpenAI llm;
@@ -95,7 +98,7 @@ public class BugVerifyAgent extends Agent {
         this.executeTool = new JavaExecuteTool();
         this.jtregTool = new JtregExecuteTool();
         this.contentProcessor = new ContentProcessor(bugReportPath + "/content_cache");
-        this.intelligentSearchTool = new IntelligentSearchTool(searchTool, webTool, contentProcessor);
+        this.minimizationAgent = new TestCaseMinimizationAgent();
     }
     
     /**
@@ -159,6 +162,25 @@ public class BugVerifyAgent extends Agent {
         if (verifyContextFolder != null && testCaseName != null) {
             Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
             saveToFile(verifyContextPath.resolve("initial_insight.json").toString(), initialInsight);
+
+            // After initial analysis, if the test case is a verified failure, try to minimize it.
+            if (this.testCase != null && this.testCase.getResult() != null && this.testCase.getResult().isFail()) {
+                LoggerUtil.logExec(Level.INFO, "Verified failure detected. Starting test case minimization for: " + testCase.name);
+                try {
+                    File minimizedFile = minimizationAgent.minimize(this.testCase, verifyContextPath);
+                    if (minimizedFile != null) {
+                        LoggerUtil.logExec(Level.INFO, "Minimization successful. New test case at: " + minimizedFile.getAbsolutePath());
+                        // Update the agent's state to use the minimized test case for subsequent steps.
+                        this.testCase.setFile(minimizedFile);
+                        this.testCode = this.testCase.getSourceCode();
+                        LoggerUtil.logExec(Level.INFO, "BugVerifyAgent will now proceed with the minimized test case.");
+                    } else {
+                        LoggerUtil.logExec(Level.WARNING, "Minimization process did not return a valid file. Continuing with the original test case.");
+                    }
+                } catch (Exception e) {
+                    LoggerUtil.logExec(Level.SEVERE, "An exception occurred during test case minimization. Continuing with the original test case. "+ e);
+                }
+            }
         }
         
         // 2. 收集信息
@@ -211,11 +233,11 @@ public class BugVerifyAgent extends Agent {
         * @param response LLM响应内容
         * 去掉里面的 ```json 和 ``` 标签
      */
-//    private static String filiterJsonMark(String response) {
-//        if (response == null) return null;
-//        var filtered = response.replaceFirst("^```(json)?", "").replaceFirst("```\\s*$", "");
-//        return filtered;
-//    }
+    //    private static String filiterJsonMark(String response) {
+    //        if (response == null) return null;
+    //        var filtered = response.replaceFirst("^```(json)?", "").replaceFirst("```\\s*$", "");
+    //        return filtered;
+    //    }
     
     /**
      * 初始分析阶段 - 分析测试用例和输出，确定问题性质
@@ -264,6 +286,8 @@ public class BugVerifyAgent extends Agent {
     private void collectJavaDocInformation(String initialInsight) {
         List<String> relevantClasses = extractJsonArrayFromField(initialInsight, "relevantClasses");
         
+        // After generating the report, if the test case is a verified failure, try to minimize it.
+
         for (String className : relevantClasses.subList(0, 1)) { // 只收集一个类
             ToolResponse<String> docResponse = javadocTool.execute(className);
             if (docResponse.isSuccess()) {
@@ -902,4 +926,6 @@ public class BugVerifyAgent extends Agent {
         LoggerUtil.logExec(Level.FINE,"Resulting object strings count: " + result.size()); // Changed level to FINE for less verbose default logging
         return result;
     }
+
+
 }

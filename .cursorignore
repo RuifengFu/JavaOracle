@@ -3,7 +3,7 @@ JavaDoc/
 JavaTest/
 jdk17u-dev/
 jdk21-src/
-./test/
+./test/*
 .git/
 .idea/
 BugReport/
@@ -11,4 +11,3 @@ Dependency
 JTwork
 Results
 target
-test/

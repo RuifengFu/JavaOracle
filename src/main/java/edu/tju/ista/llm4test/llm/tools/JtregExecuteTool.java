@@ -118,11 +118,19 @@ public class JtregExecuteTool implements Tool<TestResult> {
             return ToolResponse.failure("测试执行失败: " + e.getMessage());
         }
     }
-    
+
+    public ToolResponse<TestResult> execute(String code) {
+        return execute(Map.of(
+                "content", code,
+                "is_file_path", false,
+                "class_name", extractClassNameFromSource(code)
+        ));
+    }
+
     /**
      * 从源代码中提取类名 - 改进版
      */
-    private String extractClassNameFromSource(String sourceCode) {
+    public String extractClassNameFromSource(String sourceCode) {
         // 移除注释
         String codeWithoutComments = removeComments(sourceCode);
         
@@ -148,6 +156,8 @@ public class JtregExecuteTool implements Tool<TestResult> {
         
         return null;
     }
+
+
     
     /**
      * 移除Java代码中的注释

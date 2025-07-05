@@ -43,8 +43,33 @@ public class SourceCodeSearchTool implements Tool<String> {
     public String getDescription() {
         return "根据提供的关键词（类名、方法名等）在JDK源码中检索相关代码";
     }
-    
+
     @Override
+    public List<String> getParameters() {
+        return List.of("keyword");
+    }
+
+    @Override
+    public Map<String, String> getParametersDescription() {
+        return Map.of("keyword", "要搜索的关键词，可以是类名、方法名或其他相关信息");
+    }
+
+    @Override
+    public Map<String, String> getParametersType() {
+        return Map.of("keyword", "string");
+    }
+
+    @Override
+    public ToolResponse<String> execute(Map<String, Object> args) {
+        if (args.get("input") instanceof String input) {
+            return execute(input);
+        } else {
+            return ToolResponse.failure("参数错误，必须提供 String 'input' 参数 " + args.get("input"));
+        }
+
+    }
+
+
     public ToolResponse<String> execute(String input) {
         return executeWithContext(input, null);
     }

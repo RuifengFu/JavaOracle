@@ -1,0 +1,25 @@
+You are an expert at code refactoring and minimization. Your goal is to simplify a given Java test case by removing or modifying a small part of it. The resulting code must still compile and reproduce the original failure.
+
+**Original Failure Output:**
+```
+${test_failure_output}
+```
+
+**Current Test Case Code:**
+```java
+${current_code}
+```
+
+**Task:**
+Analyze the code and propose a single, small simplification. This could be:
+- Removing an unnecessary line or block of code.
+- Deleting an unused variable or import.
+- Simplifying a complex expression.
+- Removing a method call that doesn't affect the failure.
+
+**Requirements:**
+1.  Make only one logical change at a time.
+2.  The primary goal is to make the code shorter while keeping the original failure.
+3.  The output **must** be only the complete, modified Java code. Do not include any explanations, thoughts, or markdown formatting. Just the raw code.
+
+**Now, provide the simplified version of the code.** 

@@ -1,14 +1,19 @@
 package edu.tju.ista.llm4test.llm.agents.flow;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.tju.ista.llm4test.llm.agents.Agent;
 import edu.tju.ista.llm4test.llm.memory.MemoryStore;
 import edu.tju.ista.llm4test.llm.tools.Tool;
 import edu.tju.ista.llm4test.llm.tools.ToolResponse;
+import edu.tju.ista.llm4test.utils.LoggerUtil;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Level;
 
 /**
  * 代理系统的流程控制类，负责协调代理的思考和行动过程
@@ -18,6 +23,7 @@ public class AgentFlow {
     private final Map<String, Tool<?>> tools;  // 代理可以使用的工具集
     private final List<FlowStep> flowHistory;  // 流程执行历史记录
     private final int maxIterations;  // 最大迭代次数，防止无限循环
+    private final ObjectMapper objectMapper = new ObjectMapper(); // For JSON parsing
     
     /**
      * 创建一个代理流程
@@ -74,7 +80,7 @@ public class AgentFlow {
             } else if (action.getType() == ActionType.USE_TOOL) {
                 // 调用工具
                 String toolName = action.getToolName();
-                String toolInput = action.getToolInput();
+                Map<String, Object> toolInput = action.getToolInput();
                 
                 if (!tools.containsKey(toolName)) {
                     context.addObservation("错误: 工具 '" + toolName + "' 不存在");
@@ -84,7 +90,7 @@ public class AgentFlow {
                 try {
                     Tool<?> tool = tools.get(toolName);
                     ToolResponse<?> toolResult = tool.execute(toolInput);
-                    context.addToolResult(toolName, toolInput, toolResult);
+                    context.addToolResult(toolName, toolInput.toString(), toolResult);
                     context.addObservation("工具 '" + toolName + "' 执行结果: " + toolResult);
                 } catch (Exception e) {
                     context.addObservation("错误: 工具 '" + toolName + "' 执行失败: " + e.getMessage());
@@ -108,11 +114,12 @@ public class AgentFlow {
         HashMap<String, Object> dataModel = new HashMap<>(context.getInput());
         
         // 添加工具信息
-        List<Map<String, String>> availableTools = new ArrayList<>();
+        List<Map<String, Object>> availableTools = new ArrayList<>();
         for (Tool<?> tool : tools.values()) {
-            Map<String, String> toolInfo = new HashMap<>();
+            Map<String, Object> toolInfo = new HashMap<>();
             toolInfo.put("name", tool.getName());
             toolInfo.put("description", tool.getDescription());
+            toolInfo.put("parameters", tool.getParameters());
             availableTools.add(toolInfo);
         }
         dataModel.put("tools", availableTools);
@@ -129,30 +136,35 @@ public class AgentFlow {
      * 解析代理响应，确定下一步操作
      */
     private FlowAction parseResponse(String response) {
-        // 这里需要根据响应格式进行解析
-        // 可以使用正则表达式或其他方法从文本中提取操作信息
-        
-        // 简单示例：检查是否包含工具调用或最终答案标记
-        if (response.contains("工具调用:") || response.contains("TOOL:")) {
-            // 简单解析，实际场景应更精确解析
-            int toolStart = response.indexOf("工具调用:") >= 0 ? 
-                            response.indexOf("工具调用:") : response.indexOf("TOOL:");
-            int nameStart = response.indexOf("名称:", toolStart);
-            int inputStart = response.indexOf("输入:", toolStart);
-            
-            if (nameStart >= 0 && inputStart >= 0) {
-                String toolName = response.substring(nameStart + 3, inputStart).trim();
-                String toolInput = response.substring(inputStart + 3).trim();
-                return FlowAction.useTool(toolName, toolInput);
+        // A more robust parsing mechanism that expects a specific JSON format for tool calls.
+        // Example expected format in LLM response:
+        // <tool_code>
+        // {
+        //   "tool_name": "...",
+        //   "parameters": { ... }
+        // }
+        // </tool_code>
+
+        if (response.contains("<tool_code>")) {
+            try {
+                final String jsonStr = response.substring(response.indexOf("<tool_code>") + 11, response.indexOf("</tool_code>")).trim();
+                Map<String, Object> toolCallMap = objectMapper.readValue(jsonStr, new TypeReference<Map<String, Object>>() {});
+                String toolName = (String) toolCallMap.get("tool_name");
+                @SuppressWarnings("unchecked")
+                Map<String, Object> parameters = (Map<String, Object>) toolCallMap.get("parameters");
+                if (toolName != null && parameters != null) {
+                    return FlowAction.useTool(toolName, parameters);
+                }
+            } catch (IOException e) {
+                LoggerUtil.logExec(Level.WARNING, "Failed to parse tool call JSON: " + e.getMessage());
+                return FlowAction.thinking("Failed to parse my own tool command. My mistake. The error was: " + e.getMessage());
             }
-        } else if (response.contains("最终答案:") || response.contains("ANSWER:")) {
-            int answerStart = response.contains("最终答案:") ? 
-                              response.indexOf("最终答案:") + 5 : response.indexOf("ANSWER:") + 7;
-            String answer = response.substring(answerStart).trim();
+        } else if (response.contains("FINAL_ANSWER:")) {
+            String answer = response.substring(response.indexOf("FINAL_ANSWER:") + 13).trim();
             return FlowAction.finalAnswer(answer);
         }
         
-        // 默认作为思考内容处理
+        // By default, treat the response as thinking.
         return FlowAction.thinking(response);
     }
 } 
