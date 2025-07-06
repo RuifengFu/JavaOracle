@@ -16,7 +16,6 @@ import freemarker.template.TemplateException;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.logging.Level;
-import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.io.File;
@@ -27,7 +26,7 @@ import java.nio.file.Paths;
 
 import static edu.tju.ista.llm4test.utils.FileUtils.saveToFile;
 
-public class BugVerifyAgent extends Agent {
+public class BugVerify extends Agent {
     // 基础提示模板
 
     // 可用的工具
@@ -87,7 +86,7 @@ public class BugVerifyAgent extends Agent {
      * @param javadocPath JavaDoc路径
      * @param sourcePath 源码路径
      */
-    public BugVerifyAgent(String javadocPath, String sourcePath) {
+    public BugVerify(String javadocPath, String sourcePath) {
         this.llm = OpenAI.R1;
         this.llm_json = OpenAI.V3;
         this.javadocTool = new JavaDocSearchTool(javadocPath);
@@ -106,7 +105,7 @@ public class BugVerifyAgent extends Agent {
      * @param sourcePath 源码路径
      * @param bugReportPath BugReport路径
      */
-    public BugVerifyAgent(String javadocPath, String sourcePath, String bugReportPath) {
+    public BugVerify(String javadocPath, String sourcePath, String bugReportPath) {
         this(javadocPath, sourcePath);
         if (bugReportPath != null && !bugReportPath.isEmpty()) {
             this.bugReportPath = bugReportPath;
@@ -817,7 +816,7 @@ public class BugVerifyAgent extends Agent {
             // 为每个bug生成报告
             for (Map.Entry<String, String> entry : verifiedBugs.entrySet()) {
                 var future = manager.submitTestTask(() -> {
-                    BugVerifyAgent agent = new BugVerifyAgent(javadocPath, sourcePath, bugReportPath);
+                    BugVerify agent = new BugVerify(javadocPath, sourcePath, bugReportPath);
                     String filePath = entry.getKey();
                     String verifyMessage = entry.getValue();
 

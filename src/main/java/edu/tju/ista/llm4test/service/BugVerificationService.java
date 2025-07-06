@@ -1,7 +1,7 @@
 package edu.tju.ista.llm4test.service;
 
 import edu.tju.ista.llm4test.config.GlobalConfig;
-import edu.tju.ista.llm4test.llm.agents.BugVerifyAgent;
+import edu.tju.ista.llm4test.llm.agents.BugVerify;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
 
 import java.io.File;
@@ -32,7 +32,7 @@ public class BugVerificationService {
         String bugReportPath = createBugReportDirectory();
         
         // 调用BugVerifyAgent的verifyBugsFromLog方法
-        BugVerifyAgent.verifyBugsFromLog(logPath, baseDocPath, jdkSourcePath, bugReportPath);
+        BugVerify.verifyBugsFromLog(logPath, baseDocPath, jdkSourcePath, bugReportPath);
     }
 
     /**

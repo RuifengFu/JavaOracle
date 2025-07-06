@@ -1,6 +1,6 @@
 package edu.tju.ista.llm4test.llm;
 
-import edu.tju.ista.llm4test.llm.agents.BugVerifyAgent;
+import edu.tju.ista.llm4test.llm.agents.BugVerify;
 import org.junit.Test;
 
 public class AgentTest {
@@ -33,7 +33,7 @@ public class AgentTest {
                 "    }\n" +
                 "  ]\n" +
                 "}";
-        var result = BugVerifyAgent.extractJsonObjectArrayFromField(json, "hypotheses");
+        var result = BugVerify.extractJsonObjectArrayFromField(json, "hypotheses");
         for (String str: result) {
             System.out.println(str);
         }
