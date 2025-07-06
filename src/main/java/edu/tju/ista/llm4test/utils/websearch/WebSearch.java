@@ -1,6 +1,7 @@
 package edu.tju.ista.llm4test.utils.websearch;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import edu.tju.ista.llm4test.config.GlobalConfig;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
 import edu.tju.ista.llm4test.utils.websearch.api.*;
 import static edu.tju.ista.llm4test.utils.websearch.api.ApiModels.*;
@@ -20,8 +21,8 @@ import java.util.logging.Level;
  */
 public class WebSearch {
     
-    private static final String API_BASE_URL = "https://api.bochaai.com/v1/web-search";
-    private static final String RERANK_API_URL = "https://api.bochaai.com/v1/rerank";
+    private static final String API_BASE_URL = GlobalConfig.getWebSearchApiBaseUrl();
+    private static final String RERANK_API_URL = GlobalConfig.getWebSearchRerankApiUrl();
     private static final String DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
     
     private final SearchConfig config;
@@ -29,7 +30,7 @@ public class WebSearch {
     private final ObjectMapper objectMapper;
     
     public WebSearch() {
-        this.config = new SearchConfig().setApiKey(System.getenv("BOCHA_API_KEY")).setSummary(true);
+        this.config = new SearchConfig().setApiKey(GlobalConfig.getBochaApiKey()).setSummary(true);
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(config.getTimeout()))
                 .build();
@@ -422,10 +423,10 @@ public class WebSearch {
             System.out.println("=== WebSearch API 测试 ===");
             
             // 注意：需要设置真实的API Key才能进行测试
-            String apiKey = System.getenv("BOCHA_API_KEY"); // 从环境变量获取API Key
+            String apiKey = GlobalConfig.getBochaApiKey(); // 从配置获取API Key
             
             if (apiKey == null || apiKey.trim().isEmpty()) {
-                System.out.println("请设置环境变量 BOCHA_API_KEY 或在代码中直接设置API Key进行测试");
+                System.out.println("请在config.properties或环境变量中设置 BOCHA_API_KEY");
                 System.out.println("测试跳过，仅演示基本对象创建功能");
                 
                 // 基本功能测试

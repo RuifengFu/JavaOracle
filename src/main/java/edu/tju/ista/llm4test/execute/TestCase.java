@@ -9,7 +9,6 @@ import edu.tju.ista.llm4test.prompt.PromptGen;
 import edu.tju.ista.llm4test.utils.CodeExtractor;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
 import edu.tju.ista.llm4test.utils.ApiInfoProcessor;
-import org.pitest.util.Log;
 
 import java.io.File;
 import java.io.IOException;

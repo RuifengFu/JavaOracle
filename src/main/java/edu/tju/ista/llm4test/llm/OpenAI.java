@@ -10,6 +10,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 
+import edu.tju.ista.llm4test.config.GlobalConfig;
 import edu.tju.ista.llm4test.llm.functionCalling.FuncTool;
 import edu.tju.ista.llm4test.llm.functionCalling.FuncToolFactory;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
@@ -29,10 +30,10 @@ import static java.lang.Thread.sleep;
 public class OpenAI {
     private final String API_KEY; // Replace with your API key
 
-    private String BASE_URL = "https://api.deepseek.com/beta/v1/chat/completions";
+    private String BASE_URL;
 //    private static final String BASE_URL = "https://api.siliconflow.cn/v1/chat/completions";
 
-    private String MODEL = "deepseek-chat";
+    private String MODEL;
 
     private final double TEMPERATURE = 0.6;
 
@@ -50,16 +51,9 @@ public class OpenAI {
 
 
     public OpenAI() {
-        API_KEY = System.getenv("OPENAI_API_KEY");
-        BASE_URL = System.getenv("OPENAI_BASE_URL");
-        MODEL = System.getenv("OPENAI_MODEL");
-        if (BASE_URL == null || BASE_URL.isEmpty()) {
-            BASE_URL = "https://api.deepseek.com/beta/chat/completions";
-        }
-        if (MODEL == null || MODEL.isEmpty()) {
-            MODEL = "deepseek-chat";
-        }
-
+        API_KEY = GlobalConfig.getOpenaiApiKey();
+        BASE_URL = GlobalConfig.getOpenaiBaseUrl();
+        MODEL = GlobalConfig.getOpenaiModel();
     }
 
     public OpenAI(String modelName) {
@@ -82,12 +76,21 @@ public class OpenAI {
 
     static {
 
-        R1 = new OpenAI("deepseek-reasoner");
-        V3 = new OpenAI("deepseek-chat");
+        
+        String arkApiKey = GlobalConfig.getDoubaoApiKey();
+        String arkBaseUrl = GlobalConfig.getDoubaoBaseUrl();
+        String arkModel = GlobalConfig.getDoubaoModel();
+
+        arkModel = "doubao-seed-1-6-flash-250615";
+
+        Doubao = new OpenAI(arkApiKey, arkBaseUrl, arkModel);
+
+//        R1 = new OpenAI(GlobalConfig.getOpenaiR1Model());
+//        V3 = new OpenAI(GlobalConfig.getOpenaiV3Model());
+        R1 = new OpenAI(arkApiKey, arkBaseUrl, arkModel);
+        V3 = new OpenAI(arkApiKey, arkBaseUrl, arkModel);
         V3.JSON_OUTPUT = true;
-        var ark_api_key = System.getenv("ARK_API_KEY");
-        var ark_base_url = System.getenv("ARK_BASE_URL");
-        Doubao = new OpenAI(ark_api_key, ark_base_url, "ep-20250615170506-mtn4k");
+
     }
 
 

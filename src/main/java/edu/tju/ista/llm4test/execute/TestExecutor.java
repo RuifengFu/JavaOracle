@@ -1,5 +1,6 @@
 package edu.tju.ista.llm4test.execute;
 
+import edu.tju.ista.llm4test.config.GlobalConfig;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
 import edu.tju.ista.llm4test.concurrent.ConcurrentExecutionManager;
 
@@ -14,16 +15,13 @@ import java.util.logging.Level;
 
 public class TestExecutor {
     private final ConcurrentExecutionManager concurrentManager;
+    private final List<String> jdkPaths;
     
     // 配置常量
     private static final String[] EXEC_FLAGS = {"-Xint", "-Xcomp", "-Xmixed"};
     private static final Map<String, String> BASE_ENV = createBaseEnvironment();
     private static final String SYSTEM_PATH = System.getenv("PATH")
         .replace("/usr/lib/jvm/java-17-openjdk-amd64/bin:", "");
-    private static final List<String> DEFAULT_JDKS = Arrays.asList(
-        "/home/Java/HotSpot/jdk-17.0.14+7", 
-        "/home/Java/HotSpot/jdk-21.0.6+7"
-    );
     
     // 超时配置（毫秒）
     private static final long EXECUTION_TIMEOUT_MS = 600_000; // 10分钟
@@ -34,6 +32,7 @@ public class TestExecutor {
      */
     public TestExecutor() {
         this.concurrentManager = ConcurrentExecutionManager.getInstance();
+        this.jdkPaths = GlobalConfig.getJdkPaths();
         // 环境检查
         checkEnvironment();
     }
@@ -67,7 +66,7 @@ public class TestExecutor {
         }
         
         // 检查JDK路径
-        for (String jdk : DEFAULT_JDKS) {
+        for (String jdk : jdkPaths) {
             File jdkDir = new File(jdk);
             if (jdkDir.exists() && jdkDir.isDirectory()) {
                 LoggerUtil.logExec(Level.INFO, "JDK路径检查通过: " + jdk);
@@ -177,7 +176,7 @@ public class TestExecutor {
         CompletableFuture<Void> sequentialChain = CompletableFuture.completedFuture(null);
         
         // 为每个JDK创建顺序执行链
-        for (String jdk : DEFAULT_JDKS) {
+        for (String jdk : jdkPaths) {
             sequentialChain = sequentialChain.thenCompose(v -> 
                 concurrentManager.submitTestTask(() -> {
                     try {
@@ -472,7 +471,7 @@ public class TestExecutor {
         
         List<CompletableFuture<Void>> futures = new ArrayList<>();
         
-        for (String jdk : DEFAULT_JDKS) {
+        for (String jdk : jdkPaths) {
             CompletableFuture<Void> future = concurrentManager.submitTestTask(() -> {
                 try {
                     testSingleJDK(jdk);
@@ -485,7 +484,7 @@ public class TestExecutor {
         
         try {
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-                .get(JDK_TEST_TIMEOUT_MS * DEFAULT_JDKS.size(), TimeUnit.MILLISECONDS);
+                .get(JDK_TEST_TIMEOUT_MS * jdkPaths.size(), TimeUnit.MILLISECONDS);
         } catch (Exception e) {
             LoggerUtil.logExec(Level.WARNING, "JDK环境测试异常: " + e.getMessage());
         }
@@ -541,7 +540,7 @@ public class TestExecutor {
      * @return JDK路径列表
      */
     public List<String> getDefaultJDKs() {
-        return new ArrayList<>(DEFAULT_JDKS);
+        return new ArrayList<>(jdkPaths);
     }
     
     /**

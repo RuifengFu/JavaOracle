@@ -12,7 +12,6 @@ import edu.tju.ista.llm4test.utils.CodeExtractor;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
 import edu.tju.ista.llm4test.prompt.PromptGen;
 import freemarker.template.TemplateException;
-import org.pitest.util.Log;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -849,7 +848,7 @@ public class BugVerifyAgent extends Agent {
 
                         // 运行测试获取输出
                         JtregExecuteTool jtregTool = new JtregExecuteTool();
-                        ToolResponse<TestResult> response = jtregTool.execute(testFile.getPath());
+                        ToolResponse<TestResult> response = jtregTool.execute(testcase.getFile().toPath(), testCaseName);
 
                         String testOutput;
                         if (response.isSuccess()) {

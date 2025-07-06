@@ -7,6 +7,7 @@ import edu.tju.ista.llm4test.utils.LoggerUtil;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -106,9 +107,9 @@ public class JtregExecuteTool implements Tool<TestResult> {
             }
             
             // 创建测试执行器并执行测试 - 使用固定的工作空间结构
-            File reduceWorkSpace = new File(baseWorkingDir, "ReduceWorkSpace");
             TestExecutor executor = new TestExecutor();
             LoggerUtil.logExec(Level.INFO, "开始执行差分测试: " + testFile.getPath());
+
             TestResult result = executor.differentialTesting(testFile);
             
             return ToolResponse.success(result);
@@ -124,6 +125,14 @@ public class JtregExecuteTool implements Tool<TestResult> {
                 "content", code,
                 "is_file_path", false,
                 "class_name", extractClassNameFromSource(code)
+        ));
+    }
+
+    public ToolResponse<TestResult> execute(Path filePath, String className) {
+        return execute(Map.of(
+                "content", filePath.toString(),
+                "is_file_path", true,
+                "class_name", className
         ));
     }
 
@@ -207,21 +216,21 @@ public class JtregExecuteTool implements Tool<TestResult> {
                 extractedClassName : "TestClass_" + UUID.randomUUID().toString().replace("-", "");
         
         // 创建固定的ReduceWorkSpace工作目录
-        File reduceWorkSpace = new File(baseWorkingDir, "ReduceWorkSpace");
-        if (!reduceWorkSpace.exists()) {
-            reduceWorkSpace.mkdirs();
+        File workSpace = baseWorkingDir;
+        if (!workSpace.exists()) {
+            workSpace.mkdirs();
             
             // 只在第一次创建时创建TEST.ROOT文件
-            createTestRootFile(reduceWorkSpace);
+            createTestRootFile(workSpace);
             
             // 可选：创建lib目录用于共享库
-            File libDir = new File(reduceWorkSpace, "lib");
+            File libDir = new File(workSpace, "lib");
             libDir.mkdir();
         }
         
         // 在ReduceWorkSpace下创建测试用例特定的目录
-        File testCaseDir = new File(reduceWorkSpace, 
-                actualClassName + "_" + System.currentTimeMillis());
+        File testCaseDir = new File(workSpace,
+                actualClassName + "_" + System.currentTimeMillis() + "_" + Thread.currentThread().getId());
         testCaseDir.mkdirs();
         
         // 创建具有适当包结构的目录
@@ -254,6 +263,10 @@ public class JtregExecuteTool implements Tool<TestResult> {
      */
     private void createTestRootFile(File directory) throws IOException {
         File testRootFile = new File(directory, "TEST.ROOT");
+        if (testRootFile.getTotalSpace() != 0) {
+            LoggerUtil.logExec(Level.INFO, "TEST.ROOT文件已存在，跳过创建: " + testRootFile.getAbsolutePath());
+            return;
+        }
         Files.write(testRootFile.toPath(), TEST_ROOT_CONTENT.getBytes());
         LoggerUtil.logExec(Level.INFO, "创建TEST.ROOT文件: " + testRootFile.getAbsolutePath());
     }

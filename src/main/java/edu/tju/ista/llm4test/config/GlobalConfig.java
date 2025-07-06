@@ -34,10 +34,33 @@ public class GlobalConfig {
     private static final String DEFAULT_JDK_XML_SOURCE_PATH = "jdk17u-dev/src/java.xml/share/classes";
     private static final String DEFAULT_JDK_DESKTOP_SOURCE_PATH = "jdk17u-dev/src/java.desktop/share/classes";
     private static final String DEFAULT_SOURCE_PREFIX = "java.base/share/classes";
+    private static final String[] DEFAULT_JDK_PATHS = {
+        "/home/Java/HotSpot/jdk-17.0.14+7",
+        "/home/Java/HotSpot/jdk-21.0.6+7"
+    };
     
     // 缓存相关默认配置
     private static final String DEFAULT_VALID_TEST_CASES_DIR = "ValidTestCases";
     private static final boolean DEFAULT_USE_CACHE_MODE = false;
+    
+    /**
+     * 辅助方法：优先从配置文件获取，其次从环境变量获取
+     * @param configKey 配置文件中的键
+     * @param envKey 环境变量的键
+     * @param defaultValue 默认值
+     * @return 配置值
+     */
+    private static String getConfigThenEnv(String configKey, String envKey, String defaultValue) {
+        String value = ConfigUtil.get(configKey);
+        if (value != null && !value.trim().isEmpty()) {
+            return value;
+        }
+        value = System.getenv(envKey);
+        if (value != null && !value.trim().isEmpty()) {
+            return value;
+        }
+        return defaultValue;
+    }
     
     /**
      * 获取测试目录
@@ -104,6 +127,17 @@ public class GlobalConfig {
      */
     public static String getJarPath() {
         return String.join(File.pathSeparator, getDependencyJars());
+    }
+    
+    /**
+     * 获取JDK路径列表
+     */
+    public static java.util.List<String> getJdkPaths() {
+        String jdkPathsString = ConfigUtil.get("jdkPaths");
+        if (jdkPathsString != null && !jdkPathsString.trim().isEmpty()) {
+            return java.util.Arrays.asList(jdkPathsString.split(","));
+        }
+        return java.util.Arrays.asList(DEFAULT_JDK_PATHS);
     }
     
     /**
@@ -232,5 +266,51 @@ public class GlobalConfig {
      */
     public static boolean isUseCacheMode() {
         return ConfigUtil.getBoolean("useCacheMode", DEFAULT_USE_CACHE_MODE);
+    }
+    
+    // --- API Configuration ---
+    
+    public static String getOpenaiApiKey() {
+        return getConfigThenEnv("openai.api.key", "OPENAI_API_KEY", "");
+    }
+    
+    public static String getOpenaiBaseUrl() {
+        return getConfigThenEnv("openai.base.url", "OPENAI_BASE_URL", "https://api.deepseek.com/beta/v1/chat/completions");
+    }
+    
+    public static String getOpenaiModel() {
+        return getConfigThenEnv("openai.model", "OPENAI_MODEL", "deepseek-chat");
+    }
+    
+    public static String getOpenaiR1Model() {
+        return ConfigUtil.getOrDefault("openai.r1.model", "deepseek-reasoner");
+    }
+    
+    public static String getOpenaiV3Model() {
+        return ConfigUtil.getOrDefault("openai.v3.model", "deepseek-chat");
+    }
+    
+    public static String getDoubaoApiKey() {
+        return getConfigThenEnv("doubao.api.key", "ARK_API_KEY", "");
+    }
+    
+    public static String getDoubaoBaseUrl() {
+        return getConfigThenEnv("doubao.base.url", "ARK_BASE_URL", "");
+    }
+    
+    public static String getDoubaoModel() {
+        return getConfigThenEnv("doubao.model", "ARK_MODEL", "ep-20250615170506-mtn4k");
+    }
+    
+    public static String getBochaApiKey() {
+        return getConfigThenEnv("bocha.api.key", "BOCHA_API_KEY", "");
+    }
+    
+    public static String getWebSearchApiBaseUrl() {
+        return ConfigUtil.getOrDefault("websearch.api.base.url", "https://api.bochaai.com/v1/web-search");
+    }
+    
+    public static String getWebSearchRerankApiUrl() {
+        return ConfigUtil.getOrDefault("websearch.rerank.api.url", "https://api.bochaai.com/v1/rerank");
     }
 } 
