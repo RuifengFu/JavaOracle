@@ -1,58 +1,49 @@
 package edu.tju.ista.llm4test.llm.agents.flow;
 
-import edu.tju.ista.llm4test.llm.tools.ToolResponse;
-
-import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
- * 流程上下文，存储流程执行过程中的状态和历史信息
+ * A generic context for an agent's workflow, acting as a "blackboard"
+ * to store and retrieve data between flow steps.
  */
 public class FlowContext {
-    private final Map<String, Object> input;              // 初始输入数据
-    private final List<String> observations;              // 观察结果列表
-    private final List<String> thinking;                  // 思考过程
-    private final List<Map<String, Object>> toolResults;  // 工具调用结果
-    
-    public FlowContext(Map<String, Object> input) {
-        this.input = new HashMap<>(input);
-        this.observations = new ArrayList<>();
-        this.thinking = new ArrayList<>();
-        this.toolResults = new ArrayList<>();
+    private final Map<String, Object> contextMap;
+
+    /**
+     * Creates an empty context.
+     */
+    public FlowContext() {
+        this.contextMap = new HashMap<>();
     }
-    
-    public void addObservation(String observation) {
-        observations.add(observation);
+
+    /**
+     * Puts a key-value pair into the context.
+     *
+     * @param key   the key.
+     * @param value the value.
+     */
+    public void put(String key, Object value) {
+        contextMap.put(key, value);
     }
-    
-    public void addThinking(String thought) {
-        thinking.add(thought);
+
+    /**
+     * Gets a value from the context by its key.
+     *
+     * @param key the key.
+     * @return the value, or null if the key is not found.
+     */
+    public Object get(String key) {
+        return contextMap.get(key);
     }
-    
-    public void addToolResult(String toolName, String toolInput, ToolResponse<?> result) {
-        Map<String, Object> toolResult = new HashMap<>();
-        toolResult.put("tool", toolName);
-        toolResult.put("input", toolInput);
-        toolResult.put("success", result.isSuccess());
-        toolResult.put("result", result.toString());
-        toolResults.add(toolResult);
-    }
-    
-    public Map<String, Object> getInput() {
-        return input;
-    }
-    
-    public List<String> getObservations() {
-        return observations;
-    }
-    
-    public List<String> getThinking() {
-        return thinking;
-    }
-    
-    public List<Map<String, Object>> getToolResults() {
-        return toolResults;
+
+    /**
+     * Gets an unmodifiable view of the entire context map.
+     *
+     * @return the full context map.
+     */
+    public Map<String, Object> getAll() {
+        return Collections.unmodifiableMap(contextMap);
     }
 } 

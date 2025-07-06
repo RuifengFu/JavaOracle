@@ -1,170 +1,57 @@
 package edu.tju.ista.llm4test.llm.agents.flow;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import edu.tju.ista.llm4test.llm.agents.Agent;
-import edu.tju.ista.llm4test.llm.memory.MemoryStore;
-import edu.tju.ista.llm4test.llm.tools.Tool;
-import edu.tju.ista.llm4test.llm.tools.ToolResponse;
-import edu.tju.ista.llm4test.utils.LoggerUtil;
-
-import java.io.IOException;
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
-import java.util.logging.Level;
+import java.util.Objects;
 
 /**
- * 代理系统的流程控制类，负责协调代理的思考和行动过程
+ * Represents a workflow definition for an agent.
+ * This class holds the structure of the flow, composed of steps,
+ * but does not contain the logic for execution.
  */
 public class AgentFlow {
-    private final Agent agent;  // 负责执行任务的代理
-    private final Map<String, Tool<?>> tools;  // 代理可以使用的工具集
-    private final List<FlowStep> flowHistory;  // 流程执行历史记录
-    private final int maxIterations;  // 最大迭代次数，防止无限循环
-    private final ObjectMapper objectMapper = new ObjectMapper(); // For JSON parsing
-    
+    private final String name;
+    private final String startStepId;
+    private final Map<String, FlowStep> steps;
+
     /**
-     * 创建一个代理流程
-     * @param agent 执行任务的代理
-     * @param maxIterations 最大迭代次数
+     * Creates a new workflow definition.
+     *
+     * @param name        The name of the flow.
+     * @param startStepId The ID of the first step to be executed.
      */
-    public AgentFlow(Agent agent, int maxIterations) {
-        this.agent = agent;
-        this.tools = new HashMap<>();
-        this.flowHistory = new ArrayList<>();
-        this.maxIterations = maxIterations;
-    }
-
-
-    public AgentFlow(Agent agent, int maxIterations, MemoryStore sharedMemory) {
-        this.agent = agent;
-        this.tools = new HashMap<>();
-        this.flowHistory = new ArrayList<>();
-        this.maxIterations = maxIterations;
+    public AgentFlow(String name, String startStepId) {
+        this.name = Objects.requireNonNull(name, "Flow name cannot be null");
+        this.startStepId = Objects.requireNonNull(startStepId, "Start step ID cannot be null");
+        this.steps = new HashMap<>();
     }
 
     /**
-     * 注册代理可以使用的工具
-     * @param tool 工具实例
-     * @return 当前Flow实例，支持链式调用
+     * Adds a step to the workflow.
+     *
+     * @param step The step to add.
      */
-    public AgentFlow registerTool(Tool<?> tool) {
-        this.tools.put(tool.getName(), tool);
-        return this;
+    public void addStep(FlowStep step) {
+        Objects.requireNonNull(step, "Step cannot be null");
+        Objects.requireNonNull(step.getId(), "Step ID cannot be null");
+        steps.put(step.getId(), step);
     }
-    
-    /**
-     * 执行代理流程
-     * @param input 输入数据
-     * @return 流程执行结果
-     */
-    public FlowResult execute(Map<String, Object> input) {
-        FlowContext context = new FlowContext(input);
-        
-        int iteration = 0;
-        while (iteration < maxIterations) {
-            // 1. 思考阶段 - 生成提示并获取代理响应
-            String prompt = agent.genPrompt(buildPromptData(context));
-            String response = agent.getLLM().messageCompletion(prompt, 0.7); // 使用适当的温度值
-            
-            // 2. 解析响应，确定下一步操作
-            FlowAction action = parseResponse(response);
-            flowHistory.add(new FlowStep(iteration, prompt, response, action));
-            
-            // 3. 根据操作类型执行相应的行为
-            if (action.getType() == ActionType.FINAL_ANSWER) {
-                // 任务完成，返回结果
-                return new FlowResult(true, action.getContent(), flowHistory);
-            } else if (action.getType() == ActionType.USE_TOOL) {
-                // 调用工具
-                String toolName = action.getToolName();
-                Map<String, Object> toolInput = action.getToolInput();
-                
-                if (!tools.containsKey(toolName)) {
-                    context.addObservation("错误: 工具 '" + toolName + "' 不存在");
-                    continue;
-                }
-                
-                try {
-                    Tool<?> tool = tools.get(toolName);
-                    ToolResponse<?> toolResult = tool.execute(toolInput);
-                    context.addToolResult(toolName, toolInput.toString(), toolResult);
-                    context.addObservation("工具 '" + toolName + "' 执行结果: " + toolResult);
-                } catch (Exception e) {
-                    context.addObservation("错误: 工具 '" + toolName + "' 执行失败: " + e.getMessage());
-                }
-            } else if (action.getType() == ActionType.THINKING) {
-                // 更新思考内容，不执行具体操作
-                context.addThinking(action.getContent());
-            }
-            
-            iteration++;
-        }
-        
-        // 达到最大迭代次数仍未完成
-        return new FlowResult(false, "达到最大迭代次数 (" + maxIterations + ")", flowHistory);
-    }
-    
-    /**
-     * 构建提示数据模型
-     */
-    private HashMap<String, Object> buildPromptData(FlowContext context) {
-        HashMap<String, Object> dataModel = new HashMap<>(context.getInput());
-        
-        // 添加工具信息
-        List<Map<String, Object>> availableTools = new ArrayList<>();
-        for (Tool<?> tool : tools.values()) {
-            Map<String, Object> toolInfo = new HashMap<>();
-            toolInfo.put("name", tool.getName());
-            toolInfo.put("description", tool.getDescription());
-            toolInfo.put("parameters", tool.getParameters());
-            availableTools.add(toolInfo);
-        }
-        dataModel.put("tools", availableTools);
-        
-        // 添加观察和思考历史
-        dataModel.put("observations", context.getObservations());
-        dataModel.put("thinking", context.getThinking());
-        dataModel.put("tool_results", context.getToolResults());
-        
-        return dataModel;
-    }
-    
-    /**
-     * 解析代理响应，确定下一步操作
-     */
-    private FlowAction parseResponse(String response) {
-        // A more robust parsing mechanism that expects a specific JSON format for tool calls.
-        // Example expected format in LLM response:
-        // <tool_code>
-        // {
-        //   "tool_name": "...",
-        //   "parameters": { ... }
-        // }
-        // </tool_code>
 
-        if (response.contains("<tool_code>")) {
-            try {
-                final String jsonStr = response.substring(response.indexOf("<tool_code>") + 11, response.indexOf("</tool_code>")).trim();
-                Map<String, Object> toolCallMap = objectMapper.readValue(jsonStr, new TypeReference<Map<String, Object>>() {});
-                String toolName = (String) toolCallMap.get("tool_name");
-                @SuppressWarnings("unchecked")
-                Map<String, Object> parameters = (Map<String, Object>) toolCallMap.get("parameters");
-                if (toolName != null && parameters != null) {
-                    return FlowAction.useTool(toolName, parameters);
-                }
-            } catch (IOException e) {
-                LoggerUtil.logExec(Level.WARNING, "Failed to parse tool call JSON: " + e.getMessage());
-                return FlowAction.thinking("Failed to parse my own tool command. My mistake. The error was: " + e.getMessage());
-            }
-        } else if (response.contains("FINAL_ANSWER:")) {
-            String answer = response.substring(response.indexOf("FINAL_ANSWER:") + 13).trim();
-            return FlowAction.finalAnswer(answer);
-        }
-        
-        // By default, treat the response as thinking.
-        return FlowAction.thinking(response);
+    /**
+     * Retrieves a step by its ID.
+     *
+     * @param stepId The ID of the step.
+     * @return The FlowStep, or null if not found.
+     */
+    public FlowStep getStep(String stepId) {
+        return steps.get(stepId);
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public String getStartStepId() {
+        return startStepId;
     }
 } 

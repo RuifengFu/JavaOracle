@@ -1,30 +1,46 @@
 package edu.tju.ista.llm4test.llm.agents.flow;
 
-import java.util.List;
-
 /**
- * 流程执行结果
+ * Represents the final result of an AgentFlow execution.
  */
 public class FlowResult {
-    private final boolean completed;
-    private final String result;
-    private final List<FlowStep> steps;
-    
-    public FlowResult(boolean completed, String result, List<FlowStep> steps) {
-        this.completed = completed;
-        this.result = result;
-        this.steps = steps;
+    private final boolean success;
+    private final String errorMessage;
+    private final FlowContext context;
+
+    private FlowResult(boolean success, String errorMessage, FlowContext context) {
+        this.success = success;
+        this.errorMessage = errorMessage;
+        this.context = context;
     }
-    
-    public boolean isCompleted() {
-        return completed;
+
+    /**
+     * Creates a success result.
+     * @param context The final context after execution.
+     * @return A new FlowResult instance.
+     */
+    public static FlowResult success(FlowContext context) {
+        return new FlowResult(true, null, context);
     }
-    
-    public String getResult() {
-        return result;
+
+    /**
+     * Creates a failure result.
+     * @param errorMessage A message describing the failure.
+     * @return A new FlowResult instance.
+     */
+    public static FlowResult failure(String errorMessage) {
+        return new FlowResult(false, errorMessage, null);
     }
-    
-    public List<FlowStep> getSteps() {
-        return steps;
+
+    public boolean isSuccess() {
+        return success;
+    }
+
+    public String getErrorMessage() {
+        return errorMessage;
+    }
+
+    public FlowContext getContext() {
+        return context;
     }
 } 

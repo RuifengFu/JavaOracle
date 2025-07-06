@@ -1,13 +1,12 @@
 package edu.tju.ista.llm4test.llm.agents;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.tju.ista.llm4test.execute.TestCase;
 import edu.tju.ista.llm4test.execute.TestResult;
 import edu.tju.ista.llm4test.llm.OpenAI;
-import edu.tju.ista.llm4test.llm.agents.flow.AgentFlow;
+import edu.tju.ista.llm4test.llm.agents.flow.*;
 import edu.tju.ista.llm4test.llm.tools.*;
 import edu.tju.ista.llm4test.prompt.PromptGen;
+import edu.tju.ista.llm4test.utils.CodeExtractor;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
 import freemarker.template.TemplateException;
 
@@ -17,241 +16,259 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.logging.Level;
 
 public class TestCaseMinimizationAgent extends Agent {
 
-    // --- State ---
-    private TestCase originalTestCase;
-    private String workingDirectory;
-    private List<Map<String, Object>> plan;
-    private int currentStep = 0;
-
-    // --- Configuration ---
     private final String baseWorkspace = "minimization_workspace";
 
     public TestCaseMinimizationAgent() {
-        // The prompt for this agent will be generated dynamically.
         super("You are an expert test case minimizer.");
         this.LLM = OpenAI.R1;
     }
 
     /**
-     * Minimizes the given test case within a specified parent workspace.
+     * Minimizes the given test case using the AgentFlow framework.
      * @param testCase The test case to minimize.
      * @param parentWorkspace The directory where the minimization workspace will be created.
-     * @return A File object pointing to the minimized test case, or null if minimization failed.
+     * @return A File object pointing to the minimized test case, or the original file if minimization failed.
      */
     public File minimize(TestCase testCase, Path parentWorkspace) {
-        this.originalTestCase = testCase;
-        this.currentStep = 0;
-
+        // 1. Setup Workspace
+        String workingDir;
         try {
-            setupWorkspace(parentWorkspace);
+            workingDir = setupWorkspace(parentWorkspace);
         } catch (IOException e) {
-            LoggerUtil.logExec(Level.SEVERE, "Failed to setup workspace for test case minimization. " + e.getMessage());
-            return null;
+            LoggerUtil.logExec(Level.SEVERE, "Failed to setup workspace for test case minimization: " + e.getMessage());
+            return testCase.getFile();
         }
 
-        // Generate the initial plan
+        // 2. Build the workflow
+        AgentFlow flow;
         try {
-            String planJson = generatePlan();
-            this.plan = parsePlan(planJson);
-        } catch (Exception e) {
-            LoggerUtil.logExec(Level.SEVERE, "Failed to generate or parse the minimization plan. " +  e.getMessage());
-            return originalTestCase.getFile();
+            flow = buildMinimizationFlow();
+        } catch (TemplateException | IOException e) {
+            LoggerUtil.logExec(Level.SEVERE, "Failed to build minimization flow: " + e.getMessage());
+            return testCase.getFile();
         }
 
-        // Execute the plan step-by-step
-        return executePlan();
-    }
+        // 3. Initialize Context and Tools
+        FlowContext context = new FlowContext();
+        context.put("originalTestCaseFile", testCase.getFile().getAbsolutePath());
+        context.put("workingDirectory", workingDir);
+        context.put("testCaseName", testCase.getFile().getName());
+        context.put("fullWorkspacePath", Paths.get(workingDir, testCase.getFile().getName()).toString());
+        context.put("originalFailureOutput", testCase.getResult() != null ? testCase.getResult().getOutput() : "");
+        context.put("maxIterations", 10);
+        context.put("currentIteration", 0);
 
-    private String generatePlan() throws TemplateException, IOException {
-        Path originalPath = originalTestCase.getFile().toPath();
-        String originalTestDirectory = originalPath.getParent().toString();
 
-        // Directly get the source code and failure output from the TestCase object
-        String sourceCode = originalTestCase.getSourceCode();
-        String testFailureOutput = originalTestCase.getResult() != null ?
-                originalTestCase.getResult().getOutput() : "No failure output available.";
+        ToolRegistry toolRegistry = new ToolRegistry();
+        toolRegistry.register(new CopyFileTool());
+        toolRegistry.register(new WriteFileTool());
+        toolRegistry.register(new ReadFileTool());
+        toolRegistry.register(new JtregExecuteTool());
+        toolRegistry.register(new CheckSimplicityTool(this.LLM));
+        toolRegistry.register(new ExtractCodeTool());
 
-        String prompt = PromptGen.generateTestCaseMinimizationPlanPrompt(
-                sourceCode,
-                testFailureOutput,
-                this.workingDirectory,
-                originalPath.toString()
-        );
-        
-        return this.LLM.messageCompletion(prompt);
-    }
+        // 4. Execute the flow
+        AgentFlowExecutor executor = new AgentFlowExecutor(flow, toolRegistry, this.LLM, context);
+        FlowResult result = executor.execute();
 
-    private List<Map<String, Object>> parsePlan(String json) throws IOException {
-        ObjectMapper objectMapper = new ObjectMapper();
-        // A simple way to clean the JSON from markdown code blocks
-        json = json.trim().replace("```json", "").replace("```", "");
-        return objectMapper.readValue(json, new TypeReference<List<Map<String, Object>>>(){});
-    }
-
-    private File executePlan() {
-        Map<String, Tool<?>> tools = registerTools();
-        String originalFailureOutput = originalTestCase.getResult() != null ? originalTestCase.getResult().getOutput() : "";
-
-        while (currentStep < plan.size()) {
-            Map<String, Object> step = plan.get(currentStep);
-            String toolName = (String) step.get("tool");
-            
-            LoggerUtil.logExec(Level.INFO, "Executing step " + (currentStep + 1) + ": " + toolName);
-            
-            if (toolName.equals("start_reduction_loop")) {
-                // The reduction loop handles its own progression and returns the final file.
-                return startReductionLoop((Map<String, Object>) step.get("parameters"));
-            }
-
-            Tool<?> tool = tools.get(toolName);
-            if (tool == null) {
-                LoggerUtil.logExec(Level.WARNING, "Tool not found: " + toolName);
-                currentStep++;
-                continue;
-            }
-            
-            @SuppressWarnings("unchecked")
-            Map<String, Object> params = (Map<String, Object>) step.get("parameters");
-
-            // Execute the tool
-            ToolResponse<?> response = tool.execute(params);
-            
-            // For simplicity, we just log the outcome. More complex logic can be added here.
-            if (response.isSuccess()) {
-                LoggerUtil.logExec(Level.INFO, "Tool '" + toolName + "' executed successfully. Result: " + response.getResult());
-
-                // **** CRITICAL VERIFICATION STEP ****
-                if (toolName.equals("jtreg_execute")) {
-                    TestResult newResult = (TestResult) response.getResult();
-                    String newFailureOutput = newResult.getOutput();
-
-                    // For now, we do a simple check. A more robust check might compare stack traces.
-                    if (newResult.isSuccess() || !newFailureOutput.contains(originalFailureOutput.lines().findFirst().orElse(""))) {
-                         LoggerUtil.logExec(Level.SEVERE, "Verification failed! The test no longer produces the original failure after setup. Halting minimization.");
-                         LoggerUtil.logExec(Level.SEVERE, "Original failure signature: " + originalFailureOutput.lines().findFirst().orElse("N/A"));
-                         LoggerUtil.logExec(Level.SEVERE, "New output: " + newFailureOutput);
-                         return null; // Stop execution
-                    } else {
-                        LoggerUtil.logExec(Level.INFO, "Verification successful! The test reproduces the original failure in the new environment.");
-                    }
-                }
-
-            } else {
-                LoggerUtil.logExec(Level.WARNING, "Tool '" + toolName + "' failed. Message: " + response.getMessage());
-                // Decide if we should stop the execution on failure
-                // For now, we continue
-            }
-            
-            currentStep++;
-        }
-        return null; // Should be returned from the reduction loop
-    }
-    
-    private File startReductionLoop(Map<String, Object> parameters) {
-        String filePath = (String) parameters.get("file_path");
-        if (filePath == null) {
-            LoggerUtil.logExec(Level.SEVERE, "No file_path provided for reduction loop.");
-            return null;
-        }
-
-        LoggerUtil.logExec(Level.INFO, "Reduction loop started for file: " + filePath);
-
-        final int maxIterations = 10; // To prevent infinite loops
-        String lastSuccessfulCode;
-        String originalFailureOutput = originalTestCase.getResult() != null ? originalTestCase.getResult().getOutput() : "";
-
-        // Tools needed for the loop
-        ReadFileTool readFileTool = new ReadFileTool();
-        WriteFileTool writeFileTool = new WriteFileTool();
-        JtregExecuteTool jtregExecuteTool = new JtregExecuteTool();
-
-        // Initial read of the code
-        ToolResponse<String> readResponse = readFileTool.execute(Map.of("file_path", filePath));
-        if (!readResponse.isSuccess()) {
-            LoggerUtil.logExec(Level.SEVERE, "Could not read initial file for reduction: " + filePath);
-            return null;
-        }
-        String currentCode = readResponse.getResult();
-        lastSuccessfulCode = currentCode;
-
-        for (int i = 0; i < maxIterations; i++) {
-            LoggerUtil.logExec(Level.INFO, "Reduction attempt #" + (i + 1));
-
-            // 1. Propose a change using LLM
-            String reducedCode;
+        // 5. Return the result from the final context
+        if (result.isSuccess() && result.getContext().get("minimizedCode") != null) {
+            String minimizedCode = (String) result.getContext().get("minimizedCode");
+            Path minimizedPath = Paths.get(workingDir, testCase.getFile().getName().replace(".java", "_minimized.java"));
             try {
-                String prompt = PromptGen.generateTestCaseMinimizationReducePrompt(originalFailureOutput, currentCode);
-                reducedCode = this.LLM.messageCompletion(prompt);
-                // Simple cleanup of the LLM response
-                reducedCode = reducedCode.replaceAll("```java", "").replaceAll("```", "").trim();
-
-                if (reducedCode.equals(currentCode) || reducedCode.isEmpty()) {
-                    LoggerUtil.logExec(Level.INFO, "LLM proposed no changes, or an empty response. Ending reduction.");
-                    break;
-                }
-
-            } catch (Exception e) {
-                LoggerUtil.logExec(Level.SEVERE, "Failed to generate reduction prompt or get LLM response. " + e.getMessage());
-                break; // Stop if we can't get a valid reduction
+                Files.writeString(minimizedPath, minimizedCode);
+                LoggerUtil.logExec(Level.INFO, "Successfully saved minimized test case to: " + minimizedPath);
+                return minimizedPath.toFile();
+            } catch (IOException e) {
+                LoggerUtil.logExec(Level.SEVERE, "Failed to write minimized file: " + e.getMessage());
             }
-
-            // 2. Apply the change
-            writeFileTool.execute(Map.of("file_path", filePath, "content", reducedCode));
-
-            // 3. Verify the change
-            ToolResponse<TestResult> execResponse = jtregExecuteTool.execute(Map.of("file_path", filePath));
-
-            // 4. Decide
-            if (!execResponse.isSuccess()) {
-                // The test still fails. For this simple agent, we'll consider this a success.
-                // A more advanced agent would compare the failure output.
-                LoggerUtil.logExec(Level.INFO, "Reduction successful. Test still fails. Keeping changes.");
-                currentCode = reducedCode;
-                lastSuccessfulCode = currentCode;
-            } else {
-                // The test now passes, so the change was invalid. Revert.
-                LoggerUtil.logExec(Level.INFO, "Reduction failed. Test now passes. Reverting changes.");
-                writeFileTool.execute(Map.of("file_path", filePath, "content", currentCode));
-            }
-             LoggerUtil.logExec(Level.INFO, "Minimization progress:\n" + currentCode);
         }
-
-        // Save the final, most reduced version of the code.
-        LoggerUtil.logExec(Level.INFO, "Reduction loop finished. Final version of the code saved.");
-        String minimizedFilePath = filePath.replace(".java", "_minimized.java");
-        writeFileTool.execute(Map.of("file_path", minimizedFilePath, "content", lastSuccessfulCode));
-        return new File(minimizedFilePath);
+        
+        LoggerUtil.logExec(Level.WARNING, "Minimization did not succeed or was inconclusive. Returning original test case.");
+        return testCase.getFile();
     }
 
-
-    private Map<String, Tool<?>> registerTools() {
-        Map<String, Tool<?>> tools = new HashMap<>();
-        tools.put("copy_file", new CopyFileTool());
-        tools.put("list_directory", new ListDirTool());
-        tools.put("write_file", new WriteFileTool());
-        tools.put("read_file", new ReadFileTool());
-        tools.put("jtreg_execute", new JtregExecuteTool());
-        return tools;
+    private String setupWorkspace(Path parentWorkspace) throws IOException {
+        String workingDirectory = parentWorkspace.resolve("minimization").toString();
+        Path workspacePath = Paths.get(workingDirectory);
+        if (!Files.exists(workspacePath)) {
+            Files.createDirectories(workspacePath);
+        }
+        LoggerUtil.logExec(Level.INFO, "Ensured minimization workspace exists at: " + workspacePath);
+        return workingDirectory;
     }
 
+    private AgentFlow buildMinimizationFlow() throws TemplateException, IOException {
+        AgentFlow flow = new AgentFlow("Test Case Minimization Flow", "setup");
 
-    private void setupWorkspace(Path parentWorkspace) throws IOException {
-        this.workingDirectory = parentWorkspace.resolve("minimization").toString();
+        // Step 1: Copy file to workspace
+        FlowStep setupStep = new FlowStep();
+        setupStep.setId("setup");
+        setupStep.setDescription("Copy original test case to the working directory.");
+        FlowAction setupAction = new FlowAction();
+        setupAction.setType(ActionType.TOOL_CALL);
+        setupAction.setToolName("copy_file");
+        setupAction.setParameters(Map.of("source", "${originalTestCaseFile}", "destination", "${fullWorkspacePath}"));
+        setupAction.setOutputKey("copy_result");
+        setupStep.setAction(setupAction);
+        setupStep.setNextStepId("initial_verify");
+        flow.addStep(setupStep);
 
-        Path workspacePath = Paths.get(this.workingDirectory);
-        Files.createDirectories(workspacePath);
+        // Step 2: Initial verification
+        FlowStep initialVerifyStep = new FlowStep();
+        initialVerifyStep.setId("initial_verify");
+        initialVerifyStep.setDescription("Run the test in the new workspace to verify the failure is reproducible.");
+        FlowAction initialVerifyAction = new FlowAction();
+        initialVerifyAction.setType(ActionType.TOOL_CALL);
+        initialVerifyAction.setToolName("jtreg_execute");
+        initialVerifyAction.setParameters(Map.of("file_path", "${fullWorkspacePath}"));
+        initialVerifyAction.setOutputKey("initial_verify_result");
+        initialVerifyStep.setAction(initialVerifyAction);
+        initialVerifyStep.setConditionKey("initial_verify_result_success"); // jtreg success means test *passed*, which is a failure for us
+        initialVerifyStep.setConditionalNextSteps(Map.of("true", "end_failure_to_reproduce"));
+        initialVerifyStep.setDefaultNextStepId("initial_read");
+        flow.addStep(initialVerifyStep);
 
-        LoggerUtil.logExec(Level.INFO, "Created minimization workspace at: " + workspacePath);
+        // Step 3: Read the initial code into context
+        FlowStep initialReadStep = new FlowStep();
+        initialReadStep.setId("initial_read");
+        initialReadStep.setDescription("Read the source code to begin reduction.");
+        FlowAction initialReadAction = new FlowAction();
+        initialReadAction.setType(ActionType.TOOL_CALL);
+        initialReadAction.setToolName("read_file");
+        initialReadAction.setParameters(Map.of("file_path", "${fullWorkspacePath}"));
+        initialReadAction.setOutputKey("currentCode");
+        initialReadStep.setAction(initialReadAction);
+        initialReadStep.setNextStepId("loop_condition_check");
+        flow.addStep(initialReadStep);
+
+        // Step 4: LOOP START - Condition check
+        FlowStep loopConditionCheckStep = new FlowStep();
+        loopConditionCheckStep.setId("loop_condition_check");
+        loopConditionCheckStep.setDescription("Check if loop should continue (iteration count and simplicity).");
+        FlowAction loopConditionAction = new FlowAction();
+        loopConditionAction.setType(ActionType.TOOL_CALL);
+        loopConditionAction.setToolName("check_simplicity");
+        loopConditionAction.setParameters(Map.of("code", "${currentCode}"));
+        loopConditionAction.setOutputKey("is_simple_enough");
+        loopConditionCheckStep.setAction(loopConditionAction);
+        loopConditionCheckStep.setConditionKey("is_simple_enough");
+        loopConditionCheckStep.setConditionalNextSteps(Map.of("true", "prepare_final_result"));
+        loopConditionCheckStep.setDefaultNextStepId("propose_reduction");
+        flow.addStep(loopConditionCheckStep);
+        
+        // Step 5: Propose a reduction
+        FlowStep proposeReductionStep = new FlowStep();
+        proposeReductionStep.setId("propose_reduction");
+        proposeReductionStep.setDescription("Use LLM to propose a simplification of the current code.");
+        FlowAction proposeReductionAction = new FlowAction();
+        proposeReductionAction.setType(ActionType.LLM_CALL);
+        proposeReductionAction.setPromptTemplate(PromptGen.generateTestCaseMinimizationReducePrompt("${originalFailureOutput}", "${currentCode}"));
+        proposeReductionAction.setOutputKey("llm_proposal");
+        proposeReductionStep.setAction(proposeReductionAction);
+        proposeReductionStep.setNextStepId("extract_proposed_code");
+        flow.addStep(proposeReductionStep);
+
+        // Step 5.5: Extract clean code from the proposal
+        FlowStep extractCodeStep = new FlowStep();
+        extractCodeStep.setId("extract_proposed_code");
+        extractCodeStep.setDescription("Extract clean code from LLM proposal.");
+        FlowAction extractCodeAction = new FlowAction();
+        extractCodeAction.setType(ActionType.TOOL_CALL);
+        extractCodeAction.setToolName("extract_code");
+        extractCodeAction.setParameters(Map.of("raw_string", "${llm_proposal}"));
+        extractCodeAction.setOutputKey("proposedCode");
+        extractCodeStep.setAction(extractCodeAction);
+        extractCodeStep.setNextStepId("apply_reduction");
+        flow.addStep(extractCodeStep);
+
+        // Step 6: Apply the reduction
+        FlowStep applyReductionStep = new FlowStep();
+        applyReductionStep.setId("apply_reduction");
+        applyReductionStep.setDescription("Apply the proposed code reduction to the file.");
+        FlowAction applyReductionAction = new FlowAction();
+        applyReductionAction.setType(ActionType.TOOL_CALL);
+        applyReductionAction.setToolName("write_file");
+        applyReductionAction.setParameters(Map.of("file_path", "${fullWorkspacePath}", "content", "${proposedCode}"));
+        applyReductionAction.setOutputKey("write_reduction_result");
+        applyReductionStep.setAction(applyReductionAction);
+        applyReductionStep.setNextStepId("verify_reduction");
+        flow.addStep(applyReductionStep);
+
+        // Step 7: Verify the reduction
+        FlowStep verifyReductionStep = new FlowStep();
+        verifyReductionStep.setId("verify_reduction");
+        verifyReductionStep.setDescription("Run the test with the reduced code to see if it still fails correctly.");
+        FlowAction verifyReductionAction = new FlowAction();
+        verifyReductionAction.setType(ActionType.TOOL_CALL);
+        verifyReductionAction.setToolName("jtreg_execute");
+        verifyReductionAction.setParameters(Map.of("file_path", "${fullWorkspacePath}"));
+        verifyReductionAction.setOutputKey("verify_reduction_result");
+        verifyReductionStep.setAction(verifyReductionAction);
+        verifyReductionStep.setConditionKey("verify_reduction_result_success");
+        verifyReductionStep.setConditionalNextSteps(Map.of("true", "revert_reduction")); // Test passed -> bad reduction
+        verifyReductionStep.setDefaultNextStepId("commit_reduction"); // Test failed -> good reduction
+        flow.addStep(verifyReductionStep);
+        
+        // Step 8a: Commit the successful reduction
+        FlowStep commitReductionStep = new FlowStep();
+        commitReductionStep.setId("commit_reduction");
+        commitReductionStep.setDescription("The reduction was successful. Update the current code state.");
+        FlowAction commitReductionAction = new FlowAction();
+        commitReductionAction.setType(ActionType.TOOL_CALL);
+        commitReductionAction.setToolName("read_file");
+        commitReductionAction.setParameters(Map.of("file_path", "${fullWorkspacePath}"));
+        commitReductionAction.setOutputKey("currentCode"); // Overwrite currentCode with the new successful version
+        commitReductionStep.setAction(commitReductionAction);
+        commitReductionStep.setNextStepId("loop_condition_check"); // Loop back
+        flow.addStep(commitReductionStep);
+        
+        // Step 8b: Revert the failed reduction
+        FlowStep revertReductionStep = new FlowStep();
+        revertReductionStep.setId("revert_reduction");
+        revertReductionStep.setDescription("The reduction was invalid. Reverting to the previous version.");
+        FlowAction revertReductionAction = new FlowAction();
+        revertReductionAction.setType(ActionType.TOOL_CALL);
+        revertReductionAction.setToolName("write_file");
+        revertReductionAction.setParameters(Map.of("file_path", "${fullWorkspacePath}", "content", "${currentCode}"));
+        revertReductionAction.setOutputKey("revert_result");
+        revertReductionStep.setAction(revertReductionAction);
+        revertReductionStep.setNextStepId("loop_condition_check"); // Loop back
+        flow.addStep(revertReductionStep);
+
+        // Final Steps
+        FlowStep prepareResultStep = new FlowStep();
+        prepareResultStep.setId("prepare_final_result");
+        prepareResultStep.setDescription("Set the final minimized code for output.");
+        FlowAction prepareResultAction = new FlowAction();
+        prepareResultAction.setType(ActionType.CONTEXT_MANIPULATION);
+        prepareResultAction.setParameters(Map.of(
+            "operation", "set",
+            "key", "minimizedCode",
+            "value", "${currentCode}"
+        ));
+        prepareResultStep.setAction(prepareResultAction);
+        prepareResultStep.setNextStepId("end_success");
+        flow.addStep(prepareResultStep);
+
+        FlowStep endSuccessStep = new FlowStep();
+        endSuccessStep.setId("end_success");
+        endSuccessStep.setDescription("Minimization finished successfully.");
+        endSuccessStep.setAction(null); // No action needed
+        flow.addStep(endSuccessStep);
+        
+        FlowStep endFailureStep = new FlowStep();
+        endFailureStep.setId("end_failure_to_reproduce");
+        endFailureStep.setDescription("Minimization failed because the initial failure could not be reproduced.");
+        endFailureStep.setAction(null); // No action needed
+        flow.addStep(endFailureStep);
+
+        return flow;
     }
 
-
-    public void close() {
-        // Cleanup if needed
-    }
 } 

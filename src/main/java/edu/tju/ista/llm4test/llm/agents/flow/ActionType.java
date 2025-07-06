@@ -1,10 +1,21 @@
 package edu.tju.ista.llm4test.llm.agents.flow;
 
 /**
- * 操作类型枚举
+ * Defines the type of action a FlowStep can perform.
  */
 public enum ActionType {
-    THINKING,     // 思考阶段，不执行具体操作
-    USE_TOOL,     // 使用工具
-    FINAL_ANSWER  // 最终答案，流程结束
+    /**
+     * An action that calls a Large Language Model.
+     */
+    LLM_CALL,
+
+    /**
+     * An action that executes a tool from the ToolRegistry.
+     */
+    TOOL_CALL,
+
+    /**
+     * An action that manipulates the FlowContext directly (e.g., setting a variable).
+     */
+    CONTEXT_MANIPULATION
 } 

@@ -238,6 +238,9 @@ public class OpenAI {
         try {
             Map<String, Object> requestBody = getBaseRequestMap(prompt);
             if (jsonOutput) {
+                if (!prompt.toLowerCase().contains("json")) {
+                    prompt = prompt + "\nPlease return the response in JSON format.";
+                }
                 requestBody.put("response_format", Map.of("type", "json_object"));
             }
             // update temperature
