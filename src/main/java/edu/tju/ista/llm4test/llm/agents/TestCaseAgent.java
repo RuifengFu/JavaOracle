@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.tju.ista.llm4test.execute.TestCase;
 import edu.tju.ista.llm4test.execute.TestResult;
 import edu.tju.ista.llm4test.llm.OpenAI;
+import edu.tju.ista.llm4test.llm.functionCalling.FuncTool;
 import edu.tju.ista.llm4test.llm.tools.*;
 import edu.tju.ista.llm4test.prompt.PromptGen;
 import edu.tju.ista.llm4test.utils.CodeExtractor;
@@ -20,7 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.logging.Level;
 
-/**
+/**请你找到gemini-cli中所有使用过的prompt
  * A dynamic, autonomous agent for test case minimization.
  * It follows a Think-Act-Observe loop to iteratively reduce a failing test case.
  */
@@ -43,11 +44,12 @@ public class TestCaseAgent extends Agent {
         toolRegistry.register(new WriteFileTool());
         toolRegistry.register(new JtregExecuteTool());
         toolRegistry.register(new CheckSimplicityTool(this.LLM));
+        toolRegistry.register(new CopyFileTool());
+        toolRegistry.register(new ListDirTool());
     }
 
     /**
      * Main entry point for the agent's execution loop.
-     *
      * @param testCase The initial failing test case.
      * @param workspaceRoot The root directory for all operations.
      * @return The minimized source code, or the original code if minimization fails.
@@ -105,11 +107,128 @@ public class TestCaseAgent extends Agent {
 
             Path testFilePath = testCaseWorkspace.resolve(testCase.getFile().getName());
             Files.writeString(testFilePath, testCase.getSourceCode());
+            
+            // Change to the workspace directory for relative file operations
+            System.setProperty("user.dir", testCaseWorkspace.toString());
+            
+            // Perform workspace preparation with function calling
+            prepareWorkspaceWithFunctionCalling(testCase, testCaseWorkspace);
+            
             return testFilePath;
         } catch (IOException e) {
             LoggerUtil.logExec(Level.SEVERE, "Failed to set up workspace: " + e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Prepares the workspace by analyzing the test case and copying required files using function calling.
+     */
+    private void prepareWorkspaceWithFunctionCalling(TestCase testCase, Path workspaceRoot) {
+        try {
+            // Get the original test directory path (relative)
+            String originalTestPath = testCase.getFile().getParent().toString();
+            
+            // List the contents of the original test directory
+            String directoryListing = getDirectoryListing(testCase.getFile().getParentFile());
+            
+            // Generate the workspace preparation prompt
+            String prompt;
+            try {
+                prompt = PromptGen.generateWorkspacePreparationPrompt(
+                    testCase.getSourceCode(),
+                    testCase.getResult().getOutput(),
+                    originalTestPath,
+                    directoryListing
+                );
+            } catch (Exception e) {
+                addToHistory("Failed to generate workspace preparation prompt: " + e.getMessage());
+                return;
+            }
+            
+            addToHistory("Workspace preparation prompt generated");
+            
+            // Prepare function tools for the LLM
+            List<FuncTool> tools = new ArrayList<>();
+            tools.add(toolRegistry.get("copy_file").getTool());
+            tools.add(toolRegistry.get("list_directory").getTool());
+            
+            // Call LLM with function calling capability
+            Map<String, String> functionCalls = this.LLM.funcCall(prompt, tools);
+            
+            if (functionCalls != null && !functionCalls.isEmpty()) {
+                addToHistory("LLM suggested " + functionCalls.size() + " function calls for workspace preparation");
+                
+                // Execute each function call
+                for (Map.Entry<String, String> entry : functionCalls.entrySet()) {
+                    String toolName = entry.getKey();
+                    String arguments = entry.getValue();
+                    
+                    try {
+                        // Parse the arguments JSON
+                        Map<String, Object> args = objectMapper.readValue(arguments, new TypeReference<>() {});
+                        
+                        // Convert paths to be relative to the original test directory
+                        if ("copy_file".equals(toolName)) {
+                            String sourcePath = (String) args.get("sourcePath");
+                            String destinationPath = (String) args.get("destinationPath");
+                            
+                            // Make source path absolute from original test directory
+                            Path originalTestDir = testCase.getFile().getParentFile().toPath();
+                            Path absoluteSourcePath = originalTestDir.resolve(sourcePath);
+                            args.put("sourcePath", absoluteSourcePath.toString());
+                            
+                            // Keep destination path relative to current workspace
+                            // (current directory is already set to workspace)
+                        }
+                        
+                        // Execute the tool
+                        Tool<?> tool = toolRegistry.get(toolName);
+                        ToolResponse<?> response = tool.execute(args);
+                        
+                        if (response.isSuccess()) {
+                            addToHistory("Successfully executed " + toolName + ": " + response.getMessage());
+                        } else {
+                            addToHistory("Failed to execute " + toolName + ": " + response.getMessage());
+                        }
+                        
+                    } catch (Exception e) {
+                        addToHistory("Error executing function call " + toolName + ": " + e.getMessage());
+                    }
+                }
+            } else {
+                addToHistory("No additional files needed for workspace preparation");
+            }
+            
+        } catch (Exception e) {
+            addToHistory("Error during workspace preparation: " + e.getMessage());
+            LoggerUtil.logExec(Level.WARNING, "Workspace preparation failed: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Gets a directory listing as a formatted string
+     */
+    private String getDirectoryListing(File directory) {
+        if (directory == null || !directory.isDirectory()) {
+            return "Directory not found or not accessible";
+        }
+        
+        File[] files = directory.listFiles();
+        if (files == null) {
+            return "Unable to list directory contents";
+        }
+        
+        StringBuilder listing = new StringBuilder();
+        for (File file : files) {
+            if (file.isDirectory()) {
+                listing.append("[DIR] ").append(file.getName()).append("\n");
+            } else {
+                listing.append("[FILE] ").append(file.getName()).append(" (").append(file.length()).append(" bytes)\n");
+            }
+        }
+        
+        return listing.toString();
     }
 
     /**

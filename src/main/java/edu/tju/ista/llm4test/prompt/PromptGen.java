@@ -61,6 +61,7 @@ public class PromptGen {
             // TestCaseMinimization 相关模板
             TEMPLATE_MAP.put("TestCaseMinimizationPlan", loadResourceAsString("/prompt/TestCaseMinimizationPlan.txt"));
             TEMPLATE_MAP.put("TestCaseMinimizationReduce", loadResourceAsString("/prompt/TestCaseMinimizationReduce.txt"));
+            TEMPLATE_MAP.put("WorkspacePreparation", loadResourceAsString("/prompt/WorkspacePreparation.txt"));
         } catch (IOException e) {
             throw new RuntimeException("Failed to load prompt templates from resources", e);
         }
@@ -174,12 +175,12 @@ public class PromptGen {
         return generatePrompt("InstantiateTestCase", dataModel);
     }
 
-    public static String generateTestCaseMinimizationPlanPrompt(String sourceCode, String testFailureOutput, String workingDirectory, String originalTestDirectory) throws TemplateException, IOException {
+    public static String generateTestCaseMinimizationPlanPrompt(String sourceCode, String testFailureOutput, String workingDirectory, String originalTestCasePath) throws TemplateException, IOException {
         Map<String, Object> dataModel = new HashMap<>();
         dataModel.put("source_code", sourceCode);
         dataModel.put("test_failure_output", testFailureOutput);
         dataModel.put("working_directory", workingDirectory);
-        dataModel.put("original_test_directory", originalTestDirectory);
+        dataModel.put("original_test_directory", originalTestCasePath);
         return generatePrompt("TestCaseMinimizationPlan", dataModel);
     }
 
@@ -188,5 +189,14 @@ public class PromptGen {
         dataModel.put("test_failure_output", testFailureOutput);
         dataModel.put("current_code", currentCode);
         return generatePrompt("TestCaseMinimizationReduce", dataModel);
+    }
+
+    public static String generateWorkspacePreparationPrompt(String testCaseSourceCode, String testOutput, String originalTestPath, String directoryListing) throws TemplateException, IOException {
+        Map<String, Object> dataModel = new HashMap<>();
+        dataModel.put("testCaseSourceCode", testCaseSourceCode);
+        dataModel.put("testOutput", testOutput);
+        dataModel.put("originalTestPath", originalTestPath);
+        dataModel.put("directoryListing", directoryListing);
+        return generatePrompt("WorkspacePreparation", dataModel);
     }
 }

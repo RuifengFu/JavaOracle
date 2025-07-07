@@ -42,7 +42,7 @@ public class BugVerify extends Agent {
 
     
     // Agent for test case minimization
-    private final TestCaseMinimizationAgent minimizationAgent;
+    private final TestCaseAgent minimizationAgent;
     
     // LLM实例
     private final OpenAI llm;
@@ -96,7 +96,7 @@ public class BugVerify extends Agent {
         this.executeTool = new JavaExecuteTool();
         this.jtregTool = new JtregExecuteTool();
         this.contentProcessor = new ContentProcessor(bugReportPath + "/content_cache");
-        this.minimizationAgent = new TestCaseMinimizationAgent();
+        this.minimizationAgent = new TestCaseAgent();
     }
     
     /**
@@ -165,18 +165,26 @@ public class BugVerify extends Agent {
             if (this.testCase != null && this.testCase.getResult() != null && this.testCase.getResult().isFail()) {
                 LoggerUtil.logExec(Level.INFO, "Verified failure detected. Starting test case minimization for: " + testCase.name);
                 try {
-                    File minimizedFile = minimizationAgent.minimize(this.testCase, verifyContextPath);
-                    if (minimizedFile != null) {
+                    String minimizedCode = minimizationAgent.run(this.testCase, verifyContextPath);
+                    if (minimizedCode != null && !minimizedCode.equals(this.testCase.getSourceCode())) {
+                        // Save the minimized code to a new file
+                        String originalFileName = this.testCase.getFile().getName();
+                        String minimizedFileName = originalFileName.replace(".java", "_minimized.java");
+                        Path minimizedFilePath = verifyContextPath.resolve(minimizedFileName);
+                        
+                        Files.writeString(minimizedFilePath, minimizedCode);
+                        File minimizedFile = minimizedFilePath.toFile();
+                        
                         LoggerUtil.logExec(Level.INFO, "Minimization successful. New test case at: " + minimizedFile.getAbsolutePath());
                         // Update the agent's state to use the minimized test case for subsequent steps.
                         this.testCase.setFile(minimizedFile);
-                        this.testCode = this.testCase.getSourceCode();
+                        this.testCode = minimizedCode;
                         LoggerUtil.logExec(Level.INFO, "BugVerifyAgent will now proceed with the minimized test case.");
                     } else {
-                        LoggerUtil.logExec(Level.WARNING, "Minimization process did not return a valid file. Continuing with the original test case.");
+                        LoggerUtil.logExec(Level.WARNING, "Minimization process did not reduce the test case. Continuing with the original test case.");
                     }
                 } catch (Exception e) {
-                    LoggerUtil.logExec(Level.SEVERE, "An exception occurred during test case minimization. Continuing with the original test case. "+ e);
+                    LoggerUtil.logExec(Level.SEVERE, "An exception occurred during test case minimization. Continuing with the original test case. " + e);
                 }
             }
         }
