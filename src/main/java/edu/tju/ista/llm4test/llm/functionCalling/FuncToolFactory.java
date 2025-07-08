@@ -2,6 +2,9 @@ package edu.tju.ista.llm4test.llm.functionCalling;
 
 import java.util.List;
 import java.util.Map;
+
+
+@Deprecated
 public class FuncToolFactory {
 
     public static Map<String, Object>[] toToolsArray(List<FuncTool> tools) {

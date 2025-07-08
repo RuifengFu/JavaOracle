@@ -3,6 +3,7 @@ package edu.tju.ista.llm4test.llm.functionCalling;
 import java.util.ArrayList;
 import java.util.HashMap;
 
+@Deprecated
 // 表示Function定义
 public class FuncTool {
     private String name;

@@ -3,6 +3,7 @@ package edu.tju.ista.llm4test.llm.functionCalling;
 import java.util.HashMap;
 import java.util.Map;
 
+@Deprecated
 public class FuncParameter {
     public String name;
     public String type;

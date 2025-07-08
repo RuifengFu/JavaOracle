@@ -184,10 +184,12 @@ public class PromptGen {
         return generatePrompt("TestCaseMinimizationPlan", dataModel);
     }
 
-    public static String generateTestCaseMinimizationReducePrompt(String testFailureOutput, String currentCode) throws TemplateException, IOException {
+    public static String generateTestCaseMinimizationReducePrompt(String testFailureOutput, String currentCode, String testFilePath, String previousFeedback) throws TemplateException, IOException {
         Map<String, Object> dataModel = new HashMap<>();
         dataModel.put("test_failure_output", testFailureOutput);
         dataModel.put("current_code", currentCode);
+        dataModel.put("test_file_path", testFilePath);
+        dataModel.put("previous_feedback", previousFeedback != null ? previousFeedback : "");
         return generatePrompt("TestCaseMinimizationReduce", dataModel);
     }
 

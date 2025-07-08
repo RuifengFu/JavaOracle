@@ -91,6 +91,10 @@ public class TestCase {
         apiDoc = sb.toString();
     }
 
+    public String getName() {
+        return name;
+    }
+
     public File getFile() {
         return file;
     }

@@ -1,25 +1,25 @@
 package edu.tju.ista.llm4test.llm.agents;
 
-import com.fasterxml.jackson.core.type.TypeReference;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.tju.ista.llm4test.execute.TestCase;
 import edu.tju.ista.llm4test.execute.TestResult;
 import edu.tju.ista.llm4test.llm.OpenAI;
-import edu.tju.ista.llm4test.llm.functionCalling.FuncTool;
 import edu.tju.ista.llm4test.llm.tools.*;
 import edu.tju.ista.llm4test.prompt.PromptGen;
-import edu.tju.ista.llm4test.utils.CodeExtractor;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.logging.Level;
+import edu.tju.ista.llm4test.llm.tools.ToolCall;
+import freemarker.template.TemplateException;
+import java.util.HashMap;
 
 /**
  * A dynamic, autonomous agent for test case minimization.
@@ -27,16 +27,25 @@ import java.util.logging.Level;
  */
 public class TestCaseAgent extends Agent {
 
+    private static final Tool<Void> finish_minimization = new BasicTool("finish_minimization", "Finish minimization process");
+
     private final ToolRegistry toolRegistry;
     private final List<String> history;
+    private final List<String> feedbackHistory; // 新增：存储每次observe的反馈
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private static final int MAX_ITERATIONS = 15; // Safety limit for the reduction loop
+    private static final int MAX_ITERATIONS = 5; // Safety limit for the reduction loop
+    private List<String> lastExecutedTools; // Track executed tools for observe method
+
+    private String workspace_testcase_path;
+    private TestCase testCase;
 
     public TestCaseAgent() {
         super("You are an expert test case minimizer. Your goal is to reduce a given Java test case to its minimal form while preserving the original failure.");
         this.LLM = OpenAI.R1;
         this.toolRegistry = new ToolRegistry();
         this.history = new ArrayList<>();
+        this.feedbackHistory = new ArrayList<>(); // 初始化反馈历史
+        this.lastExecutedTools = new ArrayList<>(); // 初始化工具跟踪
         registerTools();
     }
 
@@ -56,7 +65,9 @@ public class TestCaseAgent extends Agent {
      */
     public String run(TestCase testCase, Path workspaceRoot) {
         // 1. Setup
+        this.testCase = testCase;
         history.clear();
+        feedbackHistory.clear(); // 清空反馈历史
         Path testFilePath = setupWorkspace(testCase, workspaceRoot);
         if (testFilePath == null) {
             return testCase.getSourceCode(); // Return original if setup fails
@@ -73,24 +84,35 @@ public class TestCaseAgent extends Agent {
         for (int i = 0; i < MAX_ITERATIONS; i++) {
             addToHistory("--- Iteration " + (i + 1) + "/" + MAX_ITERATIONS + " ---");
 
-            // THINK: Decide on the next action
-            String actionJson = think(currentCode, originalFailureOutput);
+            // THINK: Decide on the next action (with feedback from previous attempts)
+            String previousFeedback = feedbackHistory.isEmpty() ? "" : String.join("\n", feedbackHistory);
+            List<ToolCall> actionJson = think(currentCode, originalFailureOutput, previousFeedback, testFilePath);
             if (actionJson == null || actionJson.isEmpty()) {
                 addToHistory("LOOP: THINK failed, ending minimization");
                 break;
             }
 
             // Check for finish action
-            if (actionJson.contains("finish_minimization")) {
+            if (actionJson.stream().anyMatch(toolCall -> toolCall.toolName.equals(finish_minimization.getName()))) {
                 addToHistory("LOOP: LLM decided minimization complete");
                 break;
             }
 
             // ACT: Execute the action
-            ToolResponse<?> toolResponse = act(actionJson);
+            List<ToolResponse<?>> toolResponses = act(actionJson);
 
-            // OBSERVE: Process the result
-            currentCode = observe(toolResponse, currentCode, originalFailureOutput, testFilePath);
+            // OBSERVE: Process the result and generate feedback for next iteration
+            ObserveResult observeResult = observe(toolResponses, currentCode, originalFailureOutput, testFilePath);
+            currentCode = observeResult.newCode;
+            
+            // Store feedback for next iteration
+            if (!observeResult.feedback.isEmpty()) {
+                feedbackHistory.add("Iteration " + (i + 1) + ": " + observeResult.feedback);
+                // Keep only last 3 feedbacks to avoid prompt getting too long
+                if (feedbackHistory.size() > 3) {
+                    feedbackHistory.remove(0);
+                }
+            }
         }
 
         addToHistory("=== Minimization Complete ===");
@@ -106,6 +128,7 @@ public class TestCaseAgent extends Agent {
             Files.createDirectories(testCaseWorkspace);
 
             Path testFilePath = testCaseWorkspace.resolve(testCase.getFile().getName());
+            workspace_testcase_path = testFilePath.toString();
             Files.writeString(testFilePath, testCase.getSourceCode());
             
             // Change to the workspace directory for relative file operations
@@ -157,6 +180,7 @@ public class TestCaseAgent extends Agent {
             List<ToolCall> toolCalls = this.LLM.funcCall(prompt, tools);
             
             if (toolCalls != null && !toolCalls.isEmpty()) {
+
                 addToHistory("SETUP: Found " + toolCalls.size() + " files to copy");
                 
                 // Execute each function call
@@ -185,8 +209,6 @@ public class TestCaseAgent extends Agent {
                         ToolResponse<?> response = tool.execute(args);
                         
                         if (response.isSuccess()) {
-                            addToHistory("SETUP: Copied " + toolName.replace("_", " "));
-                        } else {
                             addToHistory("SETUP: Failed to copy " + toolName + " - " + response.getMessage());
                         }
                         
@@ -232,23 +254,28 @@ public class TestCaseAgent extends Agent {
     /**
      * The THINK step of the loop. The LLM analyzes the state and proposes the next action.
      */
-    private String think(String currentCode, String originalFailureOutput) {
+    private List<ToolCall> think(String currentCode, String originalFailureOutput, String previousFeedback, Path testFilePath) {
         try {
-            String prompt = PromptGen.generateTestCaseMinimizationReducePrompt(originalFailureOutput, currentCode);
+            String prompt = PromptGen.generateTestCaseMinimizationReducePrompt(originalFailureOutput, currentCode, testFilePath.toString(), previousFeedback);
             addToHistory("THINK: Analyzing current code and proposing reduction...");
 
-            String response = this.LLM.messageCompletion(prompt, 0.5, true);
-            
-            // Filter out thinking tags
-            String filteredResponse = filterThinkingTags(response);
-            
-            String extractedJson = CodeExtractor.extractCode(filteredResponse).stream().findFirst().orElse(filteredResponse);
+            // Prepare function tools for the LLM
+            List<Tool<?>> tools = new ArrayList<>();
+            tools.add(toolRegistry.get("write_to_file"));
+            tools.add(toolRegistry.get("jtreg_execute"));
+            tools.add(toolRegistry.get("check_simplicity"));
+            tools.add(finish_minimization);
 
-            addToHistory("THINK: Proposed action - " + (extractedJson.length() > 100 ? extractedJson.substring(0, 100) + "..." : extractedJson));
-            return extractedJson;
-        } catch (Exception e) {
-            addToHistory("THINK: Error - " + e.getMessage());
-            return null;
+
+            List<ToolCall> toolCalls = this.LLM.funcCall(prompt, tools);
+            
+            addToHistory("THINK: Proposed " + toolCalls.size() + " actions");
+
+            return toolCalls;
+        } catch (TemplateException e) {
+            throw new RuntimeException(e);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
     }
     
@@ -265,78 +292,196 @@ public class TestCaseAgent extends Agent {
     /**
      * The ACT step of the loop. Executes the tool call decided in the THINK step.
      */
-    private ToolResponse<?> act(String actionJson) {
+    private List<ToolResponse<?>> act(List<ToolCall> actionJson) {
+        List<ToolResponse<?>> responses = new ArrayList<>();
+        List<String> executedTools = new ArrayList<>(); // Track executed tools
+        
         try {
-            Map<String, Object> actionMap = objectMapper.readValue(actionJson, new TypeReference<>() {});
-            String toolName = (String) actionMap.get("tool_name");
-            Map<String, Object> parameters = (Map<String, Object>) actionMap.get("parameters");
+            if (actionJson == null || actionJson.isEmpty()) {
+                responses.add(ToolResponse.failure("No actions to execute."));
+                return responses;
+            }
 
-            if (toolName == null) {
-                return ToolResponse.failure("No tool_name specified in the action.");
+            boolean hasWriteToFile = false;
+            boolean hasJtregExecute = false;
+            
+            // First, check what tools LLM wants to call
+            for (ToolCall toolCall : actionJson) {
+                if ("write_to_file".equals(toolCall.toolName)) {
+                    hasWriteToFile = true;
+                } else if ("jtreg_execute".equals(toolCall.toolName)) {
+                    hasJtregExecute = true;
+                }
+            }
+
+            // Execute all the requested tools
+            for (ToolCall toolCall : actionJson) {
+                String toolName = toolCall.toolName;
+                Map<String, Object> parameters = toolCall.arguments;
+
+                if (toolName == null) {
+                    responses.add(ToolResponse.failure("No tool_name specified in the action."));
+                    continue;
+                }
+                
+                addToHistory("ACT: Executing " + toolName + " tool");
+
+                Tool<?> tool = toolRegistry.get(toolName);
+                ToolResponse<?> response = tool.execute(parameters);
+                
+                // Store tool name for observe method
+                executedTools.add(toolName);
+                responses.add(response);
             }
             
-            addToHistory("ACT: Executing " + toolName + " tool");
-
-            Tool<?> tool = toolRegistry.get(toolName);
-            return tool.execute(parameters);
+            // If LLM wrote to file but didn't execute test, automatically add jtreg_execute
+            if (hasWriteToFile && !hasJtregExecute) {
+                addToHistory("ACT: Auto-adding jtreg_execute to verify changes");
+                Tool<?> jtregTool = toolRegistry.get("jtreg_execute");
+                Map<String, Object> jtregParams = Map.of("content", workspace_testcase_path, "is_file_path", true, "class_name", testCase.getName());
+                ToolResponse<?> jtregResponse = jtregTool.execute(jtregParams);
+                
+                executedTools.add("jtreg_execute");
+                responses.add(jtregResponse);
+            }
+            
+            // Store tool names in a thread-local or instance variable for observe method
+            this.lastExecutedTools = executedTools;
+            
+            return responses;
 
         } catch (Exception e) {
             addToHistory("ACT: Parse error - " + e.getMessage());
-            return ToolResponse.failure("Failed to parse or execute action: " + e.getMessage());
+            responses.add(ToolResponse.failure("Failed to parse or execute action: " + e.getMessage()));
+            return responses;
         }
     }
 
     /**
      * The OBSERVE step of the loop. Analyzes the tool's output and updates the state.
      */
-    private String observe(ToolResponse<?> toolResponse, String previousCode, String originalFailure, Path testFilePath) {
-        if (!toolResponse.isSuccess()) {
-            addToHistory("OBSERVE: Tool failed, reverting - " + toolResponse.getMessage());
-            // Revert the file content if the tool failed (e.g., write_file failed)
+    private ObserveResult observe(List<ToolResponse<?>> toolResponses, String previousCode, String originalFailure, Path testFilePath) {
+        if (toolResponses == null || toolResponses.isEmpty()) {
+            addToHistory("OBSERVE: No tool responses to process.");
+            return new ObserveResult(previousCode, "No tool responses to process.");
+        }
+
+        // Separate responses by type using the tracked tool names
+        List<ToolResponse<?>> fileOperations = new ArrayList<>();
+        List<ToolResponse<?>> testExecutions = new ArrayList<>();
+        List<ToolResponse<?>> otherOperations = new ArrayList<>();
+        
+        for (int i = 0; i < toolResponses.size() && i < lastExecutedTools.size(); i++) {
+            ToolResponse<?> response = toolResponses.get(i);
+            String toolName = lastExecutedTools.get(i);
+            
+            if ("jtreg_execute".equals(toolName) || response.getResult() instanceof TestResult) {
+                testExecutions.add(response);
+            } else if ("write_to_file".equals(toolName)) {
+                fileOperations.add(response);
+            } else {
+                otherOperations.add(response);
+            }
+        }
+
+        String currentCode = previousCode;
+        boolean hasExecutionResult = false;
+        String feedback = "";
+        
+        // 1. Process file operations first
+        boolean fileOperationSuccessful = true;
+        for (ToolResponse<?> response : fileOperations) {
+            if (!response.isSuccess()) {
+                addToHistory("OBSERVE: File operation failed - " + response.getMessage());
+                feedback += "File operation failed: " + response.getMessage() + "\n";
+                fileOperationSuccessful = false;
+                break;
+            } else {
+                addToHistory("OBSERVE: File operation succeeded");
+                feedback += "File operation succeeded\n";
+            }
+        }
+        
+        // If file operations failed, revert and return
+        if (!fileOperationSuccessful) {
             try {
                 Files.writeString(testFilePath, previousCode);
+                addToHistory("OBSERVE: Reverted to previous code due to file operation failure");
             } catch (IOException e) {
                 addToHistory("OBSERVE: FATAL - Cannot revert file! " + e.getMessage());
             }
-            return previousCode;
+            return new ObserveResult(previousCode, feedback);
         }
 
-        Object result = toolResponse.getResult();
-        if (result instanceof TestResult) {
-            // This was a jtreg_execute call
-            TestResult testResult = (TestResult) result;
-            if (testResult.isFail() && outputsAreSimilar(originalFailure, testResult.getOutput())) {
-                // Good reduction: The test still fails with a similar error.
-                try {
-                    String newCode = Files.readString(testFilePath);
-                    addToHistory("OBSERVE: Success - Test still fails correctly, reduction accepted");
-                    return newCode; // The new code is now the current code
-                } catch (IOException e) {
-                    addToHistory("OBSERVE: Error reading new code, reverting - " + e.getMessage());
-                    return previousCode;
-                }
-            } else {
-                // Bad reduction: The test either passed or the failure changed too much.
-                String status = testResult.isFail() ? "failure changed" : "test passed";
-                addToHistory("OBSERVE: Failed - " + status + ", reverting reduction");
-                try {
-                    Files.writeString(testFilePath, previousCode);
-                } catch (IOException e) {
-                    addToHistory("OBSERVE: FATAL - Cannot revert file! " + e.getMessage());
-                }
-                return previousCode;
+        // 2. Process test executions to validate the changes
+        boolean testValidationPassed = true;
+        String validationFailureReason = "";
+        
+        for (ToolResponse<?> response : testExecutions) {
+            if (!response.isSuccess()) {
+                addToHistory("OBSERVE: Test execution failed - " + response.getMessage());
+                feedback += "Test execution failed: " + response.getMessage() + "\n";
+                continue;
             }
-        } else {
-            // This was another tool call, like write_file. The result is just a confirmation message.
-            addToHistory("OBSERVE: Tool completed successfully");
-            // The state of the code is now whatever is on disk, which we assume is correct for the next step.
-            try {
-                return Files.readString(testFilePath);
-            } catch (IOException e) {
-                addToHistory("OBSERVE: Error reading file, reverting - " + e.getMessage());
-                return previousCode;
+            
+            TestResult testResult = (TestResult) response.getResult();
+            hasExecutionResult = true;
+            
+            if (testResult.isFail() && outputsAreSimilar(originalFailure, testResult.getOutput())) {
+                addToHistory("OBSERVE: Test validation passed - still fails with expected error");
+                feedback += "Success - Test still fails correctly, reduction accepted\n";
+            } else {
+                testValidationPassed = false;
+                validationFailureReason = testResult.isFail() ? "failure output changed" : "test now passes";
+                addToHistory("OBSERVE: Test validation failed - " + validationFailureReason);
+                feedback += "Failed - " + validationFailureReason + ", reverting reduction\n";
+                break;
             }
         }
+        
+        // 3. Process other operations
+        for (ToolResponse<?> response : otherOperations) {
+            if (response.isSuccess()) {
+                addToHistory("OBSERVE: Utility operation succeeded - " + response.getMessage());
+                feedback += "Utility operation succeeded\n";
+            } else {
+                addToHistory("OBSERVE: Utility operation failed - " + response.getMessage());
+                feedback += "Utility operation failed: " + response.getMessage() + "\n";
+            }
+        }
+        
+        // 4. Make final decision
+        if (!testValidationPassed) {
+            try {
+                Files.writeString(testFilePath, previousCode);
+                addToHistory("OBSERVE: Reverted code due to test validation failure: " + validationFailureReason);
+            } catch (IOException e) {
+                addToHistory("OBSERVE: FATAL - Cannot revert file! " + e.getMessage());
+            }
+            return new ObserveResult(previousCode, feedback);
+        }
+        
+        // 5. Accept changes
+        if (!hasExecutionResult) {
+            try {
+                currentCode = Files.readString(testFilePath);
+                feedback += "Code updated, no execution verification\n";
+                addToHistory("OBSERVE: Code updated, no execution verification");
+            } catch (IOException e) {
+                addToHistory("OBSERVE: Error reading updated file - " + e.getMessage());
+                return new ObserveResult(previousCode, feedback);
+            }
+        } else {
+            try {
+                currentCode = Files.readString(testFilePath);
+                addToHistory("OBSERVE: Changes accepted - test validation passed");
+            } catch (IOException e) {
+                addToHistory("OBSERVE: Error reading updated code - " + e.getMessage());
+                return new ObserveResult(previousCode, feedback);
+            }
+        }
+        
+        return new ObserveResult(currentCode, feedback);
     }
 
     /**
@@ -356,5 +501,17 @@ public class TestCaseAgent extends Agent {
     private void addToHistory(String message) {
         LoggerUtil.logExec(Level.INFO, "[TestCaseAgent] " + message);
         history.add(message);
+    }
+    /**
+     * Result object for observe method containing both new code and feedback
+     */
+    private static class ObserveResult {
+        final String newCode;
+        final String feedback;
+        
+        ObserveResult(String newCode, String feedback) {
+            this.newCode = newCode;
+            this.feedback = feedback != null ? feedback : "";
+        }
     }
 }
