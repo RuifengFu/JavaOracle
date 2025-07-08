@@ -61,6 +61,7 @@ public class PromptGen {
             // TestCaseMinimization 相关模板
             TEMPLATE_MAP.put("TestCaseMinimizationPlan", loadResourceAsString("/prompt/TestCaseMinimizationPlan.txt"));
             TEMPLATE_MAP.put("TestCaseMinimizationReduce", loadResourceAsString("/prompt/TestCaseMinimizationReduce.txt"));
+            TEMPLATE_MAP.put("TestCaseObserveAndDecide", loadResourceAsString("/prompt/TestCaseObserveAndDecide.txt"));
             TEMPLATE_MAP.put("WorkspacePreparation", loadResourceAsString("/prompt/WorkspacePreparation.txt"));
         } catch (IOException e) {
             throw new RuntimeException("Failed to load prompt templates from resources", e);
@@ -82,9 +83,7 @@ public class PromptGen {
         }
     }
 
-    /**
-     * Generates a prompt by applying the given template name and data model.
-     *
+    /**</#if>
      * @param templateName The name of the template to use (key from TEMPLATE_MAP).
      * @param dataModel    The data model to populate the template variables.
      * @return The generated prompt as a string.
@@ -191,6 +190,12 @@ public class PromptGen {
         dataModel.put("test_file_path", testFilePath);
         dataModel.put("previous_feedback", previousFeedback != null ? previousFeedback : "");
         return generatePrompt("TestCaseMinimizationReduce", dataModel);
+    }
+
+    public static String generateTestCaseObserveAndDecidePrompt(String observationSummary) throws TemplateException, IOException {
+        Map<String, Object> dataModel = new HashMap<>();
+        dataModel.put("observation_summary", observationSummary);
+        return generatePrompt("TestCaseObserveAndDecide", dataModel);
     }
 
     public static String generateWorkspacePreparationPrompt(String testCaseSourceCode, String testOutput, String originalTestPath, String directoryListing) throws TemplateException, IOException {

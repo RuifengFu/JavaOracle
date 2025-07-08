@@ -27,7 +27,9 @@ import java.util.HashMap;
  */
 public class TestCaseAgent extends Agent {
 
-    private static final Tool<Void> finish_minimization = new BasicTool("finish_minimization", "Finish minimization process");
+    private static final Tool<Void> ACTION_CONTINUE = new BasicTool("continue_minimization", "Continue to the next minimization iteration.");
+    private static final Tool<Void> ACTION_FINISH = new BasicTool("finish_minimization", "Finish the minimization process as it is complete.");
+    private static final Tool<Void> ACTION_REDO = new BasicTool("redo_simplification", "Abandon the current simplification and revert to the previous code.");
 
     private final ToolRegistry toolRegistry;
     private final List<String> history;
@@ -93,7 +95,7 @@ public class TestCaseAgent extends Agent {
             }
 
             // Check for finish action
-            if (actionJson.stream().anyMatch(toolCall -> toolCall.toolName.equals(finish_minimization.getName()))) {
+            if (actionJson.stream().anyMatch(toolCall -> toolCall.toolName.equals(ACTION_FINISH.getName()))) {
                 addToHistory("LOOP: LLM decided minimization complete");
                 break;
             }
@@ -105,6 +107,11 @@ public class TestCaseAgent extends Agent {
             ObserveResult observeResult = observe(toolResponses, currentCode, originalFailureOutput, testFilePath);
             currentCode = observeResult.newCode;
             
+            if (observeResult.nextAction != null && ACTION_FINISH.getName().equals(observeResult.nextAction)) {
+                addToHistory("LOOP: LLM decided to finish minimization.");
+                break;
+            }
+
             // Store feedback for next iteration
             if (!observeResult.feedback.isEmpty()) {
                 feedbackHistory.add("Iteration " + (i + 1) + ": " + observeResult.feedback);
@@ -124,7 +131,7 @@ public class TestCaseAgent extends Agent {
      */
     private Path setupWorkspace(TestCase testCase, Path workspaceRoot) {
         try {
-            Path testCaseWorkspace = workspaceRoot.resolve(testCase.name + "_minimization_ws_" + System.currentTimeMillis());
+            Path testCaseWorkspace = workspaceRoot.resolve(testCase.name + "_minimization_ws_" + System.currentTimeMillis()).toAbsolutePath();
             Files.createDirectories(testCaseWorkspace);
 
             Path testFilePath = testCaseWorkspace.resolve(testCase.getFile().getName());
@@ -256,7 +263,10 @@ public class TestCaseAgent extends Agent {
      */
     private List<ToolCall> think(String currentCode, String originalFailureOutput, String previousFeedback, Path testFilePath) {
         try {
-            String prompt = PromptGen.generateTestCaseMinimizationReducePrompt(originalFailureOutput, currentCode, testFilePath.toString(), previousFeedback);
+            // The CWD is set to the test's workspace directory. For the prompt, providing
+            // the relative path (just the filename) is cleaner and sufficient for the LLM.
+            String relativeTestPath = testFilePath.getFileName().toString();
+            String prompt = PromptGen.generateTestCaseMinimizationReducePrompt(originalFailureOutput, currentCode, relativeTestPath, previousFeedback);
             addToHistory("THINK: Analyzing current code and proposing reduction...");
 
             // Prepare function tools for the LLM
@@ -264,7 +274,9 @@ public class TestCaseAgent extends Agent {
             tools.add(toolRegistry.get("write_to_file"));
             tools.add(toolRegistry.get("jtreg_execute"));
             tools.add(toolRegistry.get("check_simplicity"));
-            tools.add(finish_minimization);
+            tools.add(ACTION_CONTINUE);
+            tools.add(ACTION_FINISH);
+            tools.add(ACTION_REDO);
 
 
             List<ToolCall> toolCalls = this.LLM.funcCall(prompt, tools);
@@ -279,15 +291,6 @@ public class TestCaseAgent extends Agent {
         }
     }
     
-    /**
-     * Filter out thinking tags from LLM response
-     */
-    private String filterThinkingTags(String response) {
-        if (response == null || response.isEmpty()) {
-            return response;
-        }
-        return response.replaceAll("<thinking>[\\s\\S]*?</thinking>", "").trim();
-    }
 
     /**
      * The ACT step of the loop. Executes the tool call decided in the THINK step.
@@ -363,125 +366,112 @@ public class TestCaseAgent extends Agent {
     private ObserveResult observe(List<ToolResponse<?>> toolResponses, String previousCode, String originalFailure, Path testFilePath) {
         if (toolResponses == null || toolResponses.isEmpty()) {
             addToHistory("OBSERVE: No tool responses to process.");
-            return new ObserveResult(previousCode, "No tool responses to process.");
+            return new ObserveResult(previousCode, "No tool responses to process.", ACTION_CONTINUE.getName());
         }
 
-        // Separate responses by type using the tracked tool names
-        List<ToolResponse<?>> fileOperations = new ArrayList<>();
-        List<ToolResponse<?>> testExecutions = new ArrayList<>();
-        List<ToolResponse<?>> otherOperations = new ArrayList<>();
-        
-        for (int i = 0; i < toolResponses.size() && i < lastExecutedTools.size(); i++) {
-            ToolResponse<?> response = toolResponses.get(i);
-            String toolName = lastExecutedTools.get(i);
-            
-            if ("jtreg_execute".equals(toolName) || response.getResult() instanceof TestResult) {
-                testExecutions.add(response);
-            } else if ("write_to_file".equals(toolName)) {
-                fileOperations.add(response);
-            } else {
-                otherOperations.add(response);
-            }
-        }
-
-        String currentCode = previousCode;
-        boolean hasExecutionResult = false;
         String feedback = "";
-        
-        // 1. Process file operations first
-        boolean fileOperationSuccessful = true;
-        for (ToolResponse<?> response : fileOperations) {
-            if (!response.isSuccess()) {
-                addToHistory("OBSERVE: File operation failed - " + response.getMessage());
-                feedback += "File operation failed: " + response.getMessage() + "\n";
-                fileOperationSuccessful = false;
-                break;
-            } else {
-                addToHistory("OBSERVE: File operation succeeded");
-                feedback += "File operation succeeded\n";
+        String currentCode = previousCode;
+        boolean modificationApplied = false;
+
+        // Process file operations first
+        List<String> executedTools = this.lastExecutedTools;
+        boolean fileWriteSuccess = true;
+        for (int i = 0; i < executedTools.size(); i++) {
+            if ("write_to_file".equals(executedTools.get(i))) {
+                modificationApplied = true;
+                if (!toolResponses.get(i).isSuccess()) {
+                    fileWriteSuccess = false;
+                    feedback += "File write operation failed. ";
+                    break;
+                }
             }
-        }
-        
-        // If file operations failed, revert and return
-        if (!fileOperationSuccessful) {
-            try {
-                Files.writeString(testFilePath, previousCode);
-                addToHistory("OBSERVE: Reverted to previous code due to file operation failure");
-            } catch (IOException e) {
-                addToHistory("OBSERVE: FATAL - Cannot revert file! " + e.getMessage());
-            }
-            return new ObserveResult(previousCode, feedback);
         }
 
-        // 2. Process test executions to validate the changes
-        boolean testValidationPassed = true;
-        String validationFailureReason = "";
-        
-        for (ToolResponse<?> response : testExecutions) {
-            if (!response.isSuccess()) {
-                addToHistory("OBSERVE: Test execution failed - " + response.getMessage());
-                feedback += "Test execution failed: " + response.getMessage() + "\n";
-                continue;
-            }
-            
-            TestResult testResult = (TestResult) response.getResult();
-            hasExecutionResult = true;
-            
-            if (testResult.isFail() && outputsAreSimilar(originalFailure, testResult.getOutput())) {
-                addToHistory("OBSERVE: Test validation passed - still fails with expected error");
-                feedback += "Success - Test still fails correctly, reduction accepted\n";
-            } else {
-                testValidationPassed = false;
-                validationFailureReason = testResult.isFail() ? "failure output changed" : "test now passes";
-                addToHistory("OBSERVE: Test validation failed - " + validationFailureReason);
-                feedback += "Failed - " + validationFailureReason + ", reverting reduction\n";
-                break;
+        if (!fileWriteSuccess) {
+            feedback += "Reverting code.";
+            // No need to actually write, as previousCode is still the state
+            return new ObserveResult(previousCode, feedback, decideNextAction(feedback));
+        }
+
+        // Process test executions
+        TestResult lastTestResult = null;
+        for (int i = 0; i < executedTools.size(); i++) {
+            if ("jtreg_execute".equals(executedTools.get(i))) {
+                if (toolResponses.get(i).isSuccess() && toolResponses.get(i).getResult() instanceof TestResult) {
+                    lastTestResult = (TestResult) toolResponses.get(i).getResult();
+                } else {
+                    feedback += "Test execution tool failed. ";
+                }
             }
         }
-        
-        // 3. Process other operations
-        for (ToolResponse<?> response : otherOperations) {
-            if (response.isSuccess()) {
-                addToHistory("OBSERVE: Utility operation succeeded - " + response.getMessage());
-                feedback += "Utility operation succeeded\n";
+
+        // Evaluate outcome
+        boolean isReductionSuccessful = false;
+        if (modificationApplied && lastTestResult != null) {
+            if (lastTestResult.isFail() && outputsAreSimilar(originalFailure, lastTestResult.getOutput())) {
+                feedback += "Reduction successful: Test still fails as expected. ";
+                isReductionSuccessful = true;
+                try {
+                    currentCode = Files.readString(testFilePath);
+                } catch (IOException e) {
+                    feedback += "Failed to read updated code. ";
+                }
             } else {
-                addToHistory("OBSERVE: Utility operation failed - " + response.getMessage());
-                feedback += "Utility operation failed: " + response.getMessage() + "\n";
+                feedback += "Reduction failed: Test behavior changed. ";
             }
+        } else if (modificationApplied) {
+            feedback += "Change applied but not verified by a test run. ";
+        } else {
+            feedback += "No code modification was attempted. ";
         }
         
-        // 4. Make final decision
-        if (!testValidationPassed) {
+        String finalCode = isReductionSuccessful ? currentCode : previousCode;
+        if (!isReductionSuccessful && modificationApplied) {
+            // Revert if reduction was not successful
             try {
                 Files.writeString(testFilePath, previousCode);
-                addToHistory("OBSERVE: Reverted code due to test validation failure: " + validationFailureReason);
+                feedback += "Reverting code. ";
             } catch (IOException e) {
                 addToHistory("OBSERVE: FATAL - Cannot revert file! " + e.getMessage());
             }
-            return new ObserveResult(previousCode, feedback);
         }
         
-        // 5. Accept changes
-        if (!hasExecutionResult) {
+        // Let LLM decide the next strategic step
+        String nextAction = decideNextAction(feedback);
+
+        // If LLM says redo, ensure we are using previous code
+        if (ACTION_REDO.getName().equals(nextAction)) {
+            finalCode = previousCode;
             try {
-                currentCode = Files.readString(testFilePath);
-                feedback += "Code updated, no execution verification\n";
-                addToHistory("OBSERVE: Code updated, no execution verification");
+                 Files.writeString(testFilePath, previousCode);
             } catch (IOException e) {
-                addToHistory("OBSERVE: Error reading updated file - " + e.getMessage());
-                return new ObserveResult(previousCode, feedback);
-            }
-        } else {
-            try {
-                currentCode = Files.readString(testFilePath);
-                addToHistory("OBSERVE: Changes accepted - test validation passed");
-            } catch (IOException e) {
-                addToHistory("OBSERVE: Error reading updated code - " + e.getMessage());
-                return new ObserveResult(previousCode, feedback);
+                 addToHistory("OBSERVE: FATAL - Cannot revert file on REDO! " + e.getMessage());
             }
         }
         
-        return new ObserveResult(currentCode, feedback);
+        return new ObserveResult(finalCode, feedback, nextAction);
+    }
+
+    private String decideNextAction(String feedback) {
+        try {
+            String prompt = PromptGen.generateTestCaseObserveAndDecidePrompt(feedback);
+            addToHistory("OBSERVE: Asking LLM for next step...");
+
+            List<Tool<?>> decisionTools = List.of(ACTION_CONTINUE, ACTION_FINISH, ACTION_REDO);
+            List<ToolCall> toolCalls = this.LLM.funcCall(prompt, decisionTools);
+
+            if (toolCalls != null && !toolCalls.isEmpty()) {
+                String actionName = toolCalls.get(0).toolName;
+                addToHistory("OBSERVE: LLM chose action: " + actionName);
+                return actionName;
+            } else {
+                addToHistory("OBSERVE: LLM failed to choose an action, defaulting to continue.");
+                return ACTION_CONTINUE.getName();
+            }
+        } catch (Exception e) {
+            addToHistory("OBSERVE: Error during LLM decision, defaulting to continue. " + e.getMessage());
+            return ACTION_CONTINUE.getName();
+        }
     }
 
     /**
@@ -508,10 +498,12 @@ public class TestCaseAgent extends Agent {
     private static class ObserveResult {
         final String newCode;
         final String feedback;
+        final String nextAction;
         
-        ObserveResult(String newCode, String feedback) {
+        ObserveResult(String newCode, String feedback, String nextAction) {
             this.newCode = newCode;
             this.feedback = feedback != null ? feedback : "";
+            this.nextAction = nextAction;
         }
     }
 }

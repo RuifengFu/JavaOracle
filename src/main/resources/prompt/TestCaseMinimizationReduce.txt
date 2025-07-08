@@ -12,39 +12,37 @@ ${current_code}
 
 **Test File Path:** ${test_file_path}
 
-<#if previous_feedback?has_content>
 **Previous Attempts and Results:**
 ```
 ${previous_feedback}
 ```
 **Learn from above:** Consider what worked and what failed. Avoid repeating failed approaches.
-</#if>
+
 
 **Task:**
-Analyze the code and propose a single, small simplification. This could be:
-- Removing an unnecessary line or block of code.
-- Deleting an unused variable or import.
-- Simplifying a complex expression.
-- Removing a method call that doesn't affect the failure.
+Analyze the code and propose a **significant simplification**. Your goal is to remove as much code as possible in a single step, while still preserving the original failure. Be bold in your changes.
+
+This could involve:
+- Removing multiple unnecessary lines, methods, or even classes.
+- Deleting all unused variables and imports at once.
+- Aggressively simplifying complex expressions or logic.
+- Removing any code that does not directly contribute to the specific failure.
 
 **CRITICAL Requirements:**
-1. Make only one logical change at a time.
-2. The primary goal is to make the code shorter while keeping the original failure.
-3. **ALWAYS follow this two-step process:**
-   - **Step 1:** Use write_to_file to save the simplified code
-   - **Step 2:** Use jtreg_execute to verify the test still reproduces the same failure
-4. **If verification fails (test passes or different error), abandon this simplification**
+1. Your primary goal is to make the code **dramatically shorter** while keeping the original failure.
+2. **ALWAYS follow this two-step process:**
+   - **Step 1:** Use `write_to_file` to save your simplified code.
+   - **Step 2:** Use `jtreg_execute` to verify the test still reproduces the same failure.
+3. If verification fails (test passes or the error changes), the system will automatically revert. Your next attempt should be more conservative.
 
 **Available Tools:**
-- write_to_file: Write the simplified code to the test file
-- jtreg_execute: Execute the test to verify it still reproduces the failure (MANDATORY after each write)
-- check_simplicity: Check if the code has been simplified enough
-- finish_minimization: Signal that minimization is complete
+- `write_to_file`: Write the simplified code to the test file.
+- `jtreg_execute`: Execute the test to verify it still reproduces the failure (MANDATORY after each write).
+- `finish_minimization`: Signal that minimization is complete.
 
 **MANDATORY Process:**
-1. First call write_to_file with your simplified code
-2. Then IMMEDIATELY call jtreg_execute to verify the failure still occurs
-3. Only proceed if the test still fails with the same type of error as the original
+1. First, call `write_to_file` with your simplified code.
+2. Then, IMMEDIATELY call `jtreg_execute` to verify the failure still occurs.
 
 **Instructions:**
-You MUST use both write_to_file AND jtreg_execute tools in sequence. Never skip the verification step. The content should be the complete, modified Java code without any markdown formatting or explanations. 
+Be aggressive. Try to achieve the maximum possible simplification in each step. You MUST use both `write_to_file` AND `jtreg_execute` tools in sequence. Never skip the verification step. 
