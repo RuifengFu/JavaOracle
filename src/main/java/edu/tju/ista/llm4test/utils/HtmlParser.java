@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.logging.Level;
 
 public class HtmlParser {
 
@@ -44,6 +45,10 @@ public class HtmlParser {
         for (Element detail : details) {
             String methodName = Objects.requireNonNull(detail.select("h3").first()).text();
             String text = detail.text();
+            if (methodDetails.containsKey(methodName)) {
+                text = methodDetails.get(methodName) + "\n" + text;
+                LoggerUtil.logExec(Level.FINE, "Polymorphic method detected: " + methodName + ", combining details.");
+            }
             methodDetails.put(methodName, text);
         }
         return methodDetails;
