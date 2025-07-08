@@ -13,6 +13,11 @@ public class ToolCall {
         this.arguments = new ObjectMapper().readValue(args, Map.class);
     }
 
+    public ToolCall(String toolName, Map<String, Object> args)  {
+        this.toolName = toolName;
+        this.arguments = args;
+    }
+
     @Override
     public String toString() {
         return "ToolCall{" +

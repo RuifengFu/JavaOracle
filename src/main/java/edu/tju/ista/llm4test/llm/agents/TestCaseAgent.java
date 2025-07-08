@@ -39,6 +39,7 @@ public class TestCaseAgent extends Agent {
     private List<String> lastExecutedTools; // Track executed tools for observe method
 
     private String workspace_testcase_path;
+    private Path workspace_root;
     private TestCase testCase;
 
     public TestCaseAgent() {
@@ -133,7 +134,7 @@ public class TestCaseAgent extends Agent {
         try {
             Path testCaseWorkspace = workspaceRoot.resolve(testCase.name + "_minimization_ws_" + System.currentTimeMillis()).toAbsolutePath();
             Files.createDirectories(testCaseWorkspace);
-
+            workspace_root = testCaseWorkspace;
             Path testFilePath = testCaseWorkspace.resolve(testCase.getFile().getName());
             workspace_testcase_path = testFilePath.toString();
             Files.writeString(testFilePath, testCase.getSourceCode());
@@ -280,17 +281,32 @@ public class TestCaseAgent extends Agent {
 
 
             List<ToolCall> toolCalls = this.LLM.funcCall(prompt, tools);
-            
-            addToHistory("THINK: Proposed " + toolCalls.size() + " actions");
+
+            addToHistory("THINK: Proposed " + (toolCalls != null ? toolCalls.size() : 0) + " actions");
+
+            if (toolCalls == null) {
+                toolCalls = new ArrayList<>();
+            }
+
+            boolean hasWriteToFile = toolCalls.stream().anyMatch(tc -> "write_to_file".equals(tc.toolName));
+            boolean hasJtregExecute = toolCalls.stream().anyMatch(tc -> "jtreg_execute".equals(tc.toolName));
+
+            if (hasWriteToFile && !hasJtregExecute) {
+                addToHistory("THINK: Auto-adding jtreg_execute to verify changes");
+                Map<String, Object> jtregParams = new HashMap<>();
+                jtregParams.put("content", workspace_testcase_path);
+                jtregParams.put("is_file_path", true);
+                jtregParams.put("class_name", testCase.getName());
+                toolCalls.add(new ToolCall("jtreg_execute", jtregParams));
+                addToHistory("THINK: Now proposed " + toolCalls.size() + " actions");
+            }
 
             return toolCalls;
-        } catch (TemplateException e) {
-            throw new RuntimeException(e);
-        } catch (IOException e) {
+        } catch (TemplateException | IOException e) {
             throw new RuntimeException(e);
         }
     }
-    
+
 
     /**
      * The ACT step of the loop. Executes the tool call decided in the THINK step.
@@ -298,23 +314,11 @@ public class TestCaseAgent extends Agent {
     private List<ToolResponse<?>> act(List<ToolCall> actionJson) {
         List<ToolResponse<?>> responses = new ArrayList<>();
         List<String> executedTools = new ArrayList<>(); // Track executed tools
-        
+
         try {
             if (actionJson == null || actionJson.isEmpty()) {
                 responses.add(ToolResponse.failure("No actions to execute."));
                 return responses;
-            }
-
-            boolean hasWriteToFile = false;
-            boolean hasJtregExecute = false;
-            
-            // First, check what tools LLM wants to call
-            for (ToolCall toolCall : actionJson) {
-                if ("write_to_file".equals(toolCall.toolName)) {
-                    hasWriteToFile = true;
-                } else if ("jtreg_execute".equals(toolCall.toolName)) {
-                    hasJtregExecute = true;
-                }
             }
 
             // Execute all the requested tools
@@ -326,31 +330,34 @@ public class TestCaseAgent extends Agent {
                     responses.add(ToolResponse.failure("No tool_name specified in the action."));
                     continue;
                 }
-                
+
+                if (toolName.equals("write_to_file")) {
+                    String path = (String) parameters.get("path");
+                    Path filePath = workspace_root.resolve(path);
+                    if (!Files.exists(Path.of(path))) {
+                        parameters.put("path", filePath.toString());
+                    }
+                }
+
                 addToHistory("ACT: Executing " + toolName + " tool");
 
                 Tool<?> tool = toolRegistry.get(toolName);
+                if (tool == null) {
+                    responses.add(ToolResponse.failure("Tool not found: " + toolName));
+                    continue;
+                }
+
+
                 ToolResponse<?> response = tool.execute(parameters);
-                
+
                 // Store tool name for observe method
                 executedTools.add(toolName);
                 responses.add(response);
             }
-            
-            // If LLM wrote to file but didn't execute test, automatically add jtreg_execute
-            if (hasWriteToFile && !hasJtregExecute) {
-                addToHistory("ACT: Auto-adding jtreg_execute to verify changes");
-                Tool<?> jtregTool = toolRegistry.get("jtreg_execute");
-                Map<String, Object> jtregParams = Map.of("content", workspace_testcase_path, "is_file_path", true, "class_name", testCase.getName());
-                ToolResponse<?> jtregResponse = jtregTool.execute(jtregParams);
-                
-                executedTools.add("jtreg_execute");
-                responses.add(jtregResponse);
-            }
-            
+
             // Store tool names in a thread-local or instance variable for observe method
             this.lastExecutedTools = executedTools;
-            
+
             return responses;
 
         } catch (Exception e) {
@@ -419,6 +426,13 @@ public class TestCaseAgent extends Agent {
             } else {
                 feedback += "Reduction failed: Test behavior changed. ";
             }
+            String newOutput = lastTestResult.getOutput();
+            String newStatus = lastTestResult.isFail() ? "FAILED" : "PASSED";
+            if (newOutput == null || newOutput.isBlank()) {
+                newOutput = "[Test " + newStatus + " - No Output]";
+            }
+            feedback += "--- ORIGINAL FAILURE ---\n" + originalFailure.trim() + "\n";
+            feedback += "--- NEW OUTPUT (Status: " + newStatus + ") ---\n" + newOutput.trim() + "\n";
         } else if (modificationApplied) {
             feedback += "Change applied but not verified by a test run. ";
         } else {

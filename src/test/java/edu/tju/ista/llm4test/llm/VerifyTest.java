@@ -4,6 +4,8 @@ import edu.tju.ista.llm4test.execute.TestCase;
 import edu.tju.ista.llm4test.execute.TestResult;
 import edu.tju.ista.llm4test.execute.TestResultKind;
 
+import edu.tju.ista.llm4test.llm.agents.BugVerify;
+import edu.tju.ista.llm4test.service.BugVerificationService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -22,6 +24,7 @@ public class VerifyTest {
 
     @Test
     public void testTestCaseMinimizationAgent() throws IOException {
+        BugVerificationService.verifyBugs();
 
     }
 }
