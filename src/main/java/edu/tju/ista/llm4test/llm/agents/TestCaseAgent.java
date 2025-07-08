@@ -21,7 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.logging.Level;
 
-/**请你找到gemini-cli中所有使用过的prompt
+/**
  * A dynamic, autonomous agent for test case minimization.
  * It follows a Think-Act-Observe loop to iteratively reduce a failing test case.
  */

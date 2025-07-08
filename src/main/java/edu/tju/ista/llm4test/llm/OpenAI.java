@@ -313,7 +313,7 @@ public class OpenAI {
                 Map<String, Object> message = (Map<String, Object>) choice.get("message");
                 if (message != null) {
                     String content = (String) message.get("content"); // Extract "content"
-                    ArrayList<HashMap<String, Object>> toolCalls = (ArrayList<HashMap<String, Object>>) message.get("tool_calls");
+                    ArrayList<HashMap<String, Object>> toolCalls = (ArrayList<HashMap<String, Object>>) message.getOrDefault("tool_calls", new ArrayList<>());
                     Map<String, String> callMap = toolCalls.stream().map(call -> (HashMap<String, Object>)call.get("function"))
                             .collect(Collectors.toMap(
                                     func -> (String)func.get("name"),
