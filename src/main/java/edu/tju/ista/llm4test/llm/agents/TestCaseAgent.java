@@ -197,27 +197,35 @@ public class TestCaseAgent extends Agent {
                     Map<String, Object> args = toolCall.arguments;
                     
                     try {
-                        // Parse the arguments JSON
-                        // Convert paths to be relative to the original test directory
-//                        if ("copy_file".equals(toolName)) {
-//                            String sourcePath = (String) args.get("sourcePath");
-//                            String destinationPath = (String) args.get("destinationPath");
-//
-//                            // Make source path absolute from original test directory
-//                            Path originalTestDir = testCase.getFile().getParentFile().toPath();
-//                            Path absoluteSourcePath = originalTestDir.resolve(sourcePath);
-//                            args.put("sourcePath", absoluteSourcePath.toString());
-//
-//                            // Keep destination path relative to current workspace
-//                            // (current directory is already set to workspace)
-//                        }
+                        // Enhance paths for copy_file tool to ensure they are absolute
+                        if ("copy_file".equals(toolName)) {
+                            // Source path should be relative to the original test's directory
+                            String sourcePath = (String) args.get("sourcePath");
+                            if (sourcePath != null) {
+                                Path originalTestDir = testCase.getFile().getParentFile().toPath();
+                                Path absoluteSourcePath = originalTestDir.resolve(sourcePath);
+                                if (!Files.exists(originalTestDir)) {
+                                    args.put("destinationPath", absoluteSourcePath);
+                                }
+                            }
+
+                            // Destination path should be relative to the new workspace root
+                            String destinationPath = (String) args.get("destinationPath");
+                            if (destinationPath != null) {
+                                Path destPathObj = workspace_root.resolve(destinationPath);
+                                if (!Path.of(destinationPath).toAbsolutePath().toString().startsWith(workspace_root.toAbsolutePath().toString())) {
+                                    // Ensure destination is within the workspace
+                                    args.put("destinationPath", destPathObj);
+                                }
+                            }
+                        }
                         
                         // Execute the tool
                         Tool<?> tool = toolRegistry.get(toolName);
                         ToolResponse<?> response = tool.execute(args);
                         
-                        if (response.isSuccess()) {
-                            addToHistory("SETUP: Failed to copy " + toolName + " - " + response.getMessage());
+                        if (!response.isSuccess()) {
+                            addToHistory("SETUP: Failed to execute " + toolName + " - " + response.getMessage());
                         }
                         
                     } catch (Exception e) {
