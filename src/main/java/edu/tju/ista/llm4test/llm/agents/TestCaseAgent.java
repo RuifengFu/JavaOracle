@@ -65,24 +65,24 @@ public class TestCaseAgent extends Agent {
         String originalFailureOutput = testCase.getResult().getOutput();
         String currentCode = testCase.getSourceCode();
 
-        addToHistory("Agent started for test case: " + testCase.name);
-        addToHistory("Workspace created at: " + testFilePath.getParent());
-        addToHistory("Original Failure Output:\n" + originalFailureOutput);
+        addToHistory("=== TestCaseAgent Started ===");
+        addToHistory("Target: " + testCase.name);
+        addToHistory("Workspace: " + testFilePath.getParent().getFileName());
 
         // 2. Minimization Loop (Think-Act-Observe)
         for (int i = 0; i < MAX_ITERATIONS; i++) {
-            addToHistory("\n--- Iteration " + (i + 1) + "/" + MAX_ITERATIONS + " ---");
+            addToHistory("--- Iteration " + (i + 1) + "/" + MAX_ITERATIONS + " ---");
 
             // THINK: Decide on the next action
             String actionJson = think(currentCode, originalFailureOutput);
             if (actionJson == null || actionJson.isEmpty()) {
-                addToHistory("Think step failed to produce an action. Ending minimization.");
+                addToHistory("LOOP: THINK failed, ending minimization");
                 break;
             }
 
             // Check for finish action
             if (actionJson.contains("finish_minimization")) {
-                addToHistory("LLM decided minimization is complete.");
+                addToHistory("LOOP: LLM decided minimization complete");
                 break;
             }
 
@@ -93,7 +93,7 @@ public class TestCaseAgent extends Agent {
             currentCode = observe(toolResponse, currentCode, originalFailureOutput, testFilePath);
         }
 
-        addToHistory("\n--- Minimization Finished ---");
+        addToHistory("=== Minimization Complete ===");
         return currentCode;
     }
 
@@ -142,66 +142,64 @@ public class TestCaseAgent extends Agent {
                     directoryListing
                 );
             } catch (Exception e) {
-                addToHistory("Failed to generate workspace preparation prompt: " + e.getMessage());
+                addToHistory("SETUP: Failed to generate prompt - " + e.getMessage());
                 return;
             }
             
-            addToHistory("Workspace preparation prompt generated");
+            addToHistory("SETUP: Analyzing test dependencies...");
             
             // Prepare function tools for the LLM
-            List<FuncTool> tools = new ArrayList<>();
-            tools.add(toolRegistry.get("copy_file").getTool());
-            tools.add(toolRegistry.get("list_directory").getTool());
+            List<Tool<?>> tools = new ArrayList<>();
+            tools.add(toolRegistry.get("copy_file"));
+            tools.add(toolRegistry.get("list_directory"));
             
             // Call LLM with function calling capability
-            Map<String, String> functionCalls = this.LLM.funcCall(prompt, tools);
+            List<ToolCall> toolCalls = this.LLM.funcCall(prompt, tools);
             
-            if (functionCalls != null && !functionCalls.isEmpty()) {
-                addToHistory("LLM suggested " + functionCalls.size() + " function calls for workspace preparation");
+            if (toolCalls != null && !toolCalls.isEmpty()) {
+                addToHistory("SETUP: Found " + toolCalls.size() + " files to copy");
                 
                 // Execute each function call
-                for (Map.Entry<String, String> entry : functionCalls.entrySet()) {
-                    String toolName = entry.getKey();
-                    String arguments = entry.getValue();
+                for (ToolCall toolCall : toolCalls) {
+                    String toolName = toolCall.toolName;
+                    Map<String, Object> args = toolCall.arguments;
                     
                     try {
                         // Parse the arguments JSON
-                        Map<String, Object> args = objectMapper.readValue(arguments, new TypeReference<>() {});
-                        
                         // Convert paths to be relative to the original test directory
-                        if ("copy_file".equals(toolName)) {
-                            String sourcePath = (String) args.get("sourcePath");
-                            String destinationPath = (String) args.get("destinationPath");
-                            
-                            // Make source path absolute from original test directory
-                            Path originalTestDir = testCase.getFile().getParentFile().toPath();
-                            Path absoluteSourcePath = originalTestDir.resolve(sourcePath);
-                            args.put("sourcePath", absoluteSourcePath.toString());
-                            
-                            // Keep destination path relative to current workspace
-                            // (current directory is already set to workspace)
-                        }
+//                        if ("copy_file".equals(toolName)) {
+//                            String sourcePath = (String) args.get("sourcePath");
+//                            String destinationPath = (String) args.get("destinationPath");
+//
+//                            // Make source path absolute from original test directory
+//                            Path originalTestDir = testCase.getFile().getParentFile().toPath();
+//                            Path absoluteSourcePath = originalTestDir.resolve(sourcePath);
+//                            args.put("sourcePath", absoluteSourcePath.toString());
+//
+//                            // Keep destination path relative to current workspace
+//                            // (current directory is already set to workspace)
+//                        }
                         
                         // Execute the tool
                         Tool<?> tool = toolRegistry.get(toolName);
                         ToolResponse<?> response = tool.execute(args);
                         
                         if (response.isSuccess()) {
-                            addToHistory("Successfully executed " + toolName + ": " + response.getMessage());
+                            addToHistory("SETUP: Copied " + toolName.replace("_", " "));
                         } else {
-                            addToHistory("Failed to execute " + toolName + ": " + response.getMessage());
+                            addToHistory("SETUP: Failed to copy " + toolName + " - " + response.getMessage());
                         }
                         
                     } catch (Exception e) {
-                        addToHistory("Error executing function call " + toolName + ": " + e.getMessage());
+                        addToHistory("SETUP: Error with " + toolName + " - " + e.getMessage());
                     }
                 }
             } else {
-                addToHistory("No additional files needed for workspace preparation");
+                addToHistory("SETUP: No additional files needed");
             }
             
         } catch (Exception e) {
-            addToHistory("Error during workspace preparation: " + e.getMessage());
+            addToHistory("SETUP: Error - " + e.getMessage());
             LoggerUtil.logExec(Level.WARNING, "Workspace preparation failed: " + e.getMessage());
         }
     }
@@ -237,17 +235,31 @@ public class TestCaseAgent extends Agent {
     private String think(String currentCode, String originalFailureOutput) {
         try {
             String prompt = PromptGen.generateTestCaseMinimizationReducePrompt(originalFailureOutput, currentCode);
-            addToHistory("Thinking with prompt:\n" + prompt.substring(0, Math.min(prompt.length(), 300)) + "...");
+            addToHistory("THINK: Analyzing current code and proposing reduction...");
 
             String response = this.LLM.messageCompletion(prompt, 0.5, true);
-            String extractedJson = CodeExtractor.extractCode(response).stream().findFirst().orElse(response);
+            
+            // Filter out thinking tags
+            String filteredResponse = filterThinkingTags(response);
+            
+            String extractedJson = CodeExtractor.extractCode(filteredResponse).stream().findFirst().orElse(filteredResponse);
 
-            addToHistory("LLM proposed action: " + extractedJson);
+            addToHistory("THINK: Proposed action - " + (extractedJson.length() > 100 ? extractedJson.substring(0, 100) + "..." : extractedJson));
             return extractedJson;
         } catch (Exception e) {
-            addToHistory("Error during THINK step: " + e.getMessage());
+            addToHistory("THINK: Error - " + e.getMessage());
             return null;
         }
+    }
+    
+    /**
+     * Filter out thinking tags from LLM response
+     */
+    private String filterThinkingTags(String response) {
+        if (response == null || response.isEmpty()) {
+            return response;
+        }
+        return response.replaceAll("<thinking>[\\s\\S]*?</thinking>", "").trim();
     }
 
     /**
@@ -262,13 +274,14 @@ public class TestCaseAgent extends Agent {
             if (toolName == null) {
                 return ToolResponse.failure("No tool_name specified in the action.");
             }
-            addToHistory(String.format("Executing tool: %s with params: %s", toolName, parameters));
+            
+            addToHistory("ACT: Executing " + toolName + " tool");
 
             Tool<?> tool = toolRegistry.get(toolName);
             return tool.execute(parameters);
 
         } catch (Exception e) {
-            addToHistory("Error during ACT step: " + e.getMessage());
+            addToHistory("ACT: Parse error - " + e.getMessage());
             return ToolResponse.failure("Failed to parse or execute action: " + e.getMessage());
         }
     }
@@ -278,12 +291,12 @@ public class TestCaseAgent extends Agent {
      */
     private String observe(ToolResponse<?> toolResponse, String previousCode, String originalFailure, Path testFilePath) {
         if (!toolResponse.isSuccess()) {
-            addToHistory("Observation: Tool execution failed. Reverting to previous code. Reason: " + toolResponse.getMessage());
+            addToHistory("OBSERVE: Tool failed, reverting - " + toolResponse.getMessage());
             // Revert the file content if the tool failed (e.g., write_file failed)
             try {
                 Files.writeString(testFilePath, previousCode);
             } catch (IOException e) {
-                addToHistory("FATAL: Failed to revert file content! " + e.getMessage());
+                addToHistory("OBSERVE: FATAL - Cannot revert file! " + e.getMessage());
             }
             return previousCode;
         }
@@ -296,30 +309,31 @@ public class TestCaseAgent extends Agent {
                 // Good reduction: The test still fails with a similar error.
                 try {
                     String newCode = Files.readString(testFilePath);
-                    addToHistory("Observation: Reduction successful. Test still fails as expected. Committing changes.");
+                    addToHistory("OBSERVE: Success - Test still fails correctly, reduction accepted");
                     return newCode; // The new code is now the current code
                 } catch (IOException e) {
-                    addToHistory("Error reading new code after successful reduction: " + e.getMessage() + ". Reverting.");
+                    addToHistory("OBSERVE: Error reading new code, reverting - " + e.getMessage());
                     return previousCode;
                 }
             } else {
                 // Bad reduction: The test either passed or the failure changed too much.
-                addToHistory("Observation: Reduction failed. Test either passed or the failure signature changed. Reverting code.");
+                String status = testResult.isFail() ? "failure changed" : "test passed";
+                addToHistory("OBSERVE: Failed - " + status + ", reverting reduction");
                 try {
                     Files.writeString(testFilePath, previousCode);
                 } catch (IOException e) {
-                    addToHistory("FATAL: Failed to revert file content! " + e.getMessage());
+                    addToHistory("OBSERVE: FATAL - Cannot revert file! " + e.getMessage());
                 }
                 return previousCode;
             }
         } else {
             // This was another tool call, like write_file. The result is just a confirmation message.
-            addToHistory("Observation: Tool '" + toolResponse.getMessage() + "' executed successfully.");
+            addToHistory("OBSERVE: Tool completed successfully");
             // The state of the code is now whatever is on disk, which we assume is correct for the next step.
             try {
                 return Files.readString(testFilePath);
             } catch (IOException e) {
-                addToHistory("Error reading file after tool execution: " + e.getMessage() + ". Reverting.");
+                addToHistory("OBSERVE: Error reading file, reverting - " + e.getMessage());
                 return previousCode;
             }
         }

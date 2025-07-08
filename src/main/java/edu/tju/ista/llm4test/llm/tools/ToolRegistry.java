@@ -2,7 +2,9 @@ package edu.tju.ista.llm4test.llm.tools;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+
 
 /**
  * A registry for tools that can be used by an agent.
@@ -48,5 +50,23 @@ public class ToolRegistry {
      */
     public Set<String> getToolNames() {
         return toolMap.keySet();
+    }
+
+    public ToolResponse<?> act(ToolCall toolCall) {
+        Objects.requireNonNull(toolCall, "ToolCall cannot be null");
+        Tool<?> tool = get(toolCall.toolName);
+        return tool.execute(toolCall.arguments);
+    }
+
+    public boolean verifyArgs(Tool<?> tool, Map<String, Object> args) {
+        if (args.size() != tool.getParameters().size()) {
+            return false;
+        }
+        for (String param : tool.getParameters()) {
+            if (!args.containsKey(param)) {
+                return false;
+            }
+        }
+        return true;
     }
 } 

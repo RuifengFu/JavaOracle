@@ -1,5 +1,6 @@
 package edu.tju.ista.llm4test.llm;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
@@ -11,8 +12,9 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 
 import edu.tju.ista.llm4test.config.GlobalConfig;
-import edu.tju.ista.llm4test.llm.functionCalling.FuncTool;
-import edu.tju.ista.llm4test.llm.functionCalling.FuncToolFactory;
+import edu.tju.ista.llm4test.llm.tools.Tool;
+import edu.tju.ista.llm4test.llm.tools.ToolFactory;
+import edu.tju.ista.llm4test.llm.tools.ToolCall;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
 
 import java.util.*;
@@ -234,13 +236,20 @@ public class OpenAI {
         return messageCompletion(prompt, temperature, false);
     }
 
+
+    /*     * 发送消息并获取回复
+     * @param prompt 用户输入的提示
+     * @param temperature 控制生成文本的随机性，范围0-1
+     * @param jsonOutput 是否需要返回JSON格式的输出
+     * @return 返回生成的文本内容
+     */
     public String messageCompletion(String prompt, double temperature, boolean jsonOutput) {
         try {
+            if (jsonOutput && !prompt.contains("json")) {
+                prompt += "\nPlease return the response in json format.该";
+            }
             Map<String, Object> requestBody = getBaseRequestMap(prompt);
             if (jsonOutput) {
-                if (!prompt.toLowerCase().contains("json")) {
-                    prompt = prompt + "\nPlease return the response in JSON format.";
-                }
                 requestBody.put("response_format", Map.of("type", "json_object"));
             }
             // update temperature
@@ -277,10 +286,7 @@ public class OpenAI {
                 if (message != null) {
                     String content = (String) message.get("content"); // Extract "content"
                     String thinking = (String) message.get("reasoning_content");
-                    if (thinking != null && !thinking.isEmpty()) {
-                        content = "<thinking>\n" + thinking + "\n</thinking>\n\n" + content;
-                    }
-                    LoggerUtil.logOpenAI(Level.FINE, "OpenAI response: \n" + content);
+                    LoggerUtil.logOpenAI(Level.FINE, "OpenAI response: \n" + "<thinking>\n" + thinking + "\n</thinking>\n\n" + content);
                     return content; // Return the extracted content
                 }
             }
@@ -293,11 +299,11 @@ public class OpenAI {
     }
 
 
-    public Map<String, String> funcCall(String prompt, List<FuncTool> tools) {
+    public List<ToolCall> funcCall(String prompt, List<Tool<?>> tools) {
         try {
             // Create request body
             Map<String, Object> requestBody = getBaseRequestMap(prompt);
-            requestBody.put("tools", FuncToolFactory.toToolsArray(tools));
+            requestBody.put("tools", ToolFactory.toToolsArray(tools));
 //            requestBody.put("temperature", 1.0); // Set the randomness of the output
             requestBody.put("stream", false);
             requestBody.put("max_tokens", 4096);
@@ -313,15 +319,25 @@ public class OpenAI {
                 Map<String, Object> message = (Map<String, Object>) choice.get("message");
                 if (message != null) {
                     String content = (String) message.get("content"); // Extract "content"
+                    if (message.get("reasoning_content") != null) {
+                        String reasoningContent = (String) message.get("reasoning_content");
+                        content = "<thinking>\n" + reasoningContent + "\n</thinking>\n\n" + content;
+                    }
                     ArrayList<HashMap<String, Object>> toolCalls = (ArrayList<HashMap<String, Object>>) message.getOrDefault("tool_calls", new ArrayList<>());
-                    Map<String, String> callMap = toolCalls.stream().map(call -> (HashMap<String, Object>)call.get("function"))
-                            .collect(Collectors.toMap(
-                                    func -> (String)func.get("name"),
-                                    func -> (String)func.get("arguments")
-                            ));
+                    ArrayList<ToolCall> callList = toolCalls.stream().map(call -> (HashMap<String, Object>)call.get("function"))
+                            .map(func -> {
+                                try {
+                                    return new ToolCall((String)func.get("name"), (String)func.get("arguments"));
+                                } catch (JsonProcessingException e) {
+                                    LoggerUtil.logExec(Level.WARNING, "Failed to parse function call arguments: " + e.getMessage());
+                                    return null;
+                                }
+                            }).filter(Objects::nonNull)
+                            .collect(Collectors.toCollection(ArrayList::new));
 
-                    LoggerUtil.logOpenAI(Level.INFO, "OpenAI response: \n" + "content :\n" + content + "\nfunction calling: \n" + callMap);
-                    return callMap; // Return the extracted content
+
+                    LoggerUtil.logOpenAI(Level.INFO, "OpenAI response: \n" + "content :\n" + content + "\nfunction calling: \n" + callList);
+                    return callList; // Return the extracted content
                 }
             }
 
@@ -329,7 +345,7 @@ public class OpenAI {
             e.printStackTrace(System.out);
             LoggerUtil.logExec(Level.SEVERE, "OpenAI function calling failed: " + e.getMessage());
         }
-        return new HashMap<>();
+        return new ArrayList<>();
     }
 
     private Map<String, Object> getResponseBody(Map<String, Object> requestBody) throws IOException, InterruptedException {
@@ -406,6 +422,14 @@ public class OpenAI {
             future.join();
             return null;
         });
+    }
+
+    public static String filterThinkingTag(String content) {
+        if (content == null || content.isEmpty()) {
+            return content;
+        }
+        // Remove <thinking> tags and their content
+        return content.replaceAll("<thinking>[\\s\\S]*?</thinking>", "").trim();
     }
 
 }

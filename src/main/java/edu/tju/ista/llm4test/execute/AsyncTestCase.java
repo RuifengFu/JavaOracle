@@ -5,6 +5,9 @@ import edu.tju.ista.llm4test.concurrent.AsyncLLMClient;
 import edu.tju.ista.llm4test.concurrent.ConcurrentExecutionManager;
 import edu.tju.ista.llm4test.llm.functionCalling.FuncTool;
 import edu.tju.ista.llm4test.llm.functionCalling.FuncToolFactory;
+import edu.tju.ista.llm4test.llm.tools.RootCauseOutputTool;
+import edu.tju.ista.llm4test.llm.tools.Tool;
+import edu.tju.ista.llm4test.llm.tools.ToolCall;
 import edu.tju.ista.llm4test.prompt.PromptGen;
 import edu.tju.ista.llm4test.utils.CodeExtractor;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
@@ -14,6 +17,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.logging.Level;
@@ -133,22 +137,22 @@ public class AsyncTestCase {
                 dataModel.put("apiDocs", apiDoc);
 
                 String prompt = PromptGen.generatePrompt("RootCause", dataModel);
-                ArrayList<FuncTool> tools = new ArrayList<>();
-                tools.add(FuncToolFactory.createRootCauseOutputFuncTool());
+                ArrayList<Tool<?>> tools = new ArrayList<>();
+                tools.add(new RootCauseOutputTool());
                 
                 return llmClient.funcCallAsync(prompt, tools, AsyncLLMClient.ClientType.DOUBAO);
             } catch (Exception e) {
                 LoggerUtil.logExec(Level.WARNING, "构建验证请求失败: " + file + "\n" + e.getMessage());
-                return CompletableFuture.<Map<String, String>>completedFuture(new HashMap<>());
+                return CompletableFuture.<List<ToolCall>>completedFuture(new ArrayList<>());
             }
-        }, concurrentManager.submitLLMTask(() -> null).join() != null ? 
-            Runnable::run : Runnable::run) // 使用LLM线程池
+        }, Runnable::run) // 使用LLM线程池
         .thenCompose(futureResult -> futureResult)
-        .thenAccept(arguments -> {
+        .thenAccept(list -> {
             try {
-                if (arguments.containsKey("root_cause_analysis")) {
-                    var map = new ObjectMapper().readValue(arguments.get("root_cause_analysis"), Map.class);
-                    var reportBug = ((boolean) map.get("report_bug")) == true;
+
+                if (!list.isEmpty() && list.get(0).toolName.equals("root_cause_analysis")) {
+                    var map = list.get(0).arguments;
+                    var reportBug = ((boolean) map.get("report_bug"));
                     if (reportBug) {
                         this.result.setKind(TestResultKind.VERIFIED_BUG);
                     } else {

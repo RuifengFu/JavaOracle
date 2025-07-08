@@ -1,7 +1,8 @@
 package edu.tju.ista.llm4test.concurrent;
 
 import edu.tju.ista.llm4test.llm.OpenAI;
-import edu.tju.ista.llm4test.llm.functionCalling.FuncTool;
+import edu.tju.ista.llm4test.llm.tools.Tool;
+import edu.tju.ista.llm4test.llm.tools.ToolCall;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
 
 import java.util.Map;
@@ -29,7 +30,7 @@ public class AsyncLLMClient {
     
     // 请求缓存（去重）
     private final ConcurrentHashMap<String, CompletableFuture<String>> requestCache;
-    private final ConcurrentHashMap<String, CompletableFuture<Map<String, String>>> funcCallCache;
+    private final ConcurrentHashMap<String, CompletableFuture<List<ToolCall>>> funcCallCache;
     
     // 统计信息
     private final AtomicInteger totalRequests = new AtomicInteger(0);
@@ -152,26 +153,26 @@ public class AsyncLLMClient {
     /**
      * 异步函数调用
      */
-    public CompletableFuture<Map<String, String>> funcCallAsync(String prompt, List<FuncTool> tools) {
+    public CompletableFuture<List<ToolCall>> funcCallAsync(String prompt, List<Tool<?>> tools) {
         return funcCallAsync(prompt, tools, ClientType.DOUBAO);
     }
     
     /**
      * 异步函数调用（指定客户端类型）
      */
-    public CompletableFuture<Map<String, String>> funcCallAsync(String prompt, List<FuncTool> tools, ClientType clientType) {
+    public CompletableFuture<List<ToolCall>> funcCallAsync(String prompt, List<Tool<?>> tools, ClientType clientType) {
         totalRequests.incrementAndGet();
         
         // 检查缓存
         String cacheKey = generateCacheKey(prompt + tools.toString(), "FUNC_" + clientType.name());
-        CompletableFuture<Map<String, String>> cachedResult = funcCallCache.get(cacheKey);
+        var cachedResult = funcCallCache.get(cacheKey);
         if (cachedResult != null) {
             cacheHits.incrementAndGet();
             return cachedResult;
         }
         
         // 创建新的异步请求
-        CompletableFuture<Map<String, String>> future = concurrentManager.submitLLMTask(() -> {
+        var future = concurrentManager.submitLLMTask(() -> {
             return executeWithRetry(() -> callFuncCall(prompt, tools, clientType), 3);
         });
         
@@ -216,7 +217,7 @@ public class AsyncLLMClient {
     /**
      * 从连接池获取客户端并执行函数调用
      */
-    private Map<String, String> callFuncCall(String prompt, List<FuncTool> tools, ClientType clientType) throws Exception {
+    private List<ToolCall> callFuncCall(String prompt, List<Tool<?>> tools, ClientType clientType) throws Exception {
         BlockingQueue<OpenAI> pool = getClientPool(clientType);
         OpenAI client = pool.take(); // 阻塞获取连接
         

@@ -10,6 +10,8 @@ ${test_failure_output}
 ${current_code}
 ```
 
+${testcase_path}
+
 **Task:**
 Analyze the code and propose a single, small simplification. This could be:
 - Removing an unnecessary line or block of code.

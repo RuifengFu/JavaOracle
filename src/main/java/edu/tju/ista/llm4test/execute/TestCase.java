@@ -5,6 +5,8 @@ import edu.tju.ista.llm4test.concurrent.ConcurrentExecutionManager;
 import edu.tju.ista.llm4test.llm.OpenAI;
 import edu.tju.ista.llm4test.llm.functionCalling.FuncTool;
 import edu.tju.ista.llm4test.llm.functionCalling.FuncToolFactory;
+import edu.tju.ista.llm4test.llm.tools.RootCauseOutputTool;
+import edu.tju.ista.llm4test.llm.tools.Tool;
 import edu.tju.ista.llm4test.prompt.PromptGen;
 import edu.tju.ista.llm4test.utils.CodeExtractor;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
@@ -273,17 +275,23 @@ public class TestCase {
             dataModel.put("apiDocs", apiDoc);
 
             String prompt = PromptGen.generatePrompt("RootCause", dataModel);
-            ArrayList<FuncTool> tools = new ArrayList<>();
-            tools.add(FuncToolFactory.createRootCauseOutputFuncTool());
-            var arguments = OpenAI.Doubao.funcCall(prompt, tools).get("root_cause_analysis");
-            var map = new ObjectMapper().readValue(arguments, Map.class);
-            var reportBug = ((boolean)map.get("report_bug")) == true;
+            ArrayList<Tool<?>> tools = new ArrayList<>();
+            tools.add(new RootCauseOutputTool());
+            var callList = OpenAI.Doubao.funcCall(prompt, tools);
+            if (callList.isEmpty()) {
+                LoggerUtil.logExec(Level.WARNING, "No function call found in the response");
+                this.result.setKind(TestResultKind.MAYBE_TEST_FAIL);
+                return;
+            }
+            var rootCauseCall = callList.get(0);
+            var arguments = rootCauseCall.arguments;
+            var reportBug = ((boolean) arguments.get("report_bug"));
             if (reportBug) {
                 this.result.setKind(TestResultKind.VERIFIED_BUG);
             } else {
                 this.result.setKind(TestResultKind.MAYBE_TEST_FAIL);
             }
-            verifyMessage = map.toString();
+            verifyMessage = arguments.toString();
         } catch(Exception e) {
             LoggerUtil.logExec(Level.WARNING, "Verifying test case failed: " + file + "\n" + e.getMessage());
             this.result.setKind(TestResultKind.MAYBE_TEST_FAIL);

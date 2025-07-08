@@ -10,6 +10,7 @@ import edu.tju.ista.llm4test.javaparser.JavaParser;
 import edu.tju.ista.llm4test.llm.OpenAI;
 import edu.tju.ista.llm4test.llm.functionCalling.FuncTool;
 import edu.tju.ista.llm4test.llm.functionCalling.FuncToolFactory;
+import edu.tju.ista.llm4test.llm.tools.RootCauseOutputTool;
 import edu.tju.ista.llm4test.prompt.PromptGen;
 import edu.tju.ista.llm4test.utils.CodeExtractor;
 import edu.tju.ista.llm4test.utils.HtmlParser;
@@ -59,7 +60,7 @@ public class methodTest {
 
         method_info.append("Focal Class: ").append(focalClass);
 //        method_info.append(focalClass.getSource().getCodeBlock());
-        for (JavaMethod method2: methods.stream().limit(10).collect(Collectors.toList())) {
+        for (JavaMethod method2: methods.stream().limit(10).toList()) {
             method_info.append("Focal Method: ").append(method2.getDeclarationSignature(false)).append("\n");
             method_info.append("Source Code: ").append(method2.getSourceCode()).append("\n");
             method_info.append("Comments: ").append(method2.getComment()).append("\n");
@@ -109,8 +110,6 @@ public class methodTest {
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
-
-
         });
     }
 
@@ -137,10 +136,8 @@ public class methodTest {
         dataModel.put("testOutput", result.toString());
 
         String prompt = PromptGen.generatePrompt("RootCause", dataModel);
-        ArrayList<FuncTool> tools = new ArrayList<>();
-        tools.add(FuncToolFactory.createRootCauseOutputFuncTool());
-        var arguments = OpenAI.Doubao.funcCall(prompt, tools).get("root_cause_analysis");
-        var map = new ObjectMapper().readValue(arguments, Map.class);
+        var call = OpenAI.Doubao.funcCall(prompt, List.of(new RootCauseOutputTool())).get(0);
+        var map = call.arguments;
         System.out.println(map);
         System.out.println(map.get("report_bug"));
         return ;
