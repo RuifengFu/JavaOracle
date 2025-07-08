@@ -37,8 +37,7 @@ public class ConcurrentExecutionManager {
     
     private ConcurrentExecutionManager() {
         int cpuCores = Runtime.getRuntime().availableProcessors();
-//        this.virtualThreadsSupported = isVirtualThreadsSupported();
-        this.virtualThreadsSupported = false;
+        this.virtualThreadsSupported = isVirtualThreadsSupported();
         
         // LLM线程池：优先使用虚拟线程，轻量化处理IO密集型任务
         this.llmExecutor = createLLMExecutor();
