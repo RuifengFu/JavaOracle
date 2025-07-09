@@ -8,8 +8,6 @@ import edu.tju.ista.llm4test.execute.TestResult;
 import edu.tju.ista.llm4test.javaparser.APISignatureExtractor;
 import edu.tju.ista.llm4test.javaparser.JavaParser;
 import edu.tju.ista.llm4test.llm.OpenAI;
-import edu.tju.ista.llm4test.llm.functionCalling.FuncTool;
-import edu.tju.ista.llm4test.llm.functionCalling.FuncToolFactory;
 import edu.tju.ista.llm4test.llm.tools.RootCauseOutputTool;
 import edu.tju.ista.llm4test.prompt.PromptGen;
 import edu.tju.ista.llm4test.utils.CodeExtractor;

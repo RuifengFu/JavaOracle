@@ -3,8 +3,6 @@ package edu.tju.ista.llm4test.execute;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.tju.ista.llm4test.concurrent.AsyncLLMClient;
 import edu.tju.ista.llm4test.concurrent.ConcurrentExecutionManager;
-import edu.tju.ista.llm4test.llm.functionCalling.FuncTool;
-import edu.tju.ista.llm4test.llm.functionCalling.FuncToolFactory;
 import edu.tju.ista.llm4test.llm.tools.RootCauseOutputTool;
 import edu.tju.ista.llm4test.llm.tools.Tool;
 import edu.tju.ista.llm4test.llm.tools.ToolCall;

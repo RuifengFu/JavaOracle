@@ -1,6 +1,6 @@
 package edu.tju.ista.llm4test.llm.tools;
 
-import edu.tju.ista.llm4test.llm.functionCalling.FuncTool;
+
 import edu.tju.ista.llm4test.utils.LoggerUtil;
 
 import java.io.IOException;

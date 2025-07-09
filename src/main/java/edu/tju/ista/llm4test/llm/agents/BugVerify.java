@@ -283,24 +283,23 @@ public class BugVerify extends Agent {
     private void collectRelevantInformation(String initialInsight) {
         // 暂时跳过收集资料的过程
         LoggerUtil.logExec(Level.INFO, "暂时跳过信息收集阶段");
-        return;
+
         
-        /*
+
         try {
             // 1. 收集JavaDoc信息（基于初始分析提取的相关类）
             collectJavaDocInformation(initialInsight);
-            
+
             // 2. 收集源码信息（基于初始分析提取的相关类）
             collectSourceCodeInformation(initialInsight);
-            
+
             // 3. 使用智能搜索工具收集Web信息
-            // TODO : 现在跑不起来
-            //collectWebInformation(initialInsight);
-            
+//            collectWebInformation(initialInsight);
+
         } catch (Exception e) {
             LoggerUtil.logExec(Level.WARNING, "信息收集过程中出现错误: " + e.getMessage());
         }
-        */
+
     }
     
     /**
