@@ -133,7 +133,7 @@ public class AgentFlowExecutor {
             // Store the whole response or just the result
             context.put(action.getOutputKey(), response.getResult());
             context.put(action.getOutputKey() + "_success", response.isSuccess());
-            context.put(action.getOutputKey() + "_message", response.getMessage());
+            context.put(action.getOutputKey() + "_message", response.getFailMessage());
         }
     }
 

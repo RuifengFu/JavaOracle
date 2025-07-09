@@ -3,7 +3,6 @@ package edu.tju.ista.llm4test.llm;
 import edu.tju.ista.llm4test.execute.TestResult;
 import org.junit.Before;
 import org.junit.Test;
-import static org.junit.Assert.*;
 
 import edu.tju.ista.llm4test.llm.tools.*;
 
@@ -61,7 +60,7 @@ public class ToolsTest {
             System.out.println("测试通过: " + result.isSuccess());
             System.out.println("测试输出:\n" + result.getOutput());
         } else {
-            System.out.println("错误信息: " + response.getMessage());
+            System.out.println("错误信息: " + response.getFailMessage());
         }
     }
     
@@ -91,7 +90,7 @@ public class ToolsTest {
             System.out.println("测试通过: " + result.isSuccess() + " (预期为false)");
             System.out.println("测试输出摘要:\n" + truncateOutput(result.getOutput(), 200));
         } else {
-            System.out.println("错误信息: " + response.getMessage());
+            System.out.println("错误信息: " + response.getFailMessage());
         }
     }
     
@@ -112,7 +111,7 @@ public class ToolsTest {
         if (response.isSuccess()) {
             System.out.println("搜索结果摘要:\n" + truncateOutput(response.getResult(), 300));
         } else {
-            System.out.println("错误信息: " + response.getMessage());
+            System.out.println("错误信息: " + response.getFailMessage());
         }
     }
     
@@ -131,7 +130,7 @@ public class ToolsTest {
         if (response.isSuccess()) {
             System.out.println("搜索结果摘要:\n" + truncateOutput(response.getResult(), 300));
         } else {
-            System.out.println("错误信息: " + response.getMessage());
+            System.out.println("错误信息: " + response.getFailMessage());
         }
     }
     
@@ -152,7 +151,7 @@ public class ToolsTest {
         if (response.isSuccess()) {
             System.out.println("搜索结果摘要:\n" + truncateOutput(response.getResult(), 300));
         } else {
-            System.out.println("错误信息: " + response.getMessage());
+            System.out.println("错误信息: " + response.getFailMessage());
         }
     }
     
@@ -171,7 +170,7 @@ public class ToolsTest {
         if (response.isSuccess()) {
             System.out.println("搜索结果摘要:\n" + response.getResult());
         } else {
-            System.out.println("错误信息: " + response.getMessage());
+            System.out.println("错误信息: " + response.getFailMessage());
         }
     }
     

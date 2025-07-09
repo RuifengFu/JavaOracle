@@ -237,7 +237,7 @@ public class TestCaseAgent extends Agent {
                         ToolResponse<?> response = tool.execute(args);
                         
                         if (!response.isSuccess()) {
-                            addToHistory("SETUP: Failed to execute " + toolName + " - " + response.getMessage());
+                            addToHistory("SETUP: Failed to execute " + toolName + " - " + response.getFailMessage());
                         }
                         
                     } catch (Exception e) {

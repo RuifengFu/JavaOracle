@@ -3,7 +3,6 @@ package edu.tju.ista.llm4test.llm.agents;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.tju.ista.llm4test.concurrent.ConcurrentExecutionManager;
-import edu.tju.ista.llm4test.config.GlobalConfig;
 import edu.tju.ista.llm4test.execute.TestCase;
 import edu.tju.ista.llm4test.llm.OpenAI;
 import edu.tju.ista.llm4test.llm.tools.*;
@@ -37,6 +36,9 @@ public class BugVerify extends Agent {
     private final BingSearch searchTool;
     private final JavaExecuteTool executeTool;
     private final JtregExecuteTool jtregTool;
+    
+    // 新增的信息收集Agent
+    private final InformationCollectionAgent infoCollectionAgent;
     
     // 新增的智能工具
     private final ContentProcessor contentProcessor;
@@ -98,6 +100,7 @@ public class BugVerify extends Agent {
         this.jtregTool = new JtregExecuteTool();
         this.contentProcessor = new ContentProcessor(bugReportPath + "/content_cache");
         this.minimizationAgent = new TestCaseAgent();
+        this.infoCollectionAgent = new InformationCollectionAgent(sourcePath, javadocPath);
     }
     
     /**
@@ -278,95 +281,94 @@ public class BugVerify extends Agent {
     }
     
     /**
-     * 信息收集阶段 - 使用智能搜索工具根据初始分析收集相关信息
+     * 信息收集阶段 - 使用信息收集Agent收集相关信息
      */
     private void collectRelevantInformation(String initialInsight) {
-        // 暂时跳过收集资料的过程
-        LoggerUtil.logExec(Level.INFO, "暂时跳过信息收集阶段");
-
+        LoggerUtil.logExec(Level.INFO, "开始信息收集阶段");
         
-
         try {
-            // 1. 收集JavaDoc信息（基于初始分析提取的相关类）
-            collectJavaDocInformation(initialInsight);
-
-            // 2. 收集源码信息（基于初始分析提取的相关类）
-            collectSourceCodeInformation(initialInsight);
-
-            // 3. 使用智能搜索工具收集Web信息
-//            collectWebInformation(initialInsight);
-
+            // 获取测试用例的API信息和源码
+            String apiInfoWithSource = "";
+            if (testCase != null) {
+                apiInfoWithSource = testCase.getApiInfoWithSource();
+                LoggerUtil.logExec(Level.INFO, "获取到API信息和源码，大小: " + apiInfoWithSource.length() + " 字符");
+            }
+            
+            // 使用信息收集Agent收集相关信息
+            List<InformationCollectionAgent.CollectedInfo> collectedInfos = infoCollectionAgent.collectInformation(
+                initialInsight, 
+                testCode, 
+                testOutput, 
+                apiInfoWithSource
+            );
+            
+            LoggerUtil.logExec(Level.INFO, String.format("信息收集完成，共收集到 %d 条信息", collectedInfos.size()));
+            
+            // 将收集到的信息转换为原有格式并存储
+            collectedInfo.clear();
+            infoSourceMap.clear();
+            infoCounter = 0;
+            
+            for (InformationCollectionAgent.CollectedInfo info : collectedInfos) {
+                String infoId = "INFO_" + (++infoCounter);
+                infoSourceMap.put(infoId, info.source);
+                
+                // 格式化信息内容
+                StringBuilder formattedContent = new StringBuilder();
+                formattedContent.append("[").append(infoId).append(" 来源: ").append(info.source).append("]\n");
+                formattedContent.append("相关性得分: ").append(String.format("%.2f", info.relevanceScore)).append("\n");
+                formattedContent.append("信息类型: ").append(info.type).append("\n");
+                formattedContent.append("内容大小: ").append(info.content.length()).append(" 字符\n\n");
+                formattedContent.append(info.content);
+                
+                collectedInfo.put(info.id, formattedContent.toString());
+                
+                LoggerUtil.logExec(Level.INFO, String.format("收集信息: %s (相关性: %.2f, 大小: %d)", 
+                    info.source, info.relevanceScore, info.content.length()));
+            }
+            
+            // 添加API信息和源码到收集的信息中（如果有的话）
+            if (apiInfoWithSource != null && !apiInfoWithSource.isEmpty()) {
+                String infoId = "INFO_" + (++infoCounter);
+                infoSourceMap.put(infoId, "测试用例API信息和源码");
+                
+                StringBuilder formattedApiInfo = new StringBuilder();
+                formattedApiInfo.append("[").append(infoId).append(" 来源: 测试用例API信息和源码]\n");
+                formattedApiInfo.append("信息类型: API_INFO_WITH_SOURCE\n");
+                formattedApiInfo.append("内容大小: ").append(apiInfoWithSource.length()).append(" 字符\n\n");
+                
+                // 截断过长的API信息
+                if (apiInfoWithSource.length() > 8000) {
+                    formattedApiInfo.append(apiInfoWithSource.substring(0, 8000)).append("...(API信息已截断)");
+                } else {
+                    formattedApiInfo.append(apiInfoWithSource);
+                }
+                
+                collectedInfo.put("api_info_with_source", formattedApiInfo.toString());
+                
+                LoggerUtil.logExec(Level.INFO, String.format("添加API信息: 大小 %d 字符", apiInfoWithSource.length()));
+            }
+            
+            // 计算总的信息大小
+            int totalSize = collectedInfo.values().stream()
+                .mapToInt(content -> content instanceof String ? ((String) content).length() : 0)
+                .sum();
+            
+            LoggerUtil.logExec(Level.INFO, String.format("信息收集完成，总计 %d 条信息，总大小: %d 字符", 
+                collectedInfo.size(), totalSize));
+            
+            // 如果总大小超过限制，记录警告
+            if (totalSize > 32000) {
+                LoggerUtil.logExec(Level.WARNING, String.format("收集的信息总大小 (%d) 超过建议限制 (32000)", totalSize));
+            }
+            
         } catch (Exception e) {
             LoggerUtil.logExec(Level.WARNING, "信息收集过程中出现错误: " + e.getMessage());
-        }
-
-    }
-    
-    /**
-     * 收集JavaDoc信息
-     */
-    private void collectJavaDocInformation(String initialInsight) {
-        List<String> relevantClasses = extractJsonArrayFromField(initialInsight, "relevantClasses");
-        
-        // After generating the report, if the test case is a verified failure, try to minimize it.
-
-        for (String className : relevantClasses.subList(0, 1)) { // 只收集一个类
-            ToolResponse<String> docResponse = javadocTool.execute(className);
-            if (docResponse.isSuccess()) {
-                String infoId = "INFO_" + (++infoCounter);
-                String sourcePath = "JavaDoc: " + className;
-                infoSourceMap.put(infoId, sourcePath);
-                
-                // 使用内容处理器处理JavaDoc内容
-                List<ContentProcessor.ProcessedContentChunk> chunks = 
-                    contentProcessor.processContent(sourcePath, docResponse.getResult(), initialInsight);
-                
-                if (!chunks.isEmpty()) {
-                    StringBuilder processedContent = new StringBuilder();
-                    processedContent.append("[").append(infoId).append(" 来源: ").append(sourcePath).append("]\n\n");
-                    
-                    for (ContentProcessor.ProcessedContentChunk chunk : chunks) {
-                        processedContent.append(chunk.getFormattedContent()).append("\n");
-                    }
-                    
-                    collectedInfo.put("javadoc_" + className, processedContent.toString());
-                    LoggerUtil.logExec(Level.INFO, "收集JavaDoc信息: " + className + " (处理后片段: " + chunks.size() + ")");
-                }
-            }
+            e.printStackTrace();
         }
     }
     
-    /**
-     * 收集源码信息
-     */
-    private void collectSourceCodeInformation(String initialInsight) {
-        List<String> relevantClasses = extractJsonArrayFromField(initialInsight, "relevantClasses");
-        
-        for (String className : relevantClasses.subList(0, 1)) { // 只收集一个类
-            ToolResponse<String> sourceResponse = sourceTool.execute(className);
-            if (sourceResponse.isSuccess()) {
-                String infoId = "INFO_" + (++infoCounter);
-                String sourcePath = "源码: " + className;
-                infoSourceMap.put(infoId, sourcePath);
-                
-                // 使用内容处理器处理源码内容
-                List<ContentProcessor.ProcessedContentChunk> chunks = 
-                    contentProcessor.processContent(sourcePath, sourceResponse.getResult(), initialInsight);
-                
-                if (!chunks.isEmpty()) {
-                    StringBuilder processedContent = new StringBuilder();
-                    processedContent.append("[").append(infoId).append(" 来源: ").append(sourcePath).append("]\n\n");
-                    
-                    for (ContentProcessor.ProcessedContentChunk chunk : chunks) {
-                        processedContent.append(chunk.getFormattedContent()).append("\n");
-                    }
-                    
-                    collectedInfo.put("source_" + className, processedContent.toString());
-                    LoggerUtil.logExec(Level.INFO, "收集源码信息: " + className + " (处理后片段: " + chunks.size() + ")");
-                }
-            }
-        }
-    }
+
     
 
     
@@ -529,7 +531,7 @@ public class BugVerify extends Agent {
                         // 创建一个简单的TestResult对象记录执行结果
                         TestResult testResult = new TestResult();
                         testResult.setSuccess(javaResult.isSuccess());
-                        testResult.setOutput(javaResult.isSuccess() ? javaResult.getResult() : javaResult.getMessage());
+                        testResult.setOutput(javaResult.isSuccess() ? javaResult.getResult() : javaResult.getFailMessage());
                         verificationResults.put(hypothesisId, testResult);
                     }
                 }
@@ -957,6 +959,9 @@ public class BugVerify extends Agent {
     
     public void close(){
         webTool.close();
+        if (infoCollectionAgent != null) {
+            infoCollectionAgent.close();
+        }
     }
 
     /**

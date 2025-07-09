@@ -44,7 +44,7 @@ public class ToolResponse<T> {
         return success;
     }
 
-    public String getMessage() {
+    public String getFailMessage() {
         return message;
     }
 

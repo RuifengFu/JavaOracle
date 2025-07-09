@@ -20,6 +20,13 @@ public class BochaSearch implements Tool<String> {
         SearchConfig config = new SearchConfig().setApiKey(apiKey).setSummary(true);
         this.webSearch = new WebSearch(config);
     }
+    
+    public BochaSearch(SearchConfig config) {
+        if (config == null) {
+            throw new IllegalArgumentException("SearchConfig cannot be null");
+        }
+        this.webSearch = new WebSearch(config);
+    }
 
     @Override
     public String getName() {
@@ -70,6 +77,34 @@ public class BochaSearch implements Tool<String> {
                     .map(SearchResult::toString)
                     .collect(Collectors.joining("\n\n"));
             return ToolResponse.success(formattedResults);
+        } catch (Exception e) {
+            return ToolResponse.failure("Failed to execute search: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * 直接返回SearchResult对象列表，用于更好的集成
+     */
+    public List<SearchResult> searchResults(String query, int maxResults) throws Exception {
+        return webSearch.search(query, maxResults);
+    }
+    
+    /**
+     * 获取SearchResult对象列表的工具响应
+     */
+    public ToolResponse<List<SearchResult>> executeForResults(Map<String, Object> args) {
+        if (args == null || !args.containsKey("query")) {
+            return ToolResponse.failure("参数错误，必须提供 query");
+        }
+        String query = (String) args.get("query");
+        int maxResults = args.containsKey("max_results") ? (int) args.get("max_results") : 10;
+
+        try {
+            List<SearchResult> results = webSearch.search(query, maxResults);
+            if (results == null || results.isEmpty()) {
+                return ToolResponse.success(List.of());
+            }
+            return ToolResponse.success(results);
         } catch (Exception e) {
             return ToolResponse.failure("Failed to execute search: " + e.getMessage());
         }

@@ -18,6 +18,7 @@ import java.util.stream.Stream;
  * JDK源码检索工具 - 增强版
  * 支持分析上下文指导、内容处理、缓存机制
  */
+@Deprecated
 public class SourceCodeSearchTool implements Tool<String> {
     private final String sourceRootPath;
     private final OpenAI llm;
@@ -816,7 +817,7 @@ public class SourceCodeSearchTool implements Tool<String> {
                 System.out.println(result);
             }
         } else {
-            System.out.println(classResponse.getMessage());
+            System.out.println(classResponse.getFailMessage());
         }
         
         // 测试场景2: 带分析上下文的搜索
@@ -835,7 +836,7 @@ public class SourceCodeSearchTool implements Tool<String> {
                 System.out.println(result);
             }
         } else {
-            System.out.println(contextResponse.getMessage());
+            System.out.println(contextResponse.getFailMessage());
         }
     }
 } 

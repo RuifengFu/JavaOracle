@@ -16,7 +16,7 @@ public class SearchResult {
     private final String siteIcon;
     private final String datePublished;
     private final String dateLastCrawled;
-    private String content;
+    private String content = "";
     private int rank;
     
     /**
@@ -96,9 +96,14 @@ public class SearchResult {
     public String getDateLastCrawled() { return dateLastCrawled; }
     public int getRank() { return rank; }
     public double getRelevanceScore() { return relevanceScore; }
+    public String getContent() { return content; }
     
     public void setRelevanceScore(double relevanceScore) {
         this.relevanceScore = relevanceScore;
+    }
+    
+    public void setContent(String content) {
+        this.content = content;
     }
     
     @Override

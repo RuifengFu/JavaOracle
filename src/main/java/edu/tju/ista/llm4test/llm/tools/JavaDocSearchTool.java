@@ -1,5 +1,6 @@
 package edu.tju.ista.llm4test.llm.tools;
 
+import edu.tju.ista.llm4test.config.GlobalConfig;
 import edu.tju.ista.llm4test.llm.OpenAI;
 import edu.tju.ista.llm4test.utils.ApiInfoProcessor;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
@@ -21,6 +22,7 @@ import org.jsoup.select.Elements;
  * JavaDoc文档检索工具 - 增强版
  * 支持分析上下文指导、内容处理、缓存机制
  */
+@Deprecated
 public class JavaDocSearchTool implements Tool<String> {
     private final String javadocBasePath;
     private final OpenAI llm;
@@ -37,7 +39,12 @@ public class JavaDocSearchTool implements Tool<String> {
         this.docProcessor = new ApiInfoProcessor(javadocBasePath);
         this.contentProcessor = new ContentProcessor(javadocBasePath + "/doc_cache");
     }
-    
+
+    public JavaDocSearchTool() {
+        this(GlobalConfig.getBaseDocPath());
+        LoggerUtil.logExec(Level.INFO, "使用默认JavaDoc路径: " + javadocBasePath);
+    }
+
     @Override
     public String getName() {
         return "javadoc_search";
