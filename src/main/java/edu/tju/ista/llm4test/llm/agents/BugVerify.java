@@ -214,7 +214,18 @@ public class BugVerify extends Agent {
         
         // 保存最终报告
         if (testCaseName != null) {
-            saveToFile(Paths.get(bugReportPath, testCaseName, "BugReport.md").toString(), report);
+            String fileName = "TestErrorAnalysis.md";
+            if (report.contains("BUG REPORT")) {
+                fileName = "BugReport.md";
+                if (report.contains("TESTCASE ERROR ANALYSIS")) {
+                    fileName = "BugReportWithError.md";
+                }
+            } else if (fileName.contains("TESTCASE ERROR ANALYSIS")) {
+                fileName = "TestCaseErrorAnalysis.md";
+            } else {
+                fileName = "WrongFormatReport.md";
+            }
+            saveToFile(Paths.get(bugReportPath, testCaseName, fileName).toString(), report);
         }
         
         return report;
