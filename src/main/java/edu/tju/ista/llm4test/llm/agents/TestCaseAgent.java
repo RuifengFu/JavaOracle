@@ -3,6 +3,7 @@ package edu.tju.ista.llm4test.llm.agents;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.tju.ista.llm4test.execute.TestCase;
+import edu.tju.ista.llm4test.execute.TestExecutor;
 import edu.tju.ista.llm4test.execute.TestResult;
 import edu.tju.ista.llm4test.llm.OpenAI;
 import edu.tju.ista.llm4test.llm.tools.*;
@@ -35,12 +36,13 @@ public class TestCaseAgent extends Agent {
     private final List<String> history;
     private final List<String> feedbackHistory; // 新增：存储每次observe的反馈
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private static final int MAX_ITERATIONS = 5; // Safety limit for the reduction loop
+    private static final int MAX_ITERATIONS = 10; // Safety limit for the reduction loop
     private List<String> lastExecutedTools; // Track executed tools for observe method
 
     private String workspace_testcase_path;
     private Path workspace_root;
     private TestCase testCase;
+    private TestCase minimizedTestCase;
 
     public TestCaseAgent() {
         super("You are an expert test case minimizer. Your goal is to reduce a given Java test case to its minimal form while preserving the original failure.");
@@ -66,23 +68,30 @@ public class TestCaseAgent extends Agent {
      * @param workspaceRoot The root directory for all operations.
      * @return The minimized source code, or the original code if minimization fails.
      */
-    public String run(TestCase testCase, Path workspaceRoot) {
+    public TestCase run(TestCase testCase, Path workspaceRoot) {
         // 1. Setup
+
+
         this.testCase = testCase;
         history.clear();
         feedbackHistory.clear(); // 清空反馈历史
         Path testFilePath = setupWorkspace(testCase, workspaceRoot);
         if (testFilePath == null) {
-            return testCase.getSourceCode(); // Return original if setup fails
+            return testCase; // Return original if setup fails
         }
 
         String originalFailureOutput = testCase.getResult().getOutput();
         String currentCode = testCase.getSourceCode();
 
+
+
         addToHistory("=== TestCaseAgent Started ===");
         addToHistory("Target: " + testCase.name);
         addToHistory("Workspace: " + testFilePath.getParent().getFileName());
 
+        this.minimizedTestCase = new TestCase(testFilePath.toFile());
+        minimizedTestCase.setOriginFile(testCase.getFile());
+        minimizedTestCase.setResult(testCase.getResult());
         // 2. Minimization Loop (Think-Act-Observe)
         for (int i = 0; i < MAX_ITERATIONS; i++) {
             addToHistory("--- Iteration " + (i + 1) + "/" + MAX_ITERATIONS + " ---");
@@ -124,7 +133,10 @@ public class TestCaseAgent extends Agent {
         }
 
         addToHistory("=== Minimization Complete ===");
-        return currentCode;
+        var executor = new TestExecutor();
+        var result = executor.executeTest(minimizedTestCase);
+        minimizedTestCase.setResult(result);
+        return minimizedTestCase;
     }
 
     /**
