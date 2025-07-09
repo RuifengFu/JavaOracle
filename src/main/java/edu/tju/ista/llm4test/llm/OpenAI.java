@@ -99,14 +99,18 @@ public class OpenAI {
     private Map<String, Object> getBaseRequestMap(String prompt) {
         // Create request body
         Map<String, Object> requestBody = new HashMap<>();
+        if (this.JSON_OUTPUT) {
+            requestBody.put("response_format", Map.of("type", "json_object"));
+            if (!prompt.contains("json")) {
+                prompt += "\nPlease return the response in json format.";
+            }
+        }
         requestBody.put("model", MODEL);
         requestBody.put("messages", List.of(
 //                Map.of("role", "system", "content", systemPrompt),
                 Map.of("role", "user", "content", prompt)
         ));
-        if (this.JSON_OUTPUT) {
-            requestBody.put("response_format", Map.of("type", "json_object"));
-        }
+
         requestBody.put("max_tokens", MAX_TOKENS); // Limit the response length
         requestBody.put("temperature", TEMPERATURE); // Set the randomness of the output
         requestBody.put("stream", STREAM);
@@ -245,8 +249,8 @@ public class OpenAI {
      */
     public String messageCompletion(String prompt, double temperature, boolean jsonOutput) {
         try {
-            if (jsonOutput && !prompt.contains("json")) {
-                prompt += "\nPlease return the response in json format.该";
+            if (jsonOutput && !prompt.contains(" json ")) {
+                prompt += "\nPlease return the response in json format.";
             }
             Map<String, Object> requestBody = getBaseRequestMap(prompt);
             if (jsonOutput) {

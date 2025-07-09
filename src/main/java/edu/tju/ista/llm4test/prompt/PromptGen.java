@@ -57,6 +57,8 @@ public class PromptGen {
             TEMPLATE_MAP.put("BugVerifyBugReport", loadResourceAsString("/prompt/BugVerifyBugReport.txt"));
             TEMPLATE_MAP.put("BugVerifyJsonExtract", loadResourceAsString("/prompt/BugVerifyJsonExtract.txt"));
             TEMPLATE_MAP.put("InstantiateTestCase", loadResourceAsString("/prompt/InstantiateTestCase.txt"));
+            TEMPLATE_MAP.put("BugVerifyObservePrompt", loadResourceAsString("/prompt/BugVerifyObservePrompt.txt"));
+            TEMPLATE_MAP.put("BugVerifyRefineAnalysis", loadResourceAsString("/prompt/BugVerifyRefineAnalysis.txt"));
             
             // TestCaseMinimization 相关模板
             TEMPLATE_MAP.put("TestCaseMinimizationPlan", loadResourceAsString("/prompt/TestCaseMinimizationPlan.txt"));
@@ -172,6 +174,26 @@ public class PromptGen {
         dataModel.put("testcase", testcase);
         dataModel.put("hypothesis", hypothesis);
         return generatePrompt("InstantiateTestCase", dataModel);
+    }
+
+    public static String generateBugVerifyObservePrompt(String testCode, String testOutput, String collectedInfos, String symptoms) throws TemplateException, IOException {
+        Map<String, Object> dataModel = new HashMap<>();
+        dataModel.put("testCode", testCode);
+        dataModel.put("testOutput", testOutput);
+        dataModel.put("collectedInfos", collectedInfos);
+        dataModel.put("symptoms", symptoms);
+        return generatePrompt("BugVerifyObservePrompt", dataModel);
+    }
+
+    public static String generateBugVerifyRefineAnalysisPrompt(String testCode, String testOutput, String symptoms, String relevantClasses, String queries, String currentCollectedInfos) throws TemplateException, IOException {
+        Map<String, Object> dataModel = new HashMap<>();
+        dataModel.put("testCode", testCode);
+        dataModel.put("testOutput", testOutput);
+        dataModel.put("symptoms", symptoms);
+        dataModel.put("relevantClasses", relevantClasses);
+        dataModel.put("queries", queries);
+        dataModel.put("currentCollectedInfos", currentCollectedInfos);
+        return generatePrompt("BugVerifyRefineAnalysis", dataModel);
     }
 
     public static String generateTestCaseMinimizationPlanPrompt(String sourceCode, String testFailureOutput, String workingDirectory, String originalTestCasePath) throws TemplateException, IOException {
