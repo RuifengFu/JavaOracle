@@ -304,6 +304,13 @@ public class BugVerify extends Agent {
             
             LoggerUtil.logExec(Level.INFO, String.format("信息收集完成，共收集到 %d 条信息", collectedInfos.size()));
             
+            // 获取完整的详细报告
+            String detailedReport = infoCollectionAgent.getDetailedReport();
+            LoggerUtil.logExec(Level.INFO, "获取到完整信息源报告，大小: " + detailedReport.length() + " 字符");
+            
+            // 保存完整的详细报告到文件
+            saveDetailedInfoReport(detailedReport);
+            
             // 将收集到的信息转换为原有格式并存储
             collectedInfo.clear();
             infoSourceMap.clear();
@@ -313,13 +320,15 @@ public class BugVerify extends Agent {
                 String infoId = "INFO_" + (++infoCounter);
                 infoSourceMap.put(infoId, info.source);
                 
-                // 格式化信息内容
+                // 格式化信息内容，包含完整内容
                 StringBuilder formattedContent = new StringBuilder();
                 formattedContent.append("[").append(infoId).append(" 来源: ").append(info.source).append("]\n");
                 formattedContent.append("相关性得分: ").append(String.format("%.2f", info.relevanceScore)).append("\n");
                 formattedContent.append("信息类型: ").append(info.type).append("\n");
                 formattedContent.append("内容大小: ").append(info.content.length()).append(" 字符\n\n");
+                formattedContent.append("=== 完整内容 ===\n");
                 formattedContent.append(info.content);
+                formattedContent.append("\n=== 内容结束 ===\n");
                 
                 collectedInfo.put(info.id, formattedContent.toString());
                 
@@ -336,6 +345,7 @@ public class BugVerify extends Agent {
                 formattedApiInfo.append("[").append(infoId).append(" 来源: 测试用例API信息和源码]\n");
                 formattedApiInfo.append("信息类型: API_INFO_WITH_SOURCE\n");
                 formattedApiInfo.append("内容大小: ").append(apiInfoWithSource.length()).append(" 字符\n\n");
+                formattedApiInfo.append("=== 完整API信息 ===\n");
                 
                 // 截断过长的API信息
                 if (apiInfoWithSource.length() > 8000) {
@@ -343,6 +353,7 @@ public class BugVerify extends Agent {
                 } else {
                     formattedApiInfo.append(apiInfoWithSource);
                 }
+                formattedApiInfo.append("\n=== API信息结束 ===\n");
                 
                 collectedInfo.put("api_info_with_source", formattedApiInfo.toString());
                 
@@ -368,11 +379,26 @@ public class BugVerify extends Agent {
         }
     }
     
-
-    
-
-    
-
+    /**
+     * 保存完整的信息收集详细报告
+     */
+    private void saveDetailedInfoReport(String detailedReport) {
+        if (verifyContextFolder == null || testCaseName == null) return;
+        
+        try {
+            Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
+            Path infoDir = verifyContextPath.resolve("collected_info");
+            Files.createDirectories(infoDir);
+            
+            // 保存完整的详细报告
+            saveToFile(infoDir.resolve("detailed_info_report.md").toString(), detailedReport);
+            
+            LoggerUtil.logExec(Level.INFO, "已保存完整信息收集报告: detailed_info_report.md");
+            
+        } catch (IOException e) {
+            LoggerUtil.logExec(Level.WARNING, "保存详细信息报告失败: " + e.getMessage());
+        }
+    }
     
     /**
      * 保存收集到的信息
@@ -419,28 +445,46 @@ public class BugVerify extends Agent {
     private void formHypotheses() {
         // 构建提示，包含所有收集到的信息
         StringBuilder infoBuilder = new StringBuilder();
-//        for (Map.Entry<String, Object> entry : collectedInfo.entrySet()) {
-//            if (entry.getValue() instanceof String) {
-//                String content = (String) entry.getValue();
-//                // 限制每项内容的长度，避免提示过长
-//                if (content.length() > 30000) {
-//                    content = content.substring(0, 30000) + "...(内容已截断)";
-//                }
-//                if (infoBuilder.length() + content.length() > 100000) {
-//                    break;
-//                }
-//                infoBuilder.append("<").append(entry.getKey()).append(">\n");
-//                infoBuilder.append(content).append("\n");
-//                infoBuilder.append("</").append(entry.getKey()).append(">\n\n");
-//            }
-//        }
+        infoBuilder.append("# 收集的信息\n\n");
+        
+        // 添加所有收集到的信息的完整内容
+        int infoCount = 0;
+        int totalContentSize = 0;
+        final int MAX_CONTENT_SIZE = 80000; // 限制总内容大小，避免prompt过长
+        
+        for (Map.Entry<String, Object> entry : collectedInfo.entrySet()) {
+            if (entry.getValue() instanceof String) {
+                String content = (String) entry.getValue();
+                
+                // 检查是否会超出大小限制
+                if (totalContentSize + content.length() > MAX_CONTENT_SIZE) {
+                    LoggerUtil.logExec(Level.WARNING, "信息内容过多，已截断部分内容以避免prompt过长");
+                    break;
+                }
+                
+                infoBuilder.append("## 信息源 ").append(++infoCount).append(": ").append(entry.getKey()).append("\n\n");
+                infoBuilder.append(content).append("\n\n");
+                infoBuilder.append("---\n\n");
+                
+                totalContentSize += content.length();
+            }
+        }
+        
+        LoggerUtil.logExec(Level.INFO, String.format("假设形成阶段使用了 %d 条信息，总大小: %d 字符", 
+            infoCount, totalContentSize));
         
         try {
             String prompt = PromptGen.generateBugVerifyFormHypothesesPrompt(testCode, testOutput, infoBuilder.toString());
+            
+            // 记录prompt大小
+            LoggerUtil.logExec(Level.INFO, "假设形成prompt大小: " + prompt.length() + " 字符");
+            
             String response = llm.messageCompletion(prompt, 0.7, true);
             response = filterThinkingChain(response);
 
             hypotheses = extractJsonObjectArrayFromField(response, "hypotheses");
+            
+            LoggerUtil.logExec(Level.INFO, String.format("成功形成 %d 个假设", hypotheses.size()));
             
             // 立即保存假设
             saveHypotheses(response);
@@ -630,7 +674,21 @@ public class BugVerify extends Agent {
         
         // 构建信息源映射，添加API信息和源码
         StringBuilder infoSourceBuilder = new StringBuilder();
-        infoSourceBuilder.append("# 信息源映射\n\n");
+        infoSourceBuilder.append("# 完整信息源内容\n\n");
+        
+        // 添加完整的收集信息
+        int sourceCount = 0;
+        for (Map.Entry<String, Object> entry : collectedInfo.entrySet()) {
+            if (entry.getValue() instanceof String) {
+                sourceCount++;
+                infoSourceBuilder.append("## 信息源 ").append(sourceCount).append(": ").append(entry.getKey()).append("\n\n");
+                infoSourceBuilder.append((String) entry.getValue()).append("\n\n");
+                infoSourceBuilder.append("---\n\n");
+            }
+        }
+        
+        // 添加信息源映射摘要
+        infoSourceBuilder.append("# 信息源映射摘要\n\n");
         for (Map.Entry<String, String> entry : infoSourceMap.entrySet()) {
             infoSourceBuilder.append("- ").append(entry.getKey()).append(": ").append(entry.getValue()).append("\n");
         }
@@ -645,6 +703,9 @@ public class BugVerify extends Agent {
                 infoSourceBuilder.append("无API信息和源码数据\n");
             }
         }
+        
+        LoggerUtil.logExec(Level.INFO, String.format("最终报告包含 %d 个信息源，信息源内容大小: %d 字符", 
+            sourceCount, infoSourceBuilder.length()));
         
         // 根据是否为测试用例问题调整提示模板
         try {

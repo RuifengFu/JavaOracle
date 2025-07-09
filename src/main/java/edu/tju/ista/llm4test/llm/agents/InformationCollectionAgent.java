@@ -65,10 +65,10 @@ public class InformationCollectionAgent extends Agent {
                                                  String testOutput, String apiInfoWithSource) {
         LoggerUtil.logExec(Level.INFO, "开始信息收集流程");
         
-            // 重置状态
-            collectedInfos.clear();
-            currentSize = 0;
-            
+        // 重置状态
+        collectedInfos.clear();
+        currentSize = 0;
+        
         // 解析初始洞察
         AnalysisResult analysis = parseInitialInsight(initialInsight);
         
@@ -95,10 +95,110 @@ public class InformationCollectionAgent extends Agent {
             }
         }
         
-            LoggerUtil.logExec(Level.INFO, String.format("信息收集完成，共收集 %d 条信息，总大小: %d 字符", 
+        LoggerUtil.logExec(Level.INFO, String.format("信息收集完成，共收集 %d 条信息，总大小: %d 字符", 
             collectedInfos.size(), currentSize));
         
+        // 输出完整的信息源内容
+        outputDetailedReport();
+        
         return new ArrayList<>(collectedInfos);
+    }
+    
+    /**
+     * 输出完整的信息源报告
+     */
+    private void outputDetailedReport() {
+        LoggerUtil.logExec(Level.INFO, "================== 完整信息源报告 ==================");
+        
+        if (collectedInfos.isEmpty()) {
+            LoggerUtil.logExec(Level.INFO, "未收集到任何信息");
+            return;
+        }
+        
+        // 按类型分组统计
+        Map<InfoType, List<CollectedInfo>> groupedByType = new HashMap<>();
+        for (CollectedInfo info : collectedInfos) {
+            groupedByType.computeIfAbsent(info.type, k -> new ArrayList<>()).add(info);
+        }
+        
+        // 输出统计信息
+        LoggerUtil.logExec(Level.INFO, String.format("总计收集 %d 条信息，总大小 %d 字符", 
+            collectedInfos.size(), currentSize));
+        
+        for (InfoType type : InfoType.values()) {
+            List<CollectedInfo> infos = groupedByType.getOrDefault(type, new ArrayList<>());
+            if (!infos.isEmpty()) {
+                int totalSize = infos.stream().mapToInt(info -> info.content.length()).sum();
+                LoggerUtil.logExec(Level.INFO, String.format("- %s: %d 条，共 %d 字符", 
+                    type, infos.size(), totalSize));
+            }
+        }
+        
+        LoggerUtil.logExec(Level.INFO, "==================== 详细内容 ====================");
+        
+        // 输出每条信息的完整内容
+        for (int i = 0; i < collectedInfos.size(); i++) {
+            CollectedInfo info = collectedInfos.get(i);
+            LoggerUtil.logExec(Level.INFO, String.format("\n--- 信息源 %d ---", i + 1));
+            LoggerUtil.logExec(Level.INFO, "ID: " + info.id);
+            LoggerUtil.logExec(Level.INFO, "类型: " + info.type);
+            LoggerUtil.logExec(Level.INFO, "来源: " + info.source);
+            LoggerUtil.logExec(Level.INFO, "相关性得分: " + String.format("%.3f", info.relevanceScore));
+            LoggerUtil.logExec(Level.INFO, "内容大小: " + info.content.length() + " 字符");
+            LoggerUtil.logExec(Level.INFO, "完整内容:\n" + info.content);
+            LoggerUtil.logExec(Level.INFO, "--- 信息源 " + (i + 1) + " 结束 ---\n");
+        }
+        
+        LoggerUtil.logExec(Level.INFO, "================= 信息源报告结束 =================");
+    }
+    
+    /**
+     * 获取格式化的详细报告字符串
+     */
+    public String getDetailedReport() {
+        if (collectedInfos.isEmpty()) {
+            return "# 信息收集报告\n\n未收集到任何信息。\n";
+        }
+        
+        StringBuilder report = new StringBuilder();
+        report.append("# 信息收集详细报告\n\n");
+        
+        // 统计信息
+        Map<InfoType, List<CollectedInfo>> groupedByType = new HashMap<>();
+        for (CollectedInfo info : collectedInfos) {
+            groupedByType.computeIfAbsent(info.type, k -> new ArrayList<>()).add(info);
+        }
+        
+        report.append("## 统计信息\n\n");
+        report.append(String.format("- **总计**: %d 条信息，%d 字符\n", collectedInfos.size(), currentSize));
+        
+        for (InfoType type : InfoType.values()) {
+            List<CollectedInfo> infos = groupedByType.getOrDefault(type, new ArrayList<>());
+            if (!infos.isEmpty()) {
+                int totalSize = infos.stream().mapToInt(info -> info.content.length()).sum();
+                report.append(String.format("- **%s**: %d 条，%d 字符\n", type, infos.size(), totalSize));
+            }
+        }
+        
+        report.append("\n## 详细内容\n\n");
+        
+        // 详细内容
+        for (int i = 0; i < collectedInfos.size(); i++) {
+            CollectedInfo info = collectedInfos.get(i);
+            report.append(String.format("### 信息源 %d\n\n", i + 1));
+            report.append(String.format("- **ID**: %s\n", info.id));
+            report.append(String.format("- **类型**: %s\n", info.type));
+            report.append(String.format("- **来源**: %s\n", info.source));
+            report.append(String.format("- **相关性得分**: %.3f\n", info.relevanceScore));
+            report.append(String.format("- **内容大小**: %d 字符\n\n", info.content.length()));
+            report.append("**完整内容**:\n\n");
+            report.append("```\n");
+            report.append(info.content);
+            report.append("\n```\n\n");
+            report.append("---\n\n");
+        }
+        
+        return report.toString();
     }
     
     /**

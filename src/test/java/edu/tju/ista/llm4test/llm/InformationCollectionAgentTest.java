@@ -108,5 +108,10 @@ public class InformationCollectionAgentTest {
                 .mapToInt(info -> info.content.length()).sum();
             System.out.println(type + ": " + count + " 条，共 " + size + " 字符");
         }
+        
+        // 输出完整的信息源报告
+        System.out.println("\n=== 完整信息源报告 ===");
+        String detailedReport = agent.getDetailedReport();
+        System.out.println(detailedReport);
     }
 } 
