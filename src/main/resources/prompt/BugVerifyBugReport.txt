@@ -28,9 +28,9 @@ ${informationSources}
 
 1. 报告标题 (Report Heading):
 报告的格式必须严格遵守以下规范。在报告正文的开头，你必须根据你的核心结论，选择以下其中一种标题开始：
-如果根本问题在于JDK内部的缺陷，请使用一级标题 # BUG REPORT, 并参考JDK BUG report的格式撰写。
-如果根本问题在于测试用例自身的设计或逻辑错误，请使用一级标题 # TESTCASE ERROR ANALYSIS。
-如果两者皆有问题，请分别创建两个独立的部分，先是 #BUG REPORT，然后是 # TESTCASE ERROR ANALYSIS。
+如果根本问题在于JDK内部的缺陷，请使用BUG REPORT作为一级标题 , 并参考JDK BUG report的格式撰写。
+如果根本问题在于测试用例自身的设计或逻辑错误，请使用TESTCASE ERROR ANALYSIS作为一级标题。
+如果两者皆有问题，请分别创建两个一级标题，先是BUG REPORT，然后是TESTCASE ERROR ANALYSIS。
 2. 报告内容 (Report Content):
 请在选定的标题下，包含以下几个部分：
 
