@@ -3,6 +3,7 @@ package edu.tju.ista.llm4test.llm.agents;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.tju.ista.llm4test.concurrent.ConcurrentExecutionManager;
+import edu.tju.ista.llm4test.config.GlobalConfig;
 import edu.tju.ista.llm4test.execute.TestCase;
 import edu.tju.ista.llm4test.llm.OpenAI;
 import edu.tju.ista.llm4test.llm.tools.*;
@@ -151,43 +152,48 @@ public class BugVerify extends Agent {
      */
     public String analyze() {
         LoggerUtil.logExec(Level.INFO, "开始Bug验证流程");
-                               
-        // 1. 初始分析 
+
+        Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
+
+        // 0. TestCase Reproduce & reduce
+        if (this.testCase != null && this.testCase.getResult() != null && this.testCase.getResult().isFail()) {
+            LoggerUtil.logExec(Level.INFO, "Verified failure detected. Starting test case minimization for: " + testCase.name);
+            try {
+                TestCase minimizedCase = minimizationAgent.run(this.testCase, verifyContextPath);
+                String minimizedCode = minimizedCase.getSourceCode();
+                if (minimizedCode != null && !minimizedCode.equals(this.testCase.getSourceCode())) {
+                    // Save the minimized code to a new file
+                    String originalFileName = this.testCase.getFile().getName();
+                    String minimizedFileName = originalFileName.replace(".java", "_minimized.java");
+                    Path minimizedFilePath = verifyContextPath.resolve(minimizedFileName);
+
+                    Files.writeString(minimizedFilePath, minimizedCode);
+                    File minimizedFile = minimizedFilePath.toFile();
+
+                    LoggerUtil.logExec(Level.INFO, "Minimization successful. New test case at: " + minimizedFile.getAbsolutePath());
+                    // Update the agent's state to use the minimized test case for subsequent steps.
+                    this.testCase.setFile(minimizedFile);
+                    this.testCode = minimizedCode;
+                    this.testOutput = minimizedCase.getResult().getOutput();
+                    LoggerUtil.logExec(Level.INFO, "BugVerifyAgent will now proceed with the minimized test case.");
+                } else {
+                    LoggerUtil.logExec(Level.WARNING, "Minimization process did not reduce the test case. Continuing with the original test case.");
+                }
+            } catch (Exception e) {
+                LoggerUtil.logExec(Level.SEVERE, "An exception occurred during test case minimization. Continuing with the original test case. " + e);
+            }
+        }
+
+        // 1. 初始分析
         String initialInsight = performInitialAnalysis();
+        saveToFile(verifyContextPath.resolve("initial_insight.json").toString(), initialInsight);
+
         LoggerUtil.logExec(Level.INFO, "初始分析完成：" + initialInsight);
         
         // 保存初始分析结果
-        if (verifyContextFolder != null && testCaseName != null) {
-            Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
-            saveToFile(verifyContextPath.resolve("initial_insight.json").toString(), initialInsight);
 
-            // After initial analysis, if the test case is a verified failure, try to minimize it.
-            if (this.testCase != null && this.testCase.getResult() != null && this.testCase.getResult().isFail()) {
-                LoggerUtil.logExec(Level.INFO, "Verified failure detected. Starting test case minimization for: " + testCase.name);
-                try {
-                    String minimizedCode = minimizationAgent.run(this.testCase, verifyContextPath);
-                    if (minimizedCode != null && !minimizedCode.equals(this.testCase.getSourceCode())) {
-                        // Save the minimized code to a new file
-                        String originalFileName = this.testCase.getFile().getName();
-                        String minimizedFileName = originalFileName.replace(".java", "_minimized.java");
-                        Path minimizedFilePath = verifyContextPath.resolve(minimizedFileName);
-                        
-                        Files.writeString(minimizedFilePath, minimizedCode);
-                        File minimizedFile = minimizedFilePath.toFile();
-                        
-                        LoggerUtil.logExec(Level.INFO, "Minimization successful. New test case at: " + minimizedFile.getAbsolutePath());
-                        // Update the agent's state to use the minimized test case for subsequent steps.
-                        this.testCase.setFile(minimizedFile);
-                        this.testCode = minimizedCode;
-                        LoggerUtil.logExec(Level.INFO, "BugVerifyAgent will now proceed with the minimized test case.");
-                    } else {
-                        LoggerUtil.logExec(Level.WARNING, "Minimization process did not reduce the test case. Continuing with the original test case.");
-                    }
-                } catch (Exception e) {
-                    LoggerUtil.logExec(Level.SEVERE, "An exception occurred during test case minimization. Continuing with the original test case. " + e);
-                }
-            }
-        }
+
+
         
         // 2. 收集信息
         collectRelevantInformation(initialInsight);
@@ -769,8 +775,6 @@ public class BugVerify extends Agent {
         LoggerUtil.logExec(Level.INFO, "开始从日志文件验证bug: " + logPath);
         
         // 创建BugVerifyAgent
-
-        
         try {
             // 读取日志文件
             File logFile = new File(logPath);
@@ -834,11 +838,11 @@ public class BugVerify extends Agent {
             var futures = new ArrayList<CompletableFuture<Void>>();
             // 为每个bug生成报告
             for (Map.Entry<String, String> entry : verifiedBugs.entrySet()) {
+                String originFilePath = entry.getKey();
+                String filePath = originFilePath.replace("jdk17u-dev/test", "test");
+                String verifyMessage = entry.getValue();
                 var future = manager.submitTestTask(() -> {
                     BugVerify agent = new BugVerify(javadocPath, sourcePath, bugReportPath);
-                    String filePath = entry.getKey();
-                    String verifyMessage = entry.getValue();
-
                     // 从JDK路径转换到测试路径
                     File originFile = new File(filePath);
                     File testFile = new File(filePath.replace("jdk17u-dev/test", "test"));
@@ -901,6 +905,56 @@ public class BugVerify extends Agent {
 
     }
 
+
+    public void verifyBugFromFile(String filePath, String verifyMessage, String originFilePath) {
+
+        File testFile = new File(filePath);
+
+        if (!testFile.exists()) {
+            LoggerUtil.logExec(Level.WARNING, "测试文件不存在: " + filePath);
+            return;
+        }
+
+        // 使用存在的文件
+        TestCase testcase = new TestCase(testFile);
+        testcase.setApiDocProcessor(ApiInfoProcessor.fromConfig());
+
+        if (originFilePath != null) {
+            File originFile = new File(originFilePath);
+            if (originFile.exists()) {
+                testcase.setOriginFile(originFile);
+            } else {
+                LoggerUtil.logExec(Level.WARNING, "原始文件不存在: " + originFilePath);
+            }
+        }
+
+        String testCaseName = testFile.getName().replace(".java", "");
+        LoggerUtil.logExec(Level.INFO, "正在分析bug: " + testCaseName);
+        try {
+            ToolResponse<TestResult> response = jtregTool.execute(testcase.getFile().toPath(), testCaseName);
+            String testOutput;
+            if (response.isSuccess()) {
+                testOutput = response.getResult().getOutput();
+                testcase.setResult(response.getResult());
+            } else {
+                testOutput = "无法获取测试输出";
+                LoggerUtil.logResult(Level.SEVERE, testcase.getFile().getAbsolutePath() + ": 无法获取测试输出");
+            }
+            if (verifyMessage != null && !verifyMessage.isEmpty()) {
+                testcase.verifyMessage = verifyMessage;
+            } else {
+                testcase.verifyTestFail();
+            }
+            this.setTestCase(testcase);
+            this.analyze();
+            LoggerUtil.logExec(Level.INFO, "Bug报告已生成: " + testCaseName);
+        } catch (Exception e) {
+            LoggerUtil.logExec(Level.WARNING, "为测试用例生成报告失败: " + testCaseName);
+            e.printStackTrace();
+        } finally {
+            this.close();
+        }
+    }
     
     public void close(){
         webTool.close();
