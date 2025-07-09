@@ -275,7 +275,7 @@ public class OpenAI {
                 });
                 String result = "<thinking>\n" + reasonSb + "\n</thinking>\n\n" + contentSb;
                 LoggerUtil.logOpenAI(Level.INFO, "OpenAI response: \n" + result);
-                return result;
+                return contentSb.toString();
             }
             Map<String, Object> responseBody = getResponseBody(requestBody);
             // Extract the "message.content" value from the response
