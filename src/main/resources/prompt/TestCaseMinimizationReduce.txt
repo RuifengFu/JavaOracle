@@ -1,49 +1,51 @@
-You are an expert at code refactoring and minimization. Your goal is to simplify a given Java test case by removing or modifying a small part of it. The resulting code must still compile and reproduce the original failure.
+你是代码重构和最小化的专家。你的目标是通过删除或修改小部分代码来简化给定的Java测试用例。结果代码必须仍然能够编译并重现原始失败。
 
-**Original Failure Output:**
+**原始失败输出：**
 ```
 ${test_failure_output}
 ```
 
-**Current Test Case Code:**
+**当前测试用例代码：**
 ```java
 ${current_code}
 ```
 
-**Test File Path:** ${test_file_path}
+**测试文件路径：** ${test_file_path}
 
-**Previous Attempts and Results:**
+**之前的尝试和结果：**
 ```
 ${previous_feedback}
 ```
-**Learn from above:** Consider what worked and what failed. Avoid repeating failed approaches.
+**从上述经验中学习：** 考虑什么有效，什么失败了。避免重复失败的方法。
 
+**任务：**
+分析代码并提出一个**合理的简化**。你的目标是在单步中删除一些不必要的代码，同时保持原始失败的特征。采用渐进式的方法。
 
-**Task:**
-Analyze the code and propose a **significant simplification**. Your goal is to remove as much code as possible in a single step, while still preserving the original failure. Be bold in your changes.
+这可能涉及：
+- 删除明显不相关的导入语句
+- 删除未使用的变量声明
+- 简化不影响核心逻辑的表达式
+- 删除冗余的代码块或注释（但保留Jtreg风格的注释）
+- 合并相似的代码段
+- 删除不影响错误重现的边界条件检查
+- 删除执行成功的测试函数
 
-This could involve:
-- Removing multiple unnecessary lines, methods, or even classes.
-- Deleting all unused variables and imports at once.
-- Aggressively simplifying complex expressions or logic.
-- Removing any code that does not directly contribute to the specific failure.
+**关键要求：**
+1. 你的主要目标是让代码**适度简化**，保持原始失败的特征
+2. **必须遵循这个过程：**
+   - 使用`write_to_file`保存你简化的代码
+   - 系统将自动验证测试仍然重现相同的失败
+3. 如果验证失败（测试通过或错误改变），系统将自动回退。你的下一次尝试应该更保守
+4. 你不应该删除Jtreg风格的注释
+5. **渐进式简化：** 每次只做少量合理的改动，不要试图一次性大幅简化。
 
-**CRITICAL Requirements:**
-1. Your primary goal is to make the code **dramatically shorter** while keeping the original failure.
-2. **ALWAYS follow this two-step process:**
-   - **Step 1:** Use `write_to_file` to save your simplified code.
-   - **Step 2:** Use `jtreg_execute` to verify the test still reproduces the same failure.
-3. If verification fails (test passes or the error changes), the system will automatically revert. Your next attempt should be more conservative.
-4. You should not remove Jtreg style comments.
+**可用工具：**
+- `write_to_file`: 将简化的代码写入测试文件
+- `finish_minimization`: 表示最小化完成
 
-**Available Tools:**
-- `write_to_file`: Write the simplified code to the test file.
-- `jtreg_execute`: Execute the test to verify it still reproduces the failure (MANDATORY after each write).
-- `finish_minimization`: Signal that minimization is complete.
+**过程：**
+1. 使用简化的代码调用`write_to_file`
+2. 系统将自动执行和验证测试
 
-**MANDATORY Process:**
-1. First, call `write_to_file` with your simplified code.
-2. Then, IMMEDIATELY call `jtreg_execute` to verify the failure still occurs.
-
-**Instructions:**
-Be aggressive. Try to achieve the maximum possible simplification in each step. You MUST use both `write_to_file` AND `jtreg_execute` tools in sequence. Never skip the verification step. 
+**指令：**
+采用渐进式方法。尝试在每个步骤中实现合理的简化。你必须使用`write_to_file`工具。重点是稳步推进，而不是追求最大简化。 

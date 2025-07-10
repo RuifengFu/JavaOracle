@@ -88,6 +88,7 @@ public class TestCaseAgent extends Agent {
         addToHistory("=== TestCaseAgent Started ===");
         addToHistory("Target: " + testCase.name);
         addToHistory("Workspace: " + testFilePath.getParent().getFileName());
+        addToHistory("MinimizationPath: " + testFilePath.toString());
 
         this.minimizedTestCase = new TestCase(testFilePath.toFile());
         minimizedTestCase.setOriginFile(testCase.getFile());
@@ -216,8 +217,8 @@ public class TestCaseAgent extends Agent {
                             if (sourcePath != null) {
                                 Path originalTestDir = testCase.getFile().getParentFile().toPath();
                                 Path absoluteSourcePath = originalTestDir.resolve(sourcePath);
-                                if (!Files.exists(originalTestDir)) {
-                                    args.put("destinationPath", absoluteSourcePath);
+                                if (Files.exists(absoluteSourcePath)) {
+                                    args.put("sourcePath", absoluteSourcePath.toString());
                                 }
                             }
 
@@ -225,9 +226,9 @@ public class TestCaseAgent extends Agent {
                             String destinationPath = (String) args.get("destinationPath");
                             if (destinationPath != null) {
                                 Path destPathObj = workspace_root.resolve(destinationPath);
-                                if (!Path.of(destinationPath).toAbsolutePath().toString().startsWith(workspace_root.toAbsolutePath().toString())) {
+                                if (!Path.of(destinationPath).isAbsolute()) {
                                     // Ensure destination is within the workspace
-                                    args.put("destinationPath", destPathObj);
+                                    args.put("destinationPath", destPathObj.toString());
                                 }
                             }
                         }
@@ -416,8 +417,7 @@ public class TestCaseAgent extends Agent {
 
         if (!fileWriteSuccess) {
             feedback += "Reverting code.";
-            // No need to actually write, as previousCode is still the state
-            return new ObserveResult(previousCode, feedback, decideNextAction(feedback));
+            return new ObserveResult(previousCode, feedback, ACTION_CONTINUE.getName());
         }
 
         // Process test executions
@@ -432,20 +432,14 @@ public class TestCaseAgent extends Agent {
             }
         }
 
-        // Evaluate outcome
-        boolean isReductionSuccessful = false;
+        // Collect information for decision making
         if (modificationApplied && lastTestResult != null) {
-            if (lastTestResult.isFail() && outputsAreSimilar(originalFailure, lastTestResult.getOutput())) {
-                feedback += "Reduction successful: Test still fails as expected. ";
-                isReductionSuccessful = true;
-                try {
-                    currentCode = Files.readString(testFilePath);
-                } catch (IOException e) {
-                    feedback += "Failed to read updated code. ";
-                }
-            } else {
-                feedback += "Reduction failed: Test behavior changed. ";
+            try {
+                currentCode = Files.readString(testFilePath);
+            } catch (IOException e) {
+                feedback += "Failed to read updated code. ";
             }
+            
             String newOutput = lastTestResult.getOutput();
             String newStatus = lastTestResult.isFail() ? "FAILED" : "PASSED";
             if (newOutput == null || newOutput.isBlank()) {
@@ -459,36 +453,39 @@ public class TestCaseAgent extends Agent {
             feedback += "No code modification was attempted. ";
         }
         
-        String finalCode = isReductionSuccessful ? currentCode : previousCode;
-        if (!isReductionSuccessful && modificationApplied) {
-            // Revert if reduction was not successful
+        // Let LLM decide the next strategic step with error comparison
+        String nextAction = decideNextAction(feedback, originalFailure, lastTestResult);
+
+        // Handle the decision
+        String finalCode = currentCode;
+        if (ACTION_REDO.getName().equals(nextAction)) {
+            finalCode = previousCode;
             try {
                 Files.writeString(testFilePath, previousCode);
                 feedback += "Reverting code. ";
             } catch (IOException e) {
-                addToHistory("OBSERVE: FATAL - Cannot revert file! " + e.getMessage());
+                addToHistory("OBSERVE: FATAL - Cannot revert file on REDO! " + e.getMessage());
             }
-        }
-        
-        // Let LLM decide the next strategic step
-        String nextAction = decideNextAction(feedback);
-
-        // If LLM says redo, ensure we are using previous code
-        if (ACTION_REDO.getName().equals(nextAction)) {
+        } else if (lastTestResult != null && lastTestResult.isFail() && !ACTION_FINISH.getName().equals(nextAction)) {
+            // Keep the successful reduction
+            finalCode = currentCode;
+        } else if (modificationApplied && (lastTestResult == null || !lastTestResult.isFail())) {
+            // Revert if test didn't fail as expected
             finalCode = previousCode;
             try {
-                 Files.writeString(testFilePath, previousCode);
+                Files.writeString(testFilePath, previousCode);
+                feedback += "Reverting code due to test behavior change. ";
             } catch (IOException e) {
-                 addToHistory("OBSERVE: FATAL - Cannot revert file on REDO! " + e.getMessage());
+                addToHistory("OBSERVE: FATAL - Cannot revert file! " + e.getMessage());
             }
         }
         
         return new ObserveResult(finalCode, feedback, nextAction);
     }
 
-    private String decideNextAction(String feedback) {
+    private String decideNextAction(String feedback, String originalFailure, TestResult currentResult) {
         try {
-            String prompt = PromptGen.generateTestCaseObserveAndDecidePrompt(feedback);
+            String prompt = PromptGen.generateTestCaseObserveAndDecidePrompt(feedback, originalFailure, currentResult);
             addToHistory("OBSERVE: Asking LLM for next step...");
 
             List<Tool<?>> decisionTools = List.of(ACTION_CONTINUE, ACTION_FINISH, ACTION_REDO);
@@ -523,7 +520,8 @@ public class TestCaseAgent extends Agent {
     }
 
     private void addToHistory(String message) {
-        LoggerUtil.logExec(Level.INFO, "[TestCaseAgent] " + message);
+        String filePrefix = workspace_testcase_path != null ? "[" + workspace_testcase_path + "] " : "";
+        LoggerUtil.logExec(Level.INFO, "[TestCaseAgent] " + filePrefix + message);
         history.add(message);
     }
     /**

@@ -220,6 +220,14 @@ public class PromptGen {
         return generatePrompt("TestCaseObserveAndDecide", dataModel);
     }
 
+    public static String generateTestCaseObserveAndDecidePrompt(String observationSummary, String originalFailure, Object currentResult) throws TemplateException, IOException {
+        Map<String, Object> dataModel = new HashMap<>();
+        dataModel.put("observation_summary", observationSummary);
+        dataModel.put("original_failure", originalFailure);
+        dataModel.put("current_result", currentResult);
+        return generatePrompt("TestCaseObserveAndDecide", dataModel);
+    }
+
     public static String generateWorkspacePreparationPrompt(String testCaseSourceCode, String testOutput, String originalTestPath, String directoryListing) throws TemplateException, IOException {
         Map<String, Object> dataModel = new HashMap<>();
         dataModel.put("testCaseSourceCode", testCaseSourceCode);
