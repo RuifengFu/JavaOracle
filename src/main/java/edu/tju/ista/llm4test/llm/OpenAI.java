@@ -37,7 +37,7 @@ public class OpenAI {
 
     private String MODEL;
 
-    private final double TEMPERATURE = 0.6;
+    private final double TEMPERATURE = 0;
 
     private int MAX_TOKENS = 8192;
     private boolean STREAM = true;
@@ -87,10 +87,8 @@ public class OpenAI {
 
         Doubao = new OpenAI(arkApiKey, arkBaseUrl, arkModel);
 
-//        R1 = new OpenAI(GlobalConfig.getOpenaiR1Model());
-//        V3 = new OpenAI(GlobalConfig.getOpenaiV3Model());
-        R1 = new OpenAI(arkApiKey, arkBaseUrl, arkModel);
-        V3 = new OpenAI(arkApiKey, arkBaseUrl, arkModel);
+        R1 = new OpenAI(GlobalConfig.getOpenaiR1Model());
+        V3 = new OpenAI(GlobalConfig.getOpenaiV3Model());
         V3.JSON_OUTPUT = true;
 
     }

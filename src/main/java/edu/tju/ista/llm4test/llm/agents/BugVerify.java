@@ -34,22 +34,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 public class BugVerify extends Agent {
-    // 基础提示模板
 
     // 可用的工具
-    private final JavaDocSearchTool javadocTool;
-    private final SourceCodeSearchTool sourceTool;
-    private final WebContentExtractor webTool;
-    private final BingSearch searchTool;
-    private final JavaExecuteTool executeTool;
     private final JtregExecuteTool jtregTool;
     
     // 新增的信息收集Agent
     private final InformationCollectionAgent infoCollectionAgent;
-    
-    // 新增的智能工具
-    private final ContentProcessor contentProcessor;
-
     // Agent for test case minimization
     private final TestCaseAgent minimizationAgent;
     
@@ -58,7 +48,6 @@ public class BugVerify extends Agent {
     
     // LLM实例
     private final OpenAI llm;
-    private final OpenAI llm_json;
 
     public TestCase getTestCase() {
         return testCase;
@@ -98,14 +87,7 @@ public class BugVerify extends Agent {
      */
     public BugVerify(String javadocPath, String sourcePath) {
         this.llm = OpenAI.R1;
-        this.llm_json = OpenAI.V3;
-        this.javadocTool = new JavaDocSearchTool(javadocPath);
-        this.sourceTool = new SourceCodeSearchTool(sourcePath);
-        this.webTool = new WebContentExtractor(true);
-        this.searchTool = new BingSearch();
-        this.executeTool = new JavaExecuteTool();
         this.jtregTool = new JtregExecuteTool();
-        this.contentProcessor = new ContentProcessor(bugReportPath + "/content_cache");
         this.minimizationAgent = new TestCaseAgent();
         this.infoCollectionAgent = new InformationCollectionAgent(sourcePath, javadocPath);
         this.hypothesisAgent = new HypothesisAgent();
@@ -968,7 +950,6 @@ public class BugVerify extends Agent {
     }
     
     public void close(){
-        webTool.close();
         if (infoCollectionAgent != null) {
             infoCollectionAgent.close();
         }
