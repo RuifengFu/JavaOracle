@@ -436,6 +436,14 @@ public class TestCaseAgent extends Agent {
         if (modificationApplied && lastTestResult != null) {
             try {
                 currentCode = Files.readString(testFilePath);
+                
+                // 检查代码是否真的有变化
+                if (currentCode.equals(previousCode)) {
+                    addToHistory("OBSERVE: Code unchanged despite modification attempt, finishing minimization");
+                    feedback += "WARNING: Code unchanged despite modification attempt. Minimization appears complete. ";
+                    return new ObserveResult(previousCode, feedback, ACTION_FINISH.getName());
+                }
+                
             } catch (IOException e) {
                 feedback += "Failed to read updated code. ";
             }
