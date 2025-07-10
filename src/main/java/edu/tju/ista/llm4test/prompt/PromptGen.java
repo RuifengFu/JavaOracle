@@ -65,6 +65,7 @@ public class PromptGen {
             TEMPLATE_MAP.put("TestCaseMinimizationReduce", loadResourceAsString("/prompt/TestCaseMinimizationReduce.txt"));
             TEMPLATE_MAP.put("TestCaseObserveAndDecide", loadResourceAsString("/prompt/TestCaseObserveAndDecide.txt"));
             TEMPLATE_MAP.put("WorkspacePreparation", loadResourceAsString("/prompt/WorkspacePreparation.txt"));
+            TEMPLATE_MAP.put("FixVerificationTestCase", loadResourceAsString("/prompt/FixVerificationTestCase.txt"));
         } catch (IOException e) {
             throw new RuntimeException("Failed to load prompt templates from resources", e);
         }
@@ -235,5 +236,13 @@ public class PromptGen {
         dataModel.put("originalTestPath", originalTestPath);
         dataModel.put("directoryListing", directoryListing);
         return generatePrompt("WorkspacePreparation", dataModel);
+    }
+
+    public static String generateFixVerificationTestCasePrompt(String testCase, String hypothesis, String errorMessage) throws TemplateException, IOException {
+        Map<String, Object> dataModel = new HashMap<>();
+        dataModel.put("testCase", testCase);
+        dataModel.put("hypothesis", hypothesis);
+        dataModel.put("errorMessage", errorMessage);
+        return generatePrompt("FixVerificationTestCase", dataModel);
     }
 }
