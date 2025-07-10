@@ -26,6 +26,13 @@ import java.nio.file.Paths;
 
 import static edu.tju.ista.llm4test.utils.FileUtils.saveToFile;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+
 public class BugVerify extends Agent {
     // 基础提示模板
 
@@ -606,10 +613,31 @@ public class BugVerify extends Agent {
                     LoggerUtil.logExec(Level.INFO, "jtreg 执行结果 - 假设 " + hypothesisId + ": " + 
                                       (result.isSuccess() ? "成功" : "失败"));
                 } else {
-                    // 现在使用文件名作为类名，确保一致性
+                    // 先编译Java文件
+                    Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
+                    Path hypothesesDir = verifyContextPath.resolve("hypotheses");
                     String className = hypothesisId;
-                    LoggerUtil.logExec(Level.INFO, "使用 Java 执行测试 - 假设: " + hypothesisId + ", 类名: " + className + ", 文件: " + className + ".java");
-                    ToolResponse<String> javaResult = executeTool.execute(className);
+                    String fileName = className + ".java";
+                    Path sourceFile = hypothesesDir.resolve(fileName);
+                    
+                    LoggerUtil.logExec(Level.INFO, "开始编译Java文件: " + sourceFile);
+                    
+                    // 编译Java文件
+                    boolean compileSuccess = compileJavaFile(sourceFile, hypothesesDir);
+                    
+                    if (!compileSuccess) {
+                        LoggerUtil.logExec(Level.WARNING, "✗ 编译失败，跳过执行 - 假设: " + hypothesisId);
+                        TestResult testResult = new TestResult();
+                        testResult.setSuccess(false);
+                        testResult.setOutput("编译失败");
+                        verificationResults.put(hypothesisId, testResult);
+                        continue;
+                    }
+                    
+                    LoggerUtil.logExec(Level.INFO, "✓ 编译成功，开始执行 - 假设: " + hypothesisId);
+                    
+                    // 使用改进的JavaExecuteTool执行测试
+                    ToolResponse<String> javaResult = executeCompiledClass(className, hypothesesDir);
                     
                     // 创建一个简单的TestResult对象记录执行结果
                     TestResult testResult = new TestResult();
@@ -632,6 +660,92 @@ public class BugVerify extends Agent {
         
         // 立即保存验证结果
         saveVerificationResults();
+    }
+
+    /**
+     * 编译Java源文件
+     * @param sourceFile 源文件路径
+     * @param outputDir 输出目录
+     * @return 编译是否成功
+     */
+    private boolean compileJavaFile(Path sourceFile, Path outputDir) {
+        try {
+            List<String> command = new ArrayList<>();
+            command.add("javac");
+            command.add("-d");
+            command.add(outputDir.toString());
+            command.add(sourceFile.toString());
+            
+            ProcessBuilder pb = new ProcessBuilder(command);
+            pb.directory(outputDir.toFile());
+            pb.redirectErrorStream(true);
+            
+            Process process = pb.start();
+            
+            // 读取编译输出
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+            String output = reader.lines().collect(Collectors.joining("\n"));
+            
+            boolean finished = process.waitFor(30, TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                LoggerUtil.logExec(Level.WARNING, "编译超时: " + sourceFile);
+                return false;
+            }
+            
+            int exitCode = process.exitValue();
+            if (exitCode == 0) {
+                LoggerUtil.logExec(Level.INFO, "编译成功: " + sourceFile);
+                return true;
+            } else {
+                LoggerUtil.logExec(Level.WARNING, "编译失败: " + sourceFile + "\n输出: " + output);
+                return false;
+            }
+        } catch (Exception e) {
+            LoggerUtil.logExec(Level.SEVERE, "编译异常: " + sourceFile + " - " + e.getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * 执行已编译的类文件
+     * @param className 类名
+     * @param classPath 类路径
+     * @return 执行结果
+     */
+    private ToolResponse<String> executeCompiledClass(String className, Path classPath) {
+        try {
+            List<String> command = new ArrayList<>();
+            command.add("java");
+            command.add("-cp");
+            command.add(classPath.toString());
+            command.add(className);
+            
+            ProcessBuilder pb = new ProcessBuilder(command);
+            pb.directory(classPath.toFile());
+            pb.redirectErrorStream(true);
+            
+            Process process = pb.start();
+            
+            // 读取输出
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+            String output = reader.lines().collect(Collectors.joining("\n"));
+            
+            boolean finished = process.waitFor(60, TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                return ToolResponse.failure("执行超时");
+            }
+            
+            int exitCode = process.exitValue();
+            if (exitCode == 0) {
+                return ToolResponse.success(output);
+            } else {
+                return ToolResponse.failure("执行失败，退出码: " + exitCode + "\n输出: " + output);
+            }
+        } catch (Exception e) {
+            return ToolResponse.failure("执行异常: " + e.getMessage());
+        }
     }
     
     /**
@@ -720,11 +834,82 @@ public class BugVerify extends Agent {
             }
         }
         
-        // 构建信息源映射，添加API信息和源码
+        // 构建增强的信息源内容，包含分析过程
         StringBuilder infoSourceBuilder = new StringBuilder();
-        infoSourceBuilder.append("# 完整信息源内容\n\n");
+        infoSourceBuilder.append("# 信息收集和分析过程\n\n");
         
-        // 添加完整的收集信息
+        // 添加信息收集统计
+        Map<InformationCollectionAgent.InfoType, Integer> typeStats = new HashMap<>();
+        Map<InformationCollectionAgent.InfoType, Integer> typeSizes = new HashMap<>();
+        
+        // 统计各类型信息
+        for (Map.Entry<String, Object> entry : collectedInfo.entrySet()) {
+            if (entry.getValue() instanceof String) {
+                String content = (String) entry.getValue();
+                // 从内容中提取信息类型
+                InformationCollectionAgent.InfoType type = extractInfoType(content);
+                typeStats.merge(type, 1, Integer::sum);
+                typeSizes.merge(type, content.length(), Integer::sum);
+            }
+        }
+        
+        infoSourceBuilder.append("## 信息收集统计\n\n");
+        infoSourceBuilder.append("总计收集: ").append(collectedInfo.size()).append(" 条信息\n\n");
+        
+        for (InformationCollectionAgent.InfoType type : InformationCollectionAgent.InfoType.values()) {
+            int count = typeStats.getOrDefault(type, 0);
+            int size = typeSizes.getOrDefault(type, 0);
+            if (count > 0) {
+                infoSourceBuilder.append("- **").append(type).append("**: ")
+                    .append(count).append(" 条，共 ").append(size).append(" 字符\n");
+            }
+        }
+        infoSourceBuilder.append("\n");
+        
+        // 添加信息质量评估
+        infoSourceBuilder.append("## 信息质量评估\n\n");
+        
+        // 从InformationCollectionAgent获取详细报告
+        if (infoCollectionAgent != null) {
+            String detailedReport = infoCollectionAgent.getDetailedReport();
+            if (detailedReport != null && !detailedReport.isEmpty()) {
+                infoSourceBuilder.append("### 完整信息收集报告\n\n");
+                infoSourceBuilder.append(detailedReport).append("\n\n");
+            }
+        }
+        
+        infoSourceBuilder.append("## 关键信息摘要\n\n");
+        
+        // 按重要性排序显示前5条最重要的信息
+        List<Map.Entry<String, Object>> sortedInfo = collectedInfo.entrySet().stream()
+            .filter(entry -> entry.getValue() instanceof String)
+            .sorted((e1, e2) -> {
+                // 简单的重要性排序：源码 > API文档 > 网络搜索
+                String content1 = (String) e1.getValue();
+                String content2 = (String) e2.getValue();
+                InformationCollectionAgent.InfoType type1 = extractInfoType(content1);
+                InformationCollectionAgent.InfoType type2 = extractInfoType(content2);
+                return Integer.compare(getTypeWeight(type2), getTypeWeight(type1));
+            })
+            .limit(5)
+            .collect(Collectors.toList());
+        
+        for (int i = 0; i < sortedInfo.size(); i++) {
+            Map.Entry<String, Object> entry = sortedInfo.get(i);
+            String content = (String) entry.getValue();
+            InformationCollectionAgent.InfoType type = extractInfoType(content);
+            
+            infoSourceBuilder.append("### 关键信息 ").append(i + 1).append(" (").append(type).append(")\n\n");
+            infoSourceBuilder.append("来源: ").append(entry.getKey()).append("\n\n");
+            
+            // 提取内容预览（前500字符）
+            String preview = content.length() > 500 ? content.substring(0, 500) + "..." : content;
+            infoSourceBuilder.append("内容预览:\n```\n").append(preview).append("\n```\n\n");
+        }
+        
+        // 添加完整的收集信息（用于LLM分析）
+        infoSourceBuilder.append("# 完整信息源内容（用于分析）\n\n");
+        
         int sourceCount = 0;
         for (Map.Entry<String, Object> entry : collectedInfo.entrySet()) {
             if (entry.getValue() instanceof String) {
@@ -1120,6 +1305,33 @@ public class BugVerify extends Agent {
         }
         LoggerUtil.logExec(Level.FINE,"Resulting object strings count: " + result.size()); // Changed level to FINE for less verbose default logging
         return result;
+    }
+
+    /**
+     * 从信息内容中提取信息类型
+     */
+    private InformationCollectionAgent.InfoType extractInfoType(String content) {
+        if (content.contains("信息类型: SOURCE_CODE") || content.contains("信息类型: 源码")) {
+            return InformationCollectionAgent.InfoType.SOURCE_CODE;
+        } else if (content.contains("信息类型: JAVADOC") || content.contains("信息类型: API文档")) {
+            return InformationCollectionAgent.InfoType.JAVADOC;
+        } else if (content.contains("信息类型: WEB_SEARCH") || content.contains("来源: 网页")) {
+            return InformationCollectionAgent.InfoType.WEB_SEARCH;
+        } else {
+            return InformationCollectionAgent.InfoType.SOURCE_CODE; // 默认
+        }
+    }
+    
+    /**
+     * 获取信息类型的权重（用于排序）
+     */
+    private int getTypeWeight(InformationCollectionAgent.InfoType type) {
+        switch (type) {
+            case SOURCE_CODE: return 3;
+            case JAVADOC: return 2;
+            case WEB_SEARCH: return 1;
+            default: return 0;
+        }
     }
 
 
