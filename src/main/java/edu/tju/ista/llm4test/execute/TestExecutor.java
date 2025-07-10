@@ -111,7 +111,7 @@ public class TestExecutor {
      * @return 测试结果的CompletableFuture
      */
     public CompletableFuture<TestResult> executeTestAsync(File file) {
-        return differentialTestingAsync(file);
+        return concurrentManager.submitBatchTask(() -> differentialTesting(file));
     }
     
     /**
@@ -120,7 +120,7 @@ public class TestExecutor {
      * @return 测试结果的CompletableFuture
      */
     public CompletableFuture<TestResult> executeTestAsync(TestCase testCase) {
-        return differentialTestingAsync(testCase);
+        return concurrentManager.submitBatchTask(() -> differentialTesting(testCase));
     }
     
     /**
@@ -129,12 +129,8 @@ public class TestExecutor {
      * @return 测试结果
      */
     public TestResult differentialTesting(File file) {
-        try {
-            return differentialTestingAsync(file).get();
-        } catch (Exception e) {
-            LoggerUtil.logExec(Level.SEVERE, "差异化测试执行失败: " + e.getMessage());
-            return new TestResult(TestResultKind.UNKNOWN);
-        }
+        TestCase testCase = new TestCase(file);
+        return differentialTesting(testCase);
     }
     
     /**
@@ -143,83 +139,37 @@ public class TestExecutor {
      * @return 测试结果
      */
     public TestResult differentialTesting(TestCase testCase) {
-        try {
-            return differentialTestingAsync(testCase).get();
-        } catch (Exception e) {
-            LoggerUtil.logExec(Level.SEVERE, "差异化测试执行失败: " + e.getMessage());
-            return new TestResult(TestResultKind.UNKNOWN);
-        }
-    }
-    
-    /**
-     * 异步差异化测试 - 在多个JDK上顺序运行测试并比较结果
-     * 注意：由于JTreg框架会共用工作文件夹，必须顺序执行避免冲突
-     * @param file 测试文件
-     * @return 测试结果的CompletableFuture
-     */
-    public CompletableFuture<TestResult> differentialTestingAsync(File file) {
-        TestCase testCase = new TestCase(file);
-        return differentialTestingAsync(testCase);
-    }
-    
-    /**
-     * 异步差异化测试 - 在多个JDK上顺序运行测试并比较结果（使用TestCase）
-     * 注意：由于JTreg框架会共用工作文件夹，必须顺序执行避免冲突
-     * @param testCase 测试用例
-     * @return 测试结果的CompletableFuture
-     */
-    public CompletableFuture<TestResult> differentialTestingAsync(TestCase testCase) {
-        Map<String, TestOutput> results = new ConcurrentHashMap<>();
+        Map<String, TestOutput> results = new HashMap<>();
         File file = testCase.getFile();
         
-        // 创建顺序执行链，避免JTreg工作文件夹冲突
-        CompletableFuture<Void> sequentialChain = CompletableFuture.completedFuture(null);
+        LoggerUtil.logExec(Level.INFO, "开始差异化测试: " + file.getName());
         
-        // 为每个JDK创建顺序执行链
+        // 顺序执行每个JDK的测试，避免JTreg工作文件夹冲突
         for (String jdk : jdkPaths) {
-            sequentialChain = sequentialChain.thenCompose(v -> 
-                concurrentManager.submitTestTask(() -> {
-                    try {
-                        LoggerUtil.logExec(Level.INFO, "开始执行JDK测试: " + jdk + " - " + file.getName());
-                        TestOutput output = runJtregWithTestCase(testCase, jdk);
-                        results.put(jdk, output);
-                        LoggerUtil.logExec(Level.INFO, "完成JDK测试: " + jdk + " - " + file.getName());
-                        return null;
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                        LoggerUtil.logExec(Level.WARNING, 
-                            "JDK测试执行失败: " + jdk + " - " + e.getMessage());
-                        results.put(jdk, new TestOutput("", e.getMessage(), -1));
-                        return null;
-                    }
-                })
-            );
+            try {
+                LoggerUtil.logExec(Level.INFO, "开始执行JDK测试: " + jdk + " - " + file.getName());
+                TestOutput output = runJtregWithTestCase(testCase, jdk);
+                results.put(jdk, output);
+                LoggerUtil.logExec(Level.INFO, "完成JDK测试: " + jdk + " - " + file.getName());
+            } catch (Exception e) {
+                e.printStackTrace();
+                LoggerUtil.logExec(Level.WARNING, 
+                    "JDK测试执行失败: " + jdk + " - " + e.getMessage());
+                results.put(jdk, new TestOutput("", e.getMessage(), -1));
+            }
         }
         
-        // 等待所有顺序测试完成并合并结果
-        return sequentialChain
-            .thenApply(v -> {
-                TestResult result = new TestResult();
-                result.mergeResults(results);
-                LoggerUtil.logExec(Level.INFO, 
-                    String.format("差异化测试完成: %s - 共执行 %d 个JDK版本", 
-                        file.getName(), results.size()));
-                
-                // 清理所有临时文件
-                testCase.clearAllTempFiles();
-                
-                return result;
-            })
-            .exceptionally(ex -> {
-                LoggerUtil.logExec(Level.WARNING, "差异化测试异常: " + ex.getMessage());
-                
-                // 异常情况下也要清理临时文件
-                testCase.clearAllTempFiles();
-                
-                TestResult result = new TestResult();
-                result.mergeResults(results); // 即使有异常，也尝试合并已完成的结果
-                return result;
-            });
+        // 合并结果
+        TestResult result = new TestResult();
+        result.mergeResults(results);
+        LoggerUtil.logExec(Level.INFO, 
+            String.format("差异化测试完成: %s - 共执行 %d 个JDK版本", 
+                file.getName(), results.size()));
+        
+        // 清理所有临时文件
+        testCase.clearAllTempFiles();
+        
+        return result;
     }
     
     /**
@@ -313,12 +263,6 @@ public class TestExecutor {
             throw new Exception(errorMsg, e);
         }
         
-        // 并发读取输出流 - 使用并发管理器的批量处理线程池
-        CompletableFuture<String> stdoutFuture = 
-            concurrentManager.submitBatchTask(() -> readStream(process.getInputStream()));
-        CompletableFuture<String> stderrFuture = 
-            concurrentManager.submitBatchTask(() -> readStream(process.getErrorStream()));
-        
         // 等待进程完成或超时
         boolean finished;
         try {
@@ -332,23 +276,25 @@ public class TestExecutor {
             throw new Exception(errorMsg, e);
         }
         
+        // 直接在当前线程中读取输出，避免嵌套的异步调用
+        String stdout, stderr;
         if (!finished) {
             process.destroy();
             process.destroyForcibly();
             String timeoutMsg = String.format("执行超时 (%d ms): %s", EXECUTION_TIMEOUT_MS, String.join(" ", command));
             LoggerUtil.logExec(Level.WARNING, timeoutMsg);
             
-            String stdout = getCompletedResult(stdoutFuture, "");
-            String stderr = getCompletedResult(stderrFuture, "");
+            // 超时情况下尝试读取已有输出
+            stdout = readStream(process.getInputStream());
+            stderr = readStream(process.getErrorStream());
             return new TestOutput(stdout, stderr + "\n[TIMEOUT after " + EXECUTION_TIMEOUT_MS + " ms]", 124);
         }
         
+        // 进程正常完成，读取输出
         int exitValue = process.exitValue();
-        String stdout, stderr;
-        
         try {
-            stdout = stdoutFuture.get();
-            stderr = stderrFuture.get();
+            stdout = readStream(process.getInputStream());
+            stderr = readStream(process.getErrorStream());
         } catch (Exception e) {
             String errorMsg = String.format("读取进程输出失败: %s - %s", String.join(" ", command), e.getMessage());
             LoggerUtil.logExec(Level.WARNING, errorMsg);
@@ -390,17 +336,6 @@ public class TestExecutor {
         }
         
         return output;
-    }
-    
-    /**
-     * 安全获取CompletableFuture结果
-     */
-    private String getCompletedResult(CompletableFuture<String> future, String defaultValue) {
-        try {
-            return future.isDone() ? future.get() : defaultValue;
-        } catch (Exception e) {
-            return defaultValue;
-        }
     }
     
     /**
@@ -469,24 +404,13 @@ public class TestExecutor {
     public void testJDKEnvironment() {
         LoggerUtil.logExec(Level.INFO, "开始测试JDK环境...");
         
-        List<CompletableFuture<Void>> futures = new ArrayList<>();
-        
+        // 直接顺序执行每个JDK测试，避免异步调用和阻塞等待
         for (String jdk : jdkPaths) {
-            CompletableFuture<Void> future = concurrentManager.submitTestTask(() -> {
-                try {
-                    testSingleJDK(jdk);
-                } catch (Exception e) {
-                    LoggerUtil.logExec(Level.SEVERE, "JDK测试失败: " + jdk + " - " + e.getMessage());
-                }
-            });
-            futures.add(future);
-        }
-        
-        try {
-            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-                .get(JDK_TEST_TIMEOUT_MS * jdkPaths.size(), TimeUnit.MILLISECONDS);
-        } catch (Exception e) {
-            LoggerUtil.logExec(Level.WARNING, "JDK环境测试异常: " + e.getMessage());
+            try {
+                testSingleJDK(jdk);
+            } catch (Exception e) {
+                LoggerUtil.logExec(Level.SEVERE, "JDK测试失败: " + jdk + " - " + e.getMessage());
+            }
         }
         
         LoggerUtil.logExec(Level.INFO, "JDK环境测试完成");

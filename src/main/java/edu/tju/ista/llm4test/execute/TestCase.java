@@ -224,42 +224,55 @@ public class TestCase {
     public CompletableFuture<Void> processEnhancementWorkflowAsync(TestExecutor testExecutor) {
         return enhanceAsync()
                 .thenCompose(v -> executeTestAsync(testExecutor))
-                .thenCompose(result -> processTestResultAndFixAsync(result, testExecutor, 0)); // 从第0次尝试开始
+                .thenCompose(result -> processTestResultAndFixAsync(result, testExecutor));
     }
     
     /**
      * 处理测试结果的通用逻辑，并支持多次修复尝试
+     * 改为非递归版本，避免线程池资源耗尽
      * @param result 测试结果
      * @param testExecutor 测试执行器
-     * @param attempt 当前修复尝试次数
      * @return CompletableFuture<Void>
      */
-    private CompletableFuture<Void> processTestResultAndFixAsync(TestResult result, TestExecutor testExecutor, int attempt) {
-        LoggerUtil.logResult(Level.INFO, file + " " + result.getKind());
-        this.setResult(result); // 确保TestCase对象的result字段是最新的
+    private CompletableFuture<Void> processTestResultAndFixAsync(TestResult result, TestExecutor testExecutor) {
+        return concurrentManager.submitBatchTask(() -> {
+            TestResult currentResult = result;
+            int attempt = 0;
+            final int maxAttempts = 3;
+            
+            while (attempt < maxAttempts) {
+                LoggerUtil.logResult(Level.INFO, file + " " + currentResult.getKind());
+                this.setResult(currentResult); // 确保TestCase对象的result字段是最新的
 
-        if (!result.isFail()) {
-            LoggerUtil.logExec(Level.INFO, String.format("测试用例通过，停止修复流程 (TestCase: %s)", name));
-            return CompletableFuture.completedFuture(null); // 测试通过，无需修复
-        }
-        
-        // 如果测试失败
-        return verifyTestFailAsync().thenCompose(v -> {
-            if (this.getResult().isBug()) { // 如果被验证为Bug，停止修复
-                LoggerUtil.logExec(Level.INFO, String.format("测试用例被验证为Bug，停止修复 (TestCase: %s)", name));
-                return CompletableFuture.completedFuture(null);
+                if (!currentResult.isFail()) {
+                    LoggerUtil.logExec(Level.INFO, String.format("测试用例通过，停止修复流程 (TestCase: %s)", name));
+                    return null; // 测试通过，无需修复
+                }
+                
+                // 同步验证测试失败
+                verifyTestFail();
+                
+                if (this.getResult().isBug()) { // 如果被验证为Bug，停止修复
+                    LoggerUtil.logExec(Level.INFO, String.format("测试用例被验证为Bug，停止修复 (TestCase: %s)", name));
+                    return null;
+                }
+                
+                if (attempt >= maxAttempts) { // 达到最大尝试次数，停止
+                    LoggerUtil.logExec(Level.INFO, String.format("达到最大修复尝试次数 (%d)，测试用例仍失败 (TestCase: %s)", maxAttempts, name));
+                    return null;
+                }
+                
+                LoggerUtil.logExec(Level.INFO, String.format("尝试修复测试用例 (TestCase: %s, 尝试次数: %d/%d)", name, attempt + 1, maxAttempts));
+                
+                // 同步修复
+                fix();
+                
+                // 同步重新测试
+                currentResult = testExecutor.executeTest(this);
+                attempt++;
             }
             
-            if (attempt >= 3) { // 达到最大尝试次数，停止
-                LoggerUtil.logExec(Level.INFO, String.format("达到最大修复尝试次数 (%d)，测试用例仍失败 (TestCase: %s)", 3, name));
-                return CompletableFuture.completedFuture(null);
-            }
-            
-            LoggerUtil.logExec(Level.INFO, String.format("尝试修复测试用例 (TestCase: %s, 尝试次数: %d/%d)", name, attempt + 1, 3));
-            
-            return fixAsync()
-                    .thenCompose(v2 -> executeTestAsync(testExecutor)) // 修复后重新测试
-                    .thenCompose(fixedResult -> processTestResultAndFixAsync(fixedResult, testExecutor, attempt + 1)); // 递归调用进行下一次尝试
+            return null;
         });
     }
 
