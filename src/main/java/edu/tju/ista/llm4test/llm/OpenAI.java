@@ -118,10 +118,15 @@ public class OpenAI {
     }
 
     private HttpClient buildHttpClient() {
-        if (System.getProperty("os.name").toLowerCase().contains("linux")) {
-            return HttpClient.newBuilder()
-                    .proxy(ProxySelector.of(new InetSocketAddress("172.19.135.130", 5000)))
-                    .build();
+        if (GlobalConfig.isProxyEnabled()) {
+            String proxyHost = GlobalConfig.getProxyHost();
+            int proxyPort = GlobalConfig.getProxyPort();
+            
+            if (!proxyHost.isEmpty() && proxyPort > 0) {
+                return HttpClient.newBuilder()
+                        .proxy(ProxySelector.of(new InetSocketAddress(proxyHost, proxyPort)))
+                        .build();
+            }
         }
         return HttpClient.newHttpClient();
     }

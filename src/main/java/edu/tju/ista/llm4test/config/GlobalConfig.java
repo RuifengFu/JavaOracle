@@ -183,6 +183,27 @@ public class GlobalConfig {
     }
     
     /**
+     * 是否启用代理
+     */
+    public static boolean isProxyEnabled() {
+        return ConfigUtil.getBoolean("proxy.enabled", false);
+    }
+    
+    /**
+     * 获取代理主机地址
+     */
+    public static String getProxyHost() {
+        return ConfigUtil.getOrDefault("proxy.host", "");
+    }
+    
+    /**
+     * 获取代理端口
+     */
+    public static int getProxyPort() {
+        return ConfigUtil.getInt("proxy.port", 0);
+    }
+    
+    /**
      * 确保目录存在
      */
     public static File ensureDirectoryExists(String path) {
