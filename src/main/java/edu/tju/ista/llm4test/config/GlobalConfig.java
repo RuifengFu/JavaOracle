@@ -169,6 +169,13 @@ public class GlobalConfig {
     }
     
     /**
+     * 是否启用虚拟线程支持
+     */
+    public static boolean isVirtualThreadsEnabled() {
+        return ConfigUtil.getBoolean("virtualThreads.enabled", true);
+    }
+    
+    /**
      * 获取模板模式
      */
     public static String getTemplateMode() {

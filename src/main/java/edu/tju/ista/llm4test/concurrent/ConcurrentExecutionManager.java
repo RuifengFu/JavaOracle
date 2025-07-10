@@ -1,6 +1,7 @@
 package edu.tju.ista.llm4test.concurrent;
 
 import edu.tju.ista.llm4test.utils.LoggerUtil;
+import edu.tju.ista.llm4test.config.GlobalConfig;
 
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -57,8 +58,8 @@ public class ConcurrentExecutionManager {
         this.batchExecutor = createBatchExecutor();
         
         LoggerUtil.logExec(Level.INFO, 
-            String.format("并发执行管理器初始化完成 - CPU核心数: %d, 虚拟线程支持: %s, LLM执行器: %s, 测试执行器: ForkJoinPool", 
-                cpuCores, virtualThreadsSupported, 
+            String.format("并发执行管理器初始化完成 - CPU核心数: %d, 虚拟线程配置: %s, 虚拟线程支持: %s, LLM执行器: %s, 测试执行器: ForkJoinPool", 
+                cpuCores, GlobalConfig.isVirtualThreadsEnabled(), virtualThreadsSupported,
                 virtualThreadsSupported ? "虚拟线程" : "传统线程池"));
         
         // 注册关闭钩子
@@ -69,6 +70,12 @@ public class ConcurrentExecutionManager {
      * 检查是否支持虚拟线程（Java 19+）
      */
     private boolean isVirtualThreadsSupported() {
+        // 首先检查配置是否启用了虚拟线程支持
+        if (!GlobalConfig.isVirtualThreadsEnabled()) {
+            LoggerUtil.logExec(Level.INFO, "虚拟线程支持已通过配置禁用，将使用传统线程池");
+            return false;
+        }
+        
         try {
             // 尝试获取虚拟线程相关的方法
             Thread.class.getMethod("startVirtualThread", Runnable.class);
@@ -266,9 +273,9 @@ public class ConcurrentExecutionManager {
      */
     public void logStatus() {
         LoggerUtil.logExec(Level.INFO, 
-            String.format("并发执行状态 - %s | %s | %s | 虚拟线程支持: %s", 
+            String.format("并发执行状态 - %s | %s | %s | 虚拟线程配置: %s | 虚拟线程支持: %s", 
                 getLLMPoolStatus(), getTestPoolStatus(), getBatchPoolStatus(),
-                virtualThreadsSupported));
+                GlobalConfig.isVirtualThreadsEnabled(), virtualThreadsSupported));
     }
     
     /**
@@ -277,14 +284,17 @@ public class ConcurrentExecutionManager {
     public void performanceReport() {
         StringBuilder report = new StringBuilder();
         report.append("=== 性能报告 ===\n");
-        report.append(String.format("虚拟线程支持: %s\n", virtualThreadsSupported));
+        report.append(String.format("虚拟线程配置启用: %s\n", GlobalConfig.isVirtualThreadsEnabled()));
+        report.append(String.format("虚拟线程实际支持: %s\n", virtualThreadsSupported));
         report.append(String.format("CPU核心数: %d\n", Runtime.getRuntime().availableProcessors()));
         report.append(String.format("当前活跃LLM任务: %d\n", activeLLMTasks.get()));
         report.append(String.format("当前活跃测试任务: %d\n", activeTestTasks.get()));
         report.append(String.format("当前活跃批量任务: %d\n", activeBatchTasks.get()));
         
         // 性能建议
-        if (!virtualThreadsSupported) {
+        if (!GlobalConfig.isVirtualThreadsEnabled()) {
+            report.append("建议: 虚拟线程支持已被配置禁用，如需更好的IO性能可在config.properties中设置virtualThreads.enabled=true\n");
+        } else if (!virtualThreadsSupported) {
             report.append("建议: 升级到Java 19+以获得虚拟线程支持，可显著提升IO密集型任务性能\n");
         }
         
