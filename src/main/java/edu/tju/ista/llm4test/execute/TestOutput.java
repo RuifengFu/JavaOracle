@@ -40,7 +40,10 @@ public class TestOutput {
 
         for (String line : lines) {
             line = line.trim();
-
+            if(line.contains("Compilation failed")) {
+                testOutput.append(line).append("\n");
+                continue;
+            }
             // 跳过空行和分隔线
             if (line.isEmpty() || line.startsWith("---")) {
                 continue;

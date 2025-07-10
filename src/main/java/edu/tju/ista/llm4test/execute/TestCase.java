@@ -302,6 +302,8 @@ public class TestCase {
             var rootCauseCall = callList.get(0);
             var arguments = rootCauseCall.arguments;
             var reportBug = ((boolean) arguments.get("report_bug"));
+            reportBug = reportBug & (!this.result.getCompilationFailed()); // 如果编译失败，则不报告Bug
+            arguments.put("report_bug", reportBug);
             if (reportBug) {
                 this.result.setKind(TestResultKind.VERIFIED_BUG);
             } else {

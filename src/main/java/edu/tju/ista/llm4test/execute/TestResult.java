@@ -12,6 +12,7 @@ public class TestResult {
     private TestOutput jtregResult;
     private HashMap<String, TestOutput> execResults = new HashMap<>();
     private String output;
+    private boolean compilationFailed;
 
     public TestResult() {
         this.kind = TestResultKind.UNKNOWN;
@@ -22,6 +23,7 @@ public class TestResult {
         this.kind = kind;
         this.compileResult = null;
         this.execResults = null;
+        this.compilationFailed = false;
     }
 
 
@@ -35,6 +37,11 @@ public class TestResult {
             }
         } else {
             kind = TestResultKind.SUCCESS;
+        }
+        if (jtregResult.toString().contains("Compilation failed")) {
+            compilationFailed = true;
+        } else {
+            compilationFailed = false;
         }
     }
 
@@ -98,6 +105,7 @@ public class TestResult {
                 kind = TestResultKind.SUCCESS;
             }
         }
+        compilationFailed = results.values().stream().anyMatch(result -> result.toString().contains("Compilation failed"));
     }
 
     public void setKind(TestResultKind kind) {
@@ -121,6 +129,9 @@ public class TestResult {
         return jtregResult;
     }
 
+    public boolean getCompilationFailed() {
+        return compilationFailed;
+    }
 
     public String toString() {
         if (!execResults.isEmpty()) {
