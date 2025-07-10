@@ -35,6 +35,9 @@ public class ConcurrentExecutionManager {
     // 是否支持虚拟线程
     private final boolean virtualThreadsSupported;
     
+    // 是否已经关闭
+    private volatile boolean isShutdown = false;
+    
     private ConcurrentExecutionManager() {
         int cpuCores = Runtime.getRuntime().availableProcessors();
         this.virtualThreadsSupported = isVirtualThreadsSupported();
@@ -292,6 +295,12 @@ public class ConcurrentExecutionManager {
      * 优雅关闭所有线程池
      */
     public void shutdown() {
+        if (isShutdown) {
+            LoggerUtil.logExec(Level.INFO, "并发执行管理器已经关闭，跳过重复关闭");
+            return;
+        }
+        
+        isShutdown = true;
         LoggerUtil.logExec(Level.INFO, "开始关闭并发执行管理器...");
         
         shutdownExecutorGracefully(llmExecutor, "LLM", 30);
@@ -299,6 +308,13 @@ public class ConcurrentExecutionManager {
         shutdownExecutorGracefully(batchExecutor, "批量", 10);
         
         LoggerUtil.logExec(Level.INFO, "并发执行管理器关闭完成");
+    }
+    
+    /**
+     * 检查是否已经关闭
+     */
+    public boolean isShutdown() {
+        return isShutdown;
     }
     
     /**
@@ -355,7 +371,7 @@ public class ConcurrentExecutionManager {
         @Override
         public Thread newThread(Runnable r) {
             Thread t = new Thread(r, namePrefix + threadNumber.getAndIncrement());
-            // t.setDaemon(true); // 设置为守护线程
+            t.setDaemon(true); // 设置为守护线程
             if (t.getPriority() != Thread.NORM_PRIORITY) {
                 t.setPriority(Thread.NORM_PRIORITY);
             }

@@ -58,6 +58,13 @@ public class Main {
             System.err.println("执行失败: " + e.getMessage());
             e.printStackTrace();
             System.exit(1);
+        } finally {
+            // 确保程序结束时关闭所有线程池
+            try {
+                edu.tju.ista.llm4test.concurrent.ConcurrentExecutionManager.getInstance().shutdown();
+            } catch (Exception e) {
+                System.err.println("关闭线程池时出错: " + e.getMessage());
+            }
         }
     }
     
