@@ -241,7 +241,8 @@ public class TestCase {
             final int maxAttempts = 3;
             
             while (attempt < maxAttempts) {
-                LoggerUtil.logResult(Level.INFO, file + " " + currentResult.getKind());
+                // not final result, no need to log in result
+                LoggerUtil.logExec(Level.INFO, file + " is fixing: " + currentResult.getKind());
                 this.setResult(currentResult); // 确保TestCase对象的result字段是最新的
 
                 if (!currentResult.isFail()) {
