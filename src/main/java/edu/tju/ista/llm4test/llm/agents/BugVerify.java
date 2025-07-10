@@ -235,6 +235,11 @@ public class BugVerify extends Agent {
                 fileName = "WrongFormatReport.md";
             }
             saveToFile(Paths.get(bugReportPath, testCaseName, fileName).toString(), report);
+            
+            // 记录最终结果
+            var result = fileName.replace(".md", "");
+            LoggerUtil.logResult(Level.INFO, "BugVerifyAgent: " + testCase.getFile().getAbsolutePath() + " " + result);
+            LoggerUtil.logExec(Level.INFO, "BugVerifyAgent: " + testCase.getFile().getAbsolutePath() + " " + result);
         }
         
         return report;
@@ -542,11 +547,16 @@ public class BugVerify extends Agent {
      * 假设验证阶段 - 通过执行测试来验证假设
      */
     private void verifyHypotheses() {
+        LoggerUtil.logExec(Level.INFO, "开始假设验证阶段，共有 " + hypotheses.size() + " 个假设");
+        
         for (String hypothesisJson : hypotheses) {
-
-
             String verificationCode = extractJsonFieldValue(hypothesisJson, "verificationCode");
             String hypothesisId = extractJsonFieldValue(hypothesisJson, "id");
+            String hypothesisDescription = extractJsonFieldValue(hypothesisJson, "description");
+            
+            LoggerUtil.logExec(Level.INFO, "=== 处理假设 " + hypothesisId + " ===");
+            LoggerUtil.logExec(Level.INFO, "假设描述: " + (hypothesisDescription != null ? hypothesisDescription : "无描述"));
+            
             try {
                 String prompt = PromptGen.generateBugVerifyInstantiateTestCase(testCode, hypothesisJson);
                 String text = filterThinkingChain(llm.messageCompletion(prompt));
@@ -556,31 +566,69 @@ public class BugVerify extends Agent {
                     LoggerUtil.logExec(Level.WARNING, "测试用例为空跳过 " + testCaseName + " " + hypothesisId);
                     continue;
                 }
+                
+                // 修改代码中的类名，使其与文件名一致
+                String expectedClassName = hypothesisId;
+                String actualClassName = extractClassNameFromCode(code);
+                
+                LoggerUtil.logExec(Level.INFO, "类名信息 - 假设ID: " + hypothesisId + 
+                                  ", 期望类名: " + expectedClassName + 
+                                  ", 原始类名: " + (actualClassName != null ? actualClassName : "未找到"));
+                
+                if (actualClassName != null && !actualClassName.equals(expectedClassName)) {
+                    // 替换类名
+                    code = code.replaceAll("public\\s+class\\s+" + Pattern.quote(actualClassName), 
+                                         "public class " + expectedClassName);
+                    LoggerUtil.logExec(Level.INFO, "✓ 类名已修改: " + actualClassName + " → " + expectedClassName);
+                } else if (actualClassName != null) {
+                    LoggerUtil.logExec(Level.INFO, "✓ 类名已匹配: " + actualClassName);
+                } else {
+                    LoggerUtil.logExec(Level.WARNING, "⚠ 未找到类名定义，假设类名为: " + expectedClassName);
+                }
+                
                 Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
                 Path hypothesesDir = verifyContextPath.resolve("hypotheses");
-                saveToFile(hypothesesDir.resolve(hypothesisId + ".java").toString(), code);
+                String fileName = hypothesisId + ".java";
+                saveToFile(hypothesesDir.resolve(fileName).toString(), code);
+                LoggerUtil.logExec(Level.INFO, "✓ 测试文件已保存: " + fileName);
+                
                 verificationCode = code; // 使用实例化后的代码
             } catch (Exception e) {
-                LoggerUtil.logExec(Level.SEVERE, "测试用例模板实例化失败 " + testCaseName + " " + hypothesisId + " " + e.getMessage());
+                LoggerUtil.logExec(Level.SEVERE, "✗ 测试用例模板实例化失败 " + testCaseName + " " + hypothesisId + " " + e.getMessage());
+                continue;
             }
             
             if (verificationCode != null && !verificationCode.isEmpty()) {
                 if (verificationCode.contains("@test")) { // 包含jtreg风格的注释。
+                    LoggerUtil.logExec(Level.INFO, "使用 jtreg 执行测试: " + hypothesisId);
                     ToolResponse<TestResult> result = jtregTool.execute(verificationCode);
                     verificationResults.put(hypothesisId, result.getResult());
+                    LoggerUtil.logExec(Level.INFO, "jtreg 执行结果 - 假设 " + hypothesisId + ": " + 
+                                      (result.isSuccess() ? "成功" : "失败"));
                 } else {
-                    String className = extractClassNameFromCode(verificationCode);
-                    if (className != null) {
-                        ToolResponse<String> javaResult = executeTool.execute(className);
-                        // 创建一个简单的TestResult对象记录执行结果
-                        TestResult testResult = new TestResult();
-                        testResult.setSuccess(javaResult.isSuccess());
-                        testResult.setOutput(javaResult.isSuccess() ? javaResult.getResult() : javaResult.getFailMessage());
-                        verificationResults.put(hypothesisId, testResult);
+                    // 现在使用文件名作为类名，确保一致性
+                    String className = hypothesisId;
+                    LoggerUtil.logExec(Level.INFO, "使用 Java 执行测试 - 假设: " + hypothesisId + ", 类名: " + className + ", 文件: " + className + ".java");
+                    ToolResponse<String> javaResult = executeTool.execute(className);
+                    
+                    // 创建一个简单的TestResult对象记录执行结果
+                    TestResult testResult = new TestResult();
+                    testResult.setSuccess(javaResult.isSuccess());
+                    testResult.setOutput(javaResult.isSuccess() ? javaResult.getResult() : javaResult.getFailMessage());
+                    verificationResults.put(hypothesisId, testResult);
+                    
+                    LoggerUtil.logExec(Level.INFO, "Java 执行结果 - 假设 " + hypothesisId + ": " + 
+                                      (javaResult.isSuccess() ? "成功" : "失败"));
+                    if (!javaResult.isSuccess()) {
+                        LoggerUtil.logExec(Level.WARNING, "执行失败详情 - 假设 " + hypothesisId + ": " + javaResult.getFailMessage());
                     }
                 }
+            } else {
+                LoggerUtil.logExec(Level.WARNING, "✗ 验证代码为空，跳过执行 - 假设: " + hypothesisId);
             }
         }
+        
+        LoggerUtil.logExec(Level.INFO, "假设验证阶段完成，验证结果数: " + verificationResults.size());
         
         // 立即保存验证结果
         saveVerificationResults();
@@ -896,41 +944,45 @@ public class BugVerify extends Agent {
             
             LoggerUtil.logExec(Level.INFO, "从日志中找到 " + verifiedBugs.size() + " 个已验证的bug");
 
+            // 使用批量处理线程池进行并发处理，避免与测试线程池冲突
             var manager = ConcurrentExecutionManager.getInstance();
             var futures = new ArrayList<CompletableFuture<Void>>();
-            // 为每个bug生成报告
+            
+            // 为每个bug并发生成报告
             for (Map.Entry<String, String> entry : verifiedBugs.entrySet()) {
                 String originFilePath = entry.getKey();
                 String filePath = originFilePath.replace("jdk17u-dev/test", "test");
                 String verifyMessage = entry.getValue();
-                var future = manager.submitTestTask(() -> {
+                
+                // 使用批量处理线程池，避免占用测试线程池
+                CompletableFuture<Void> future = manager.submitBatchTask(() -> {
+                    LoggerUtil.logExec(Level.INFO, "开始处理bug: " + filePath);
+                    
                     BugVerify agent = new BugVerify(javadocPath, sourcePath, bugReportPath);
-                    // 从JDK路径转换到测试路径
-                    File originFile = new File(filePath);
-                    File testFile = new File(filePath.replace("jdk17u-dev/test", "test"));
-
-                    if (!testFile.exists()) {
-                        LoggerUtil.logExec(Level.WARNING, "测试文件不存在: " + filePath);
-                        return;
-                    }
-
-                    // 使用存在的文件
-
-
-                    TestCase testcase = new TestCase(testFile);
-                    testcase.setOriginFile(originFile);
-                    testcase.verifyMessage = verifyMessage;
-                    testcase.setApiDocProcessor(ApiInfoProcessor.fromConfig());
-
-
-                    String testCaseName = testFile.getName().replace(".java", "");
-                    LoggerUtil.logExec(Level.INFO, "正在分析bug: " + testCaseName);
-
+                    
                     try {
+                        // 从JDK路径转换到测试路径
+                        File originFile = new File(filePath);
+                        File testFile = new File(filePath.replace("jdk17u-dev/test", "test"));
+
+                        if (!testFile.exists()) {
+                            LoggerUtil.logExec(Level.WARNING, "测试文件不存在: " + filePath);
+                            return null;
+                        }
+
+                        // 使用存在的文件
+                        TestCase testcase = new TestCase(testFile);
+                        testcase.setOriginFile(originFile);
+                        testcase.verifyMessage = verifyMessage;
+                        testcase.setApiDocProcessor(ApiInfoProcessor.fromConfig());
+
+                        String testCaseName = testFile.getName().replace(".java", "");
+                        LoggerUtil.logExec(Level.INFO, "正在分析bug: " + testCaseName);
+
                         // 读取测试用例内容
                         String sourceCode = Files.readString(testFile.toPath());
 
-                        // 运行测试获取输出
+                        // 运行测试获取输出 - 现在安全了，因为JtregExecuteTool使用同步调用
                         JtregExecuteTool jtregTool = new JtregExecuteTool();
                         ToolResponse<TestResult> response = jtregTool.execute(testcase.getFile().toPath(), testCaseName);
 
@@ -948,23 +1000,30 @@ public class BugVerify extends Agent {
                         agent.analyze();
 
                         LoggerUtil.logExec(Level.INFO, "Bug报告已生成: " + testCaseName);
+                        
                     } catch (Exception e) {
-                        LoggerUtil.logExec(Level.WARNING, "为测试用例生成报告失败: " + testCaseName);
+                        LoggerUtil.logExec(Level.WARNING, "为测试用例生成报告失败: " + filePath + " - " + e.getMessage());
                         e.printStackTrace();
                     } finally {
+                        // 确保资源得到正确释放
                         agent.close();
                     }
+                    
+                    return null;
                 });
 
                 futures.add(future);
             }
-            futures.forEach(CompletableFuture::join);
+            
+            // 等待所有并发任务完成
+            LoggerUtil.logExec(Level.INFO, "等待 " + futures.size() + " 个并发Bug验证任务完成...");
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+            
             LoggerUtil.logExec(Level.INFO, "Bug验证和报告生成完成，报告保存在: " + bugReportPath);
         } catch (Exception e) {
             LoggerUtil.logExec(Level.SEVERE, "Bug验证过程失败: " + e.getMessage());
             e.printStackTrace();
         }
-
     }
 
 
