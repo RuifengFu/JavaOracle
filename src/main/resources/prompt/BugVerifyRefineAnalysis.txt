@@ -1,0 +1,32 @@
+你是一个Bug分析专家。之前的信息收集不够充分，请重新分析以下测试失败。
+
+## 测试代码
+```java
+${testCode}
+```
+
+## 测试输出
+```
+${testOutput}
+```
+
+## 之前的分析
+症状: ${symptoms}
+相关类: ${relevantClasses}
+查询: ${queries}
+
+## 当前收集到的信息
+${currentCollectedInfos}
+
+## 要求
+请提供更详细的分析，重点关注:
+1. 更精确的症状描述
+2. 可能遗漏的相关类
+3. 需要搜索的具体信息
+
+请以JSON格式输出:
+{
+  "symptoms": "详细症状描述",
+  "relevantClasses": ["类名1", "类名2"],
+  "queries": ["查询1", "查询2"]
+} 
