@@ -50,9 +50,11 @@ public class BugVerify extends Agent {
     // 新增的智能工具
     private final ContentProcessor contentProcessor;
 
-    
     // Agent for test case minimization
     private final TestCaseAgent minimizationAgent;
+    
+    // Agent for hypothesis formation and verification
+    private final HypothesisAgent hypothesisAgent;
     
     // LLM实例
     private final OpenAI llm;
@@ -78,8 +80,6 @@ public class BugVerify extends Agent {
     private String testOutput;
     private String initialAnalysis;
     private Map<String, Object> collectedInfo = new HashMap<>();
-    private List<String> hypotheses = new ArrayList<>();
-    private Map<String, TestResult> verificationResults = new HashMap<>();
     private String conclusion;
     
     // 报告输出路径
@@ -108,6 +108,7 @@ public class BugVerify extends Agent {
         this.contentProcessor = new ContentProcessor(bugReportPath + "/content_cache");
         this.minimizationAgent = new TestCaseAgent();
         this.infoCollectionAgent = new InformationCollectionAgent(sourcePath, javadocPath);
+        this.hypothesisAgent = new HypothesisAgent();
     }
     
     /**
@@ -212,20 +213,20 @@ public class BugVerify extends Agent {
         // 保存收集到的信息
         saveCollectedInfo();
         
-        // 3. 形成假设
-        formHypotheses();
-        LoggerUtil.logExec(Level.INFO, "形成 " + hypotheses.size() + " 个假设");
-
+        // 3. 设置HypothesisAgent工作环境
+        hypothesisAgent.setWorkingEnvironment(verifyContextPath.toString(), testCaseName);
         
-        // 4. 验证假设
-        verifyHypotheses();
+        // 4. 形成假设
+        List<String> hypotheses = hypothesisAgent.formHypotheses(testCode, testOutput, 
+            buildCollectedInformationString());
+        LoggerUtil.logExec(Level.INFO, "形成 " + hypotheses.size() + " 个假设");
+        
+        // 5. 验证假设
+        Map<String, TestResult> verificationResults = hypothesisAgent.verifyHypotheses(testCode);
         LoggerUtil.logExec(Level.INFO, "验证完成，结果数: " + verificationResults.size());
         
-        // 保存验证结果
-        saveVerificationResults();
-        
-        // 5. 形成结论和报告
-        String report = generateReport();
+        // 6. 形成结论和报告
+        String report = generateReport(hypotheses, verificationResults);
         LoggerUtil.logExec(Level.INFO, "Bug验证报告已生成");
         
         // 保存最终报告
@@ -451,11 +452,18 @@ public class BugVerify extends Agent {
         }
     }
     
+
+    
+
+    
+
+    
+
+    
     /**
-     * 假设形成阶段 - 基于收集到的信息形成假设
+     * 构建收集信息的字符串
      */
-    private void formHypotheses() {
-        // 构建提示，包含所有收集到的信息
+    private String buildCollectedInformationString() {
         StringBuilder infoBuilder = new StringBuilder();
         infoBuilder.append("# 收集的信息\n\n");
         
@@ -482,319 +490,16 @@ public class BugVerify extends Agent {
             }
         }
         
-        LoggerUtil.logExec(Level.INFO, String.format("假设形成阶段使用了 %d 条信息，总大小: %d 字符", 
+        LoggerUtil.logExec(Level.INFO, String.format("信息字符串构建完成，使用了 %d 条信息，总大小: %d 字符", 
             infoCount, totalContentSize));
         
-        try {
-            String prompt = PromptGen.generateBugVerifyFormHypothesesPrompt(testCode, testOutput, infoBuilder.toString());
-            
-            // 记录prompt大小
-            LoggerUtil.logExec(Level.INFO, "假设形成prompt大小: " + prompt.length() + " 字符");
-            
-            String response = llm.messageCompletion(prompt, 0.7, true);
-            response = filterThinkingChain(response);
-
-            hypotheses = extractJsonObjectArrayFromField(response, "hypotheses");
-            
-            LoggerUtil.logExec(Level.INFO, String.format("成功形成 %d 个假设", hypotheses.size()));
-            
-            // 立即保存假设
-            saveHypotheses(response);
-        } catch (TemplateException | IOException e) {
-            LoggerUtil.logExec(Level.SEVERE, "生成假设形成prompt失败: " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
-    
-    /**
-     * 保存假设
-     */
-    private void saveHypotheses(String response) {
-        if (verifyContextFolder == null || testCaseName == null) return;
-        
-        try {
-            // 创建假设目录
-            Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
-            Path hypothesesDir = verifyContextPath.resolve("hypotheses");
-            Files.createDirectories(hypothesesDir);
-
-            saveToFile(hypothesesDir.resolve("response.txt").toString(), response);
-            
-            // 保存每个假设
-            for (int i = 0; i < hypotheses.size(); i++) {
-                String hypothesis = hypotheses.get(i);
-                String id = extractJsonFieldValue(hypothesis, "id");
-                if (id == null) id = "H" + (i + 1);
-                
-                saveToFile(hypothesesDir.resolve(id + ".json").toString(), hypothesis);
-                
-
-            }
-
-
-            // 保存假设汇总
-            StringBuilder summary = new StringBuilder();
-            summary.append("# 假设汇总\n\n");
-            for (String hypothesis : hypotheses) {
-                String id = extractJsonFieldValue(hypothesis, "id");
-                String description = extractJsonFieldValue(hypothesis, "description");
-                String category = extractJsonFieldValue(hypothesis, "category");
-                
-                summary.append("## ").append(id != null ? id : "未知ID").append("\n\n");
-                summary.append("- 描述: ").append(description != null ? description : "无描述").append("\n");
-                summary.append("- 类别: ").append(category != null ? category : "未分类").append("\n\n");
-            }
-            saveToFile(hypothesesDir.resolve("_summary.md").toString(), summary.toString());
-        } catch (IOException e) {
-            LoggerUtil.logExec(Level.WARNING, "保存假设失败: " + e.getMessage());
-        }
-    }
-    
-    /**
-     * 假设验证阶段 - 通过执行测试来验证假设
-     */
-    private void verifyHypotheses() {
-        LoggerUtil.logExec(Level.INFO, "开始假设验证阶段，共有 " + hypotheses.size() + " 个假设");
-        
-        for (String hypothesisJson : hypotheses) {
-            String verificationCode = extractJsonFieldValue(hypothesisJson, "verificationCode");
-            String hypothesisId = extractJsonFieldValue(hypothesisJson, "id");
-            String hypothesisDescription = extractJsonFieldValue(hypothesisJson, "description");
-            
-            LoggerUtil.logExec(Level.INFO, "=== 处理假设 " + hypothesisId + " ===");
-            LoggerUtil.logExec(Level.INFO, "假设描述: " + (hypothesisDescription != null ? hypothesisDescription : "无描述"));
-            
-            try {
-                String prompt = PromptGen.generateBugVerifyInstantiateTestCase(testCode, hypothesisJson);
-                String text = filterThinkingChain(llm.messageCompletion(prompt));
-                ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
-                String code = codeBlocks.isEmpty()? "" : codeBlocks.get(codeBlocks.size() - 1);
-                if (code.isEmpty()) {
-                    LoggerUtil.logExec(Level.WARNING, "测试用例为空跳过 " + testCaseName + " " + hypothesisId);
-                    continue;
-                }
-                
-                // 修改代码中的类名，使其与文件名一致
-                String expectedClassName = hypothesisId;
-                String actualClassName = extractClassNameFromCode(code);
-                
-                LoggerUtil.logExec(Level.INFO, "类名信息 - 假设ID: " + hypothesisId + 
-                                  ", 期望类名: " + expectedClassName + 
-                                  ", 原始类名: " + (actualClassName != null ? actualClassName : "未找到"));
-                
-                if (actualClassName != null && !actualClassName.equals(expectedClassName)) {
-                    // 替换类名
-                    code = code.replaceAll("public\\s+class\\s+" + Pattern.quote(actualClassName), 
-                                         "public class " + expectedClassName);
-                    LoggerUtil.logExec(Level.INFO, "✓ 类名已修改: " + actualClassName + " → " + expectedClassName);
-                } else if (actualClassName != null) {
-                    LoggerUtil.logExec(Level.INFO, "✓ 类名已匹配: " + actualClassName);
-                } else {
-                    LoggerUtil.logExec(Level.WARNING, "⚠ 未找到类名定义，假设类名为: " + expectedClassName);
-                }
-                
-                Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
-                Path hypothesesDir = verifyContextPath.resolve("hypotheses");
-                String fileName = hypothesisId + ".java";
-                saveToFile(hypothesesDir.resolve(fileName).toString(), code);
-                LoggerUtil.logExec(Level.INFO, "✓ 测试文件已保存: " + fileName);
-                
-                verificationCode = code; // 使用实例化后的代码
-            } catch (Exception e) {
-                LoggerUtil.logExec(Level.SEVERE, "✗ 测试用例模板实例化失败 " + testCaseName + " " + hypothesisId + " " + e.getMessage());
-                continue;
-            }
-            
-            if (verificationCode != null && !verificationCode.isEmpty()) {
-                if (verificationCode.contains("@test")) { // 包含jtreg风格的注释。
-                    LoggerUtil.logExec(Level.INFO, "使用 jtreg 执行测试: " + hypothesisId);
-                    ToolResponse<TestResult> result = jtregTool.execute(verificationCode);
-                    verificationResults.put(hypothesisId, result.getResult());
-                    LoggerUtil.logExec(Level.INFO, "jtreg 执行结果 - 假设 " + hypothesisId + ": " + 
-                                      (result.isSuccess() ? "成功" : "失败"));
-                } else {
-                    // 先编译Java文件
-                    Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
-                    Path hypothesesDir = verifyContextPath.resolve("hypotheses");
-                    String className = hypothesisId;
-                    String fileName = className + ".java";
-                    Path sourceFile = hypothesesDir.resolve(fileName);
-                    
-                    LoggerUtil.logExec(Level.INFO, "开始编译Java文件: " + sourceFile);
-                    
-                    // 编译Java文件
-                    boolean compileSuccess = compileJavaFile(sourceFile, hypothesesDir);
-                    
-                    if (!compileSuccess) {
-                        LoggerUtil.logExec(Level.WARNING, "✗ 编译失败，跳过执行 - 假设: " + hypothesisId);
-                        TestResult testResult = new TestResult();
-                        testResult.setSuccess(false);
-                        testResult.setOutput("编译失败");
-                        verificationResults.put(hypothesisId, testResult);
-                        continue;
-                    }
-                    
-                    LoggerUtil.logExec(Level.INFO, "✓ 编译成功，开始执行 - 假设: " + hypothesisId);
-                    
-                    // 使用改进的JavaExecuteTool执行测试
-                    ToolResponse<String> javaResult = executeCompiledClass(className, hypothesesDir);
-                    
-                    // 创建一个简单的TestResult对象记录执行结果
-                    TestResult testResult = new TestResult();
-                    testResult.setSuccess(javaResult.isSuccess());
-                    testResult.setOutput(javaResult.isSuccess() ? javaResult.getResult() : javaResult.getFailMessage());
-                    verificationResults.put(hypothesisId, testResult);
-                    
-                    LoggerUtil.logExec(Level.INFO, "Java 执行结果 - 假设 " + hypothesisId + ": " + 
-                                      (javaResult.isSuccess() ? "成功" : "失败"));
-                    if (!javaResult.isSuccess()) {
-                        LoggerUtil.logExec(Level.WARNING, "执行失败详情 - 假设 " + hypothesisId + ": " + javaResult.getFailMessage());
-                    }
-                }
-            } else {
-                LoggerUtil.logExec(Level.WARNING, "✗ 验证代码为空，跳过执行 - 假设: " + hypothesisId);
-            }
-        }
-        
-        LoggerUtil.logExec(Level.INFO, "假设验证阶段完成，验证结果数: " + verificationResults.size());
-        
-        // 立即保存验证结果
-        saveVerificationResults();
-    }
-
-    /**
-     * 编译Java源文件
-     * @param sourceFile 源文件路径
-     * @param outputDir 输出目录
-     * @return 编译是否成功
-     */
-    private boolean compileJavaFile(Path sourceFile, Path outputDir) {
-        try {
-            List<String> command = new ArrayList<>();
-            command.add("javac");
-            command.add("-d");
-            command.add(outputDir.toString());
-            command.add(sourceFile.toString());
-            
-            ProcessBuilder pb = new ProcessBuilder(command);
-            pb.directory(outputDir.toFile());
-            pb.redirectErrorStream(true);
-            
-            Process process = pb.start();
-            
-            // 读取编译输出
-            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-            String output = reader.lines().collect(Collectors.joining("\n"));
-            
-            boolean finished = process.waitFor(30, TimeUnit.SECONDS);
-            if (!finished) {
-                process.destroyForcibly();
-                LoggerUtil.logExec(Level.WARNING, "编译超时: " + sourceFile);
-                return false;
-            }
-            
-            int exitCode = process.exitValue();
-            if (exitCode == 0) {
-                LoggerUtil.logExec(Level.INFO, "编译成功: " + sourceFile);
-                return true;
-            } else {
-                LoggerUtil.logExec(Level.WARNING, "编译失败: " + sourceFile + "\n输出: " + output);
-                return false;
-            }
-        } catch (Exception e) {
-            LoggerUtil.logExec(Level.SEVERE, "编译异常: " + sourceFile + " - " + e.getMessage());
-            return false;
-        }
-    }
-    
-    /**
-     * 执行已编译的类文件
-     * @param className 类名
-     * @param classPath 类路径
-     * @return 执行结果
-     */
-    private ToolResponse<String> executeCompiledClass(String className, Path classPath) {
-        try {
-            List<String> command = new ArrayList<>();
-            command.add("java");
-            command.add("-cp");
-            command.add(classPath.toString());
-            command.add(className);
-            
-            ProcessBuilder pb = new ProcessBuilder(command);
-            pb.directory(classPath.toFile());
-            pb.redirectErrorStream(true);
-            
-            Process process = pb.start();
-            
-            // 读取输出
-            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-            String output = reader.lines().collect(Collectors.joining("\n"));
-            
-            boolean finished = process.waitFor(60, TimeUnit.SECONDS);
-            if (!finished) {
-                process.destroyForcibly();
-                return ToolResponse.failure("执行超时");
-            }
-            
-            int exitCode = process.exitValue();
-            if (exitCode == 0) {
-                return ToolResponse.success(output);
-            } else {
-                return ToolResponse.failure("执行失败，退出码: " + exitCode + "\n输出: " + output);
-            }
-        } catch (Exception e) {
-            return ToolResponse.failure("执行异常: " + e.getMessage());
-        }
-    }
-    
-    /**
-     * 保存验证结果
-     */
-    private void saveVerificationResults() {
-        if (verifyContextFolder == null || testCaseName == null) return;
-        
-        try {
-            // 创建验证结果目录
-            Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
-            Path resultsDir = verifyContextPath.resolve("verification_results");
-            Files.createDirectories(resultsDir);
-            
-            // 保存每个验证结果
-            for (Map.Entry<String, TestResult> entry : verificationResults.entrySet()) {
-                String id = entry.getKey();
-                TestResult result = entry.getValue();
-                
-                StringBuilder content = new StringBuilder();
-                content.append("# 验证结果: ").append(id).append("\n\n");
-                content.append("成功: ").append(result.isSuccess()).append("\n\n");
-                content.append("输出:\n```\n").append(result.getOutput()).append("\n```\n");
-                
-                saveToFile(resultsDir.resolve(id + "_result.md").toString(), content.toString());
-            }
-            
-            // 保存验证结果汇总
-            StringBuilder summary = new StringBuilder();
-            summary.append("# 验证结果汇总\n\n");
-            for (Map.Entry<String, TestResult> entry : verificationResults.entrySet()) {
-                summary.append("## ").append(entry.getKey()).append("\n\n");
-                summary.append("- 成功: ").append(entry.getValue().isSuccess()).append("\n");
-                summary.append("- 输出摘要: ").append(
-                        entry.getValue().getOutput().length() > 100 
-                        ? entry.getValue().getOutput().substring(0, 100) + "..." 
-                        : entry.getValue().getOutput()
-                ).append("\n\n");
-            }
-            saveToFile(resultsDir.resolve("_summary.md").toString(), summary.toString());
-        } catch (IOException e) {
-            LoggerUtil.logExec(Level.WARNING, "保存验证结果失败: " + e.getMessage());
-        }
+        return infoBuilder.toString();
     }
     
     /**
      * 结论形成阶段 - 生成最终报告
      */
-    private String generateReport() {
+    private String generateReport(List<String> hypotheses, Map<String, TestResult> verificationResults) {
         // 构建验证结果
         StringBuilder resultsBuilder = new StringBuilder();
         for (Map.Entry<String, TestResult> entry : verificationResults.entrySet()) {
