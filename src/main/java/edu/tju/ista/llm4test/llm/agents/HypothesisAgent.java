@@ -11,6 +11,7 @@ import edu.tju.ista.llm4test.prompt.PromptGen;
 import freemarker.template.TemplateException;
 
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.file.Files;
@@ -42,10 +43,16 @@ public class HypothesisAgent extends Agent {
     private String workingDir;
     private String testCaseName;
     
+    // 项目根目录 - 确保所有路径基于正确的根目录
+    private final String projectRoot;
+    
     public HypothesisAgent() {
         this.llm = OpenAI.R1;
         this.executeTool = new JavaExecuteTool();
         this.jtregTool = new JtregExecuteTool();
+        // 获取项目根目录
+        this.projectRoot = System.getProperty("user.dir");
+        LoggerUtil.logExec(Level.INFO, "项目根目录: " + projectRoot);
     }
     
     /**
@@ -186,23 +193,32 @@ public class HypothesisAgent extends Agent {
      */
     private Path saveTestCase(String code, String hypothesisId) {
         try {
+            // 确保目录结构存在
+            Path targetDir = Paths.get(projectRoot, "target");
+            Path classesDir = targetDir.resolve("classes");
+            Path testClassesDir = targetDir.resolve("test-classes");
+            
+            Files.createDirectories(classesDir);
+            Files.createDirectories(testClassesDir);
+            
             // 保存到验证上下文目录（用于记录）
-            Path verifyContextPath = Paths.get(workingDir);
-            Path hypothesesDir = verifyContextPath.resolve("hypotheses");
-            Files.createDirectories(hypothesesDir);
+            if (workingDir != null) {
+                Path verifyContextPath = Paths.get(workingDir);
+                Path hypothesesDir = verifyContextPath.resolve("hypotheses");
+                Files.createDirectories(hypothesesDir);
+                
+                String fileName = hypothesisId + ".java";
+                Path testFilePath = hypothesesDir.resolve(fileName);
+                saveToFile(testFilePath.toString(), code);
+            }
             
+            // 保存到target/test-classes目录，以便编译和执行
             String fileName = hypothesisId + ".java";
-            Path testFilePath = hypothesesDir.resolve(fileName);
-            saveToFile(testFilePath.toString(), code);
-            
-            // 同时保存到target/test-classes目录，以便JavaExecuteTool能找到
-            Path targetDir = Paths.get("target/test-classes");
-            Files.createDirectories(targetDir);
-            Path targetTestFile = targetDir.resolve(fileName);
+            Path targetTestFile = testClassesDir.resolve(fileName);
             saveToFile(targetTestFile.toString(), code);
             
-            LoggerUtil.logExec(Level.INFO, "✓ 测试文件已保存: " + fileName + " (保存到验证目录和target目录)");
-            return testFilePath;
+            LoggerUtil.logExec(Level.INFO, "✓ 测试文件已保存: " + fileName + " (保存到target目录)");
+            return targetTestFile;
         } catch (IOException e) {
             LoggerUtil.logExec(Level.SEVERE, "✗ 保存测试文件失败: " + hypothesisId + " - " + e.getMessage());
             return null;
@@ -226,16 +242,32 @@ public class HypothesisAgent extends Agent {
         LoggerUtil.logExec(Level.INFO, "编译并执行测试: " + hypothesisId);
         
         try {
-            // 1. 编译Java文件
+            // 1. 确保目录结构存在
+            Path targetDir = Paths.get(projectRoot, "target");
+            Path classesDir = targetDir.resolve("classes");
+            Path testClassesDir = targetDir.resolve("test-classes");
+            
+            Files.createDirectories(classesDir);
+            Files.createDirectories(testClassesDir);
+            
+            // 2. 编译Java文件 - 使用绝对路径和正确的类路径
+            Path javaFile = testClassesDir.resolve(hypothesisId + ".java");
+            
+            // 构建绝对路径的类路径
+            String classpath = classesDir.toAbsolutePath() + File.pathSeparator + testClassesDir.toAbsolutePath();
+            
             List<String> compileCommand = new ArrayList<>();
             compileCommand.add("javac");
             compileCommand.add("-cp");
-            compileCommand.add("./target/classes:./target/test-classes");
+            compileCommand.add(classpath);
             compileCommand.add("-d");
-            compileCommand.add("./target/test-classes");
-            compileCommand.add("./target/test-classes/" + hypothesisId + ".java");
+            compileCommand.add(testClassesDir.toAbsolutePath().toString());
+            compileCommand.add(javaFile.toAbsolutePath().toString());
+            
+            LoggerUtil.logExec(Level.INFO, "编译命令: " + String.join(" ", compileCommand));
             
             ProcessBuilder compilePb = new ProcessBuilder(compileCommand);
+            compilePb.directory(new File(projectRoot));  // 设置工作目录为项目根目录
             compilePb.redirectErrorStream(true);
             Process compileProcess = compilePb.start();
             
@@ -263,8 +295,10 @@ public class HypothesisAgent extends Agent {
                     saveTestCase(fixedCode, hypothesisId + "_fixed");
                     
                     // 重新编译修复后的代码
-                    compileCommand.set(compileCommand.size() - 1, "./target/test-classes/" + hypothesisId + "_fixed.java");
+                    Path fixedJavaFile = testClassesDir.resolve(hypothesisId + "_fixed.java");
+                    compileCommand.set(compileCommand.size() - 1, fixedJavaFile.toAbsolutePath().toString());
                     ProcessBuilder fixedCompilePb = new ProcessBuilder(compileCommand);
+                    fixedCompilePb.directory(new File(projectRoot));  // 设置工作目录
                     fixedCompilePb.redirectErrorStream(true);
                     Process fixedCompileProcess = fixedCompilePb.start();
                     
@@ -297,18 +331,28 @@ public class HypothesisAgent extends Agent {
                 }
             }
             
-            // 2. 使用JavaExecuteTool执行编译后的类
+            // 3. 使用JavaExecuteTool执行编译后的类
             LoggerUtil.logExec(Level.INFO, "✓ 编译成功，开始执行: " + hypothesisId);
-            ToolResponse<String> javaResult = executeTool.execute(hypothesisId);
             
-            if (javaResult.isSuccess()) {
-                result.setSuccess(true);
-                result.setOutput(javaResult.getResult());
-                LoggerUtil.logExec(Level.INFO, "✓ 执行成功: " + hypothesisId);
-            } else {
-                result.setSuccess(false);
-                result.setOutput(javaResult.getFailMessage());
-                LoggerUtil.logExec(Level.WARNING, "✗ 执行失败: " + hypothesisId + " - " + javaResult.getFailMessage());
+            // 确保当前工作目录是项目根目录以便JavaExecuteTool正确工作
+            String originalDir = System.getProperty("user.dir");
+            System.setProperty("user.dir", projectRoot);
+            
+            try {
+                ToolResponse<String> javaResult = executeTool.execute(hypothesisId);
+                
+                if (javaResult.isSuccess()) {
+                    result.setSuccess(true);
+                    result.setOutput(javaResult.getResult());
+                    LoggerUtil.logExec(Level.INFO, "✓ 执行成功: " + hypothesisId);
+                } else {
+                    result.setSuccess(false);
+                    result.setOutput(javaResult.getFailMessage());
+                    LoggerUtil.logExec(Level.WARNING, "✗ 执行失败: " + hypothesisId + " - " + javaResult.getFailMessage());
+                }
+            } finally {
+                // 恢复原始工作目录
+                System.setProperty("user.dir", originalDir);
             }
             
         } catch (Exception e) {
@@ -504,5 +548,45 @@ public class HypothesisAgent extends Agent {
             return matcher.group(1);
         }
         return null;
+    }
+    
+    /**
+     * 诊断方法 - 检查环境配置
+     */
+    public void diagnoseEnvironment() {
+        LoggerUtil.logExec(Level.INFO, "=== HypothesisAgent 环境诊断 ===");
+        LoggerUtil.logExec(Level.INFO, "当前工作目录: " + System.getProperty("user.dir"));
+        LoggerUtil.logExec(Level.INFO, "项目根目录: " + projectRoot);
+        LoggerUtil.logExec(Level.INFO, "Java版本: " + System.getProperty("java.version"));
+        LoggerUtil.logExec(Level.INFO, "操作系统: " + System.getProperty("os.name"));
+        LoggerUtil.logExec(Level.INFO, "路径分隔符: " + File.pathSeparator);
+        
+        // 检查target目录
+        Path targetDir = Paths.get(projectRoot, "target");
+        Path classesDir = targetDir.resolve("classes");
+        Path testClassesDir = targetDir.resolve("test-classes");
+        
+        LoggerUtil.logExec(Level.INFO, "target目录存在: " + Files.exists(targetDir));
+        LoggerUtil.logExec(Level.INFO, "classes目录存在: " + Files.exists(classesDir));
+        LoggerUtil.logExec(Level.INFO, "test-classes目录存在: " + Files.exists(testClassesDir));
+        
+        // 检查javac和java命令
+        try {
+            Process javacProcess = new ProcessBuilder("javac", "-version").start();
+            javacProcess.waitFor(5, TimeUnit.SECONDS);
+            LoggerUtil.logExec(Level.INFO, "javac命令可用: " + (javacProcess.exitValue() == 0));
+        } catch (Exception e) {
+            LoggerUtil.logExec(Level.WARNING, "javac命令检查失败: " + e.getMessage());
+        }
+        
+        try {
+            Process javaProcess = new ProcessBuilder("java", "-version").start();
+            javaProcess.waitFor(5, TimeUnit.SECONDS);
+            LoggerUtil.logExec(Level.INFO, "java命令可用: " + (javaProcess.exitValue() == 0));
+        } catch (Exception e) {
+            LoggerUtil.logExec(Level.WARNING, "java命令检查失败: " + e.getMessage());
+        }
+        
+        LoggerUtil.logExec(Level.INFO, "=== 诊断完成 ===");
     }
 } 
