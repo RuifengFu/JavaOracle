@@ -18,8 +18,13 @@ import edu.tju.ista.llm4test.llm.tools.ToolCall;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
 
 import java.util.*;
+import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -45,7 +50,7 @@ public class OpenAI {
     private boolean JSON_OUTPUT = false;
 
     private static final int MAX_RETRIES = 3;
-    private static final int RETRY_DELAY_MS = 60000;
+    private static final long RETRY_DELAY_MS = 60000;
 
     public String messageCompletion(String prompt) {
         return messageCompletion(prompt, 0.7);
@@ -93,6 +98,19 @@ public class OpenAI {
 
     }
 
+    /**
+     * 内部类，用于封装流式响应的结果
+     */
+    private static class StreamedResponse {
+        final String content;
+        final String thinkingAndContent;
+
+        StreamedResponse(String content, String thinkingAndContent) {
+            this.content = content;
+            this.thinkingAndContent = thinkingAndContent;
+        }
+    }
+
 
     private Map<String, Object> getBaseRequestMap(String prompt) {
         // Create request body
@@ -130,55 +148,30 @@ public class OpenAI {
     }
 
     private HttpRequest buildRequest(String requestBodyJson) {
+        // 最佳实践：为所有网络请求设置一个合理的超时，以防止无限期等待。
+        // 这个值理想情况下应该来自 GlobalConfig，此处设置为60秒作为一个安全的默认值。
+        final long REQUEST_TIMEOUT_SECONDS = 1800;
+
         return HttpRequest.newBuilder()
                 .uri(URI.create(BASE_URL))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer " + API_KEY)
+                .timeout(Duration.ofSeconds(REQUEST_TIMEOUT_SECONDS)) // **关键修复：设置请求超时**
                 .POST(HttpRequest.BodyPublishers.ofString(requestBodyJson))
                 .build();
     }
 
     private boolean shouldRetry(int statusCode) {
-        return statusCode == 503 || statusCode == 429 || statusCode == 504 || statusCode == 421;
+        // 扩展列表以包括 500 Internal Server Error，这是一种常见的可重试瞬时错误。
+        return statusCode == 500 || statusCode == 503 || statusCode == 429 || statusCode == 504 || statusCode == 421;
     }
 
-    private <T> T executeWithRetry(String operationName, RetryableOperation<T> retryOperation) 
-            throws IOException, InterruptedException {
-        int retryCount = 0;
-        Exception lastException = null;
-
-        while (retryCount <= MAX_RETRIES) {
-            try {
-                return retryOperation.execute();
-            } catch (Exception e) {
-                lastException = e;
-                
-                // 检查是否需要重试
-                if (shouldRetry(e)) {
-                    handleRetry(operationName, retryCount);
-                    retryCount++;
-                    continue;
-                }
-                
-                // 不需要重试的错误直接抛出
-                throw e;
-            }
-        }
-
-        // 如果所有重试都失败了，抛出最后一个异常
-        throw new RuntimeException(
-            String.format("Operation '%s' failed after %d retries. Last error: %s", 
-                operationName, MAX_RETRIES, lastException.getMessage()),
-            lastException
-        );
-    }
-
-    private boolean shouldRetry(Exception e) {
-        if (!(e instanceof RuntimeException)) {
+    private boolean shouldRetry(Throwable t) {
+        if (!(t instanceof RuntimeException)) {
             return false;
         }
 
-        String message = e.getMessage();
+        String message = t.getMessage();
         if (message == null) {
             return false;
         }
@@ -199,21 +192,6 @@ public class OpenAI {
         }
 
         return false;
-    }
-
-    private void handleRetry(String operationName, int retryCount) throws InterruptedException {
-        if (retryCount >= MAX_RETRIES) {
-            throw new RuntimeException(
-                String.format("Maximum retry attempts (%d) reached for operation: %s", 
-                    MAX_RETRIES, operationName)
-            );
-        }
-
-        LoggerUtil.logExec(Level.WARNING, 
-            String.format("Retry attempt %d/%d for %s after %dms", 
-                retryCount + 1, MAX_RETRIES, operationName, RETRY_DELAY_MS));
-        
-        Thread.sleep(RETRY_DELAY_MS);
     }
 
     private int extractStatusCode(String errorMessage) {
@@ -244,13 +222,33 @@ public class OpenAI {
     }
 
 
-    /*     * 发送消息并获取回复
+    /*     * 发送消息并获取回复 (同步阻塞版本)
      * @param prompt 用户输入的提示
      * @param temperature 控制生成文本的随机性，范围0-1
      * @param jsonOutput 是否需要返回JSON格式的输出
      * @return 返回生成的文本内容
      */
     public String messageCompletion(String prompt, double temperature, boolean jsonOutput) {
+        try {
+            // 调用异步版本并阻塞等待结果
+            return messageCompletionAsync(prompt, temperature, jsonOutput).join();
+        } catch (Exception e) {
+            // 解包CompletionException以获得更清晰的日志
+            Throwable cause = (e instanceof CompletionException) ? e.getCause() : e;
+            LoggerUtil.logExec(Level.SEVERE, "OpenAI message completion failed: " + cause.getMessage());
+            cause.printStackTrace(System.err);
+            return "";
+        }
+    }
+
+    /**
+     * 异步发送消息并获取回复 (非阻塞版本)
+     * @param prompt 用户输入的提示
+     * @param temperature 控制生成文本的随机性，范围0-1
+     * @param jsonOutput 是否需要返回JSON格式的输出
+     * @return CompletableFuture<String>，最终将包含回复内容
+     */
+    public CompletableFuture<String> messageCompletionAsync(String prompt, double temperature, boolean jsonOutput) {
         try {
             if (jsonOutput && !prompt.contains(" json ")) {
                 prompt += "\nPlease return the response in json format.";
@@ -259,152 +257,190 @@ public class OpenAI {
             if (jsonOutput) {
                 requestBody.put("response_format", Map.of("type", "json_object"));
             }
-            // update temperature
             requestBody.put("temperature", temperature);
+
             if (STREAM) {
-                StringBuilder reasonSb = new StringBuilder();
-                StringBuilder contentSb = new StringBuilder();
-                // 调用流式接口
-                streamResponse(requestBody, chunk -> {
-                    List<Map<String, Object>> choices = (List<Map<String, Object>>) chunk.get("choices");
-                    if (choices != null && !choices.isEmpty()) {
-                        Map<String, Object> choice = choices.get(0);
-                        Map<String, Object> message = (Map<String, Object>) choice.get("delta");
-                        if (message != null) {
-                            String reasoning_content = (String) message.get("reasoning_content");
-                            if (reasoning_content != null)
-                                reasonSb.append(reasoning_content);
-                            String content = (String) message.get("content");
-                            if (content != null)
-                                contentSb.append(content);
-                        }
-                    }
-                });
-                String result = "<thinking>\n" + reasonSb + "\n</thinking>\n\n" + contentSb;
-                LoggerUtil.logOpenAI(Level.INFO, "OpenAI response: \n" + result);
-                return contentSb.toString();
-            }
-            Map<String, Object> responseBody = getResponseBody(requestBody);
-            // Extract the "message.content" value from the response
-            List<Map<String, Object>> choices = (List<Map<String, Object>>) responseBody.get("choices");
-            if (choices != null && !choices.isEmpty()) {
-                Map<String, Object> choice = choices.get(0); // Get the first choice
-                Map<String, Object> message = (Map<String, Object>) choice.get("message");
-                if (message != null) {
-                    String content = (String) message.get("content"); // Extract "content"
-                    String thinking = (String) message.get("reasoning_content");
-                    LoggerUtil.logOpenAI(Level.FINE, "OpenAI response: \n" + "<thinking>\n" + thinking + "\n</thinking>\n\n" + content);
-                    return content; // Return the extracted content
-                }
+                return executeWithRetryAsync("streamResponse", () -> streamResponseAsync(requestBody), 0)
+                        .thenApply(streamedResponse -> {
+                            LoggerUtil.logOpenAI(Level.INFO, "OpenAI async response: \n" + streamedResponse.thinkingAndContent);
+                            return streamedResponse.content;
+                        });
+            } else {
+                return executeWithRetryAsync("getResponseBody", () -> getResponseBodyAsync(requestBody), 0)
+                        .thenApply(responseBody -> {
+                            List<Map<String, Object>> choices = (List<Map<String, Object>>) responseBody.get("choices");
+                            if (choices != null && !choices.isEmpty()) {
+                                Map<String, Object> choice = choices.get(0);
+                                Map<String, Object> message = (Map<String, Object>) choice.get("message");
+                                if (message != null) {
+                                    String content = (String) message.get("content");
+                                    String thinking = (String) message.get("reasoning_content");
+                                    LoggerUtil.logOpenAI(Level.FINE, "OpenAI async response: \n" + "<thinking>\n" + thinking + "\n</thinking>\n\n" + content);
+                                    return content;
+                                }
+                            }
+                            return "";
+                        });
             }
         } catch (Exception e) {
-            LoggerUtil.logExec(Level.SEVERE, "OpenAI message completion failed: " + e.getMessage());
-            e.printStackTrace(System.err);
+            LoggerUtil.logExec(Level.SEVERE, "Failed to start OpenAI message completion async: " + e.getMessage());
+            return CompletableFuture.failedFuture(e);
         }
-
-        return "";
     }
 
 
+    /**
+     * 执行函数调用 (同步阻塞版本)
+     */
     public List<ToolCall> funcCall(String prompt, List<Tool<?>> tools) {
         try {
-            // Create request body
+            // 调用异步版本并阻塞等待结果
+            return funcCallAsync(prompt, tools).join();
+        } catch (Exception e) {
+            // 解包CompletionException
+            Throwable cause = (e instanceof CompletionException) ? e.getCause() : e;
+            cause.printStackTrace(System.out);
+            LoggerUtil.logExec(Level.SEVERE, "OpenAI function calling failed: " + cause.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    /**
+     * 异步执行函数调用 (非阻塞版本)
+     */
+    public CompletableFuture<List<ToolCall>> funcCallAsync(String prompt, List<Tool<?>> tools) {
+        try {
             Map<String, Object> requestBody = getBaseRequestMap(prompt);
             requestBody.put("tools", ToolFactory.toToolsArray(tools));
-//            requestBody.put("temperature", 1.0); // Set the randomness of the output
             requestBody.put("stream", false);
             requestBody.put("max_tokens", 4096);
             requestBody.put("model", MODEL);
 
-            // Convert request body to JSON
-            Map<String, Object> responseBody = getResponseBody(requestBody);
-            LoggerUtil.logOpenAI(Level.INFO, "OpenAI response Body : \n" + responseBody);
-            // Extract the "message.content" value from the response
-            List<Map<String, Object>> choices = (List<Map<String, Object>>) responseBody.get("choices");
-            if (choices != null && !choices.isEmpty()) {
-                Map<String, Object> choice = choices.get(0); // Get the first choice
-                Map<String, Object> message = (Map<String, Object>) choice.get("message");
-                if (message != null) {
-                    String content = (String) message.get("content"); // Extract "content"
-                    if (message.get("reasoning_content") != null) {
-                        String reasoningContent = (String) message.get("reasoning_content");
-                        content = "<thinking>\n" + reasoningContent + "\n</thinking>\n\n" + content;
-                    }
-                    ArrayList<HashMap<String, Object>> toolCalls = (ArrayList<HashMap<String, Object>>) message.getOrDefault("tool_calls", new ArrayList<>());
-                    ArrayList<ToolCall> callList = toolCalls.stream().map(call -> (HashMap<String, Object>)call.get("function"))
-                            .map(func -> {
-                                try {
-                                    return new ToolCall((String)func.get("name"), (String)func.get("arguments"));
-                                } catch (JsonProcessingException e) {
-                                    LoggerUtil.logExec(Level.WARNING, "Failed to parse function call arguments: " + e.getMessage());
-                                    return null;
+            return executeWithRetryAsync("funcCall", () -> getResponseBodyAsync(requestBody), 0)
+                    .thenApply(responseBody -> {
+                        LoggerUtil.logOpenAI(Level.INFO, "OpenAI async response Body : \n" + responseBody);
+                        List<Map<String, Object>> choices = (List<Map<String, Object>>) responseBody.get("choices");
+                        if (choices != null && !choices.isEmpty()) {
+                            Map<String, Object> choice = choices.get(0);
+                            Map<String, Object> message = (Map<String, Object>) choice.get("message");
+                            if (message != null) {
+                                String content = (String) message.get("content");
+                                if (message.get("reasoning_content") != null) {
+                                    String reasoningContent = (String) message.get("reasoning_content");
+                                    content = "<thinking>\n" + reasoningContent + "\n</thinking>\n\n" + content;
                                 }
-                            }).filter(Objects::nonNull)
-                            .collect(Collectors.toCollection(ArrayList::new));
+                                ArrayList<HashMap<String, Object>> toolCalls = (ArrayList<HashMap<String, Object>>) message.getOrDefault("tool_calls", new ArrayList<>());
+                                ArrayList<ToolCall> callList = toolCalls.stream().map(call -> (HashMap<String, Object>) call.get("function"))
+                                        .map(func -> {
+                                            try {
+                                                return new ToolCall((String) func.get("name"), (String) func.get("arguments"));
+                                            } catch (JsonProcessingException e) {
+                                                LoggerUtil.logExec(Level.WARNING, "Failed to parse function call arguments: " + e.getMessage());
+                                                return null;
+                                            }
+                                        }).filter(Objects::nonNull)
+                                        .collect(Collectors.toCollection(ArrayList::new));
 
-
-                    LoggerUtil.logOpenAI(Level.INFO, "OpenAI response: \n" + "content :\n" + content + "\nfunction calling: \n" + callList);
-                    return callList; // Return the extracted content
-                }
-            }
-
+                                LoggerUtil.logOpenAI(Level.INFO, "OpenAI response: \n" + "content :\n" + content + "\nfunction calling: \n" + callList);
+                                return callList;
+                            }
+                        }
+                        return new ArrayList<ToolCall>();
+                    });
         } catch (Exception e) {
-            e.printStackTrace(System.out);
-            LoggerUtil.logExec(Level.SEVERE, "OpenAI function calling failed: " + e.getMessage());
+            LoggerUtil.logExec(Level.SEVERE, "Failed to start OpenAI function calling async: " + e.getMessage());
+            return CompletableFuture.failedFuture(e);
         }
-        return new ArrayList<>();
     }
 
-    private Map<String, Object> getResponseBody(Map<String, Object> requestBody) throws IOException, InterruptedException {
-        return executeWithRetry("getResponseBody", () -> {
-            ObjectMapper mapper = new ObjectMapper();
-            String requestBodyJson = mapper.writeValueAsString(requestBody);
-            HttpClient httpClient = buildHttpClient();
-            HttpRequest request = buildRequest(requestBodyJson);
+    /**
+     * 异步、非阻塞地执行网络请求，并带有重试逻辑
+     */
+    private <T> CompletableFuture<T> executeWithRetryAsync(
+            String operationName, Supplier<CompletableFuture<T>> operation, int attempt) {
 
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            
-            if (response.statusCode() != 200) {
-                throw new RuntimeException("HTTP error: " + response.statusCode() + "\n" + 
-                    response.body());
-            }
+        return operation.get().handle((result, ex) -> {
+            if (ex != null) {
+                // 解包 CompletionException
+                Throwable cause = (ex instanceof CompletionException) ? ex.getCause() : ex;
 
-            Map<String, Object> responseBody = new HashMap<>();
-            String responseBodyString = response.body();
-            Arrays.stream(responseBodyString.split("\n")).forEach(line -> {
-                if (!line.trim().isEmpty() && !line.startsWith(": keep-alive")) {
-                    try {
-                        Map<String, Object> lineResponse = mapper.readValue(line, Map.class);
-                        responseBody.putAll(lineResponse);
-                    } catch (IOException e) {
-                        LoggerUtil.logExec(Level.WARNING, "Failed to parse response line: " + line + "\n" + e.getMessage());
-                    }
+                if (attempt < MAX_RETRIES && shouldRetry(cause)) {
+                    LoggerUtil.logExec(Level.WARNING,
+                            String.format("Async retry attempt %d/%d for %s after %dms",
+                                    attempt + 1, MAX_RETRIES, operationName, RETRY_DELAY_MS));
+
+                    // 使用延迟执行器进行非阻塞等待
+                    return CompletableFuture.supplyAsync(() -> null, CompletableFuture.delayedExecutor(RETRY_DELAY_MS, TimeUnit.MILLISECONDS))
+                            .thenCompose(v -> executeWithRetryAsync(operationName, operation, attempt + 1));
+                } else {
+                    // 达到最大重试次数或遇到不可重试的错误
+                    return CompletableFuture.<T>failedFuture(cause);
                 }
-            });
-
-            if (responseBody.isEmpty()) {
-                throw new RuntimeException("Server returned empty response");
             }
-
-            return responseBody;
-        });
+            // 成功
+            return CompletableFuture.completedFuture(result);
+        }).thenCompose(Function.identity()); // 展开嵌套的CompletableFuture
     }
 
-    private void streamResponse(Map<String, Object> requestBody, Consumer<Map<String, Object>> chunkConsumer)
-            throws IOException, InterruptedException {
-        executeWithRetry("streamResponse", () -> {
+    /**
+     * 异步获取完整的响应体 (非流式)
+     */
+    private CompletableFuture<Map<String, Object>> getResponseBodyAsync(Map<String, Object> requestBody) {
+        try {
             ObjectMapper mapper = new ObjectMapper();
             String requestBodyJson = mapper.writeValueAsString(requestBody);
             HttpClient httpClient = buildHttpClient();
             HttpRequest request = buildRequest(requestBodyJson);
 
-            CompletableFuture<Void> future = httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofLines())
-                    .thenAccept(response -> {
+            return httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                    .thenApply(response -> {
                         if (response.statusCode() != 200) {
-                            throw new RuntimeException("HTTP error: " + response.statusCode() + "\n" +
-                                                       response.body().collect(Collectors.joining("\n")));
+                            throw new CompletionException(new RuntimeException("HTTP error: " + response.statusCode() + "\n" +
+                                    response.body()));
                         }
 
+                        Map<String, Object> responseBodyMap = new HashMap<>();
+                        String responseBodyString = response.body();
+                        Arrays.stream(responseBodyString.split("\n")).forEach(line -> {
+                            if (!line.trim().isEmpty() && !line.startsWith(": keep-alive")) {
+                                try {
+                                    Map<String, Object> lineResponse = mapper.readValue(line, Map.class);
+                                    responseBodyMap.putAll(lineResponse);
+                                } catch (IOException e) {
+                                    LoggerUtil.logExec(Level.WARNING, "Failed to parse response line: " + line + "\n" + e.getMessage());
+                                }
+                            }
+                        });
+
+                        if (responseBodyMap.isEmpty()) {
+                            throw new CompletionException(new RuntimeException("Server returned empty response"));
+                        }
+                        return responseBodyMap;
+                    });
+        } catch (JsonProcessingException e) {
+            return CompletableFuture.failedFuture(e);
+        }
+    }
+    
+    /**
+     * 异步处理流式响应，并将结果聚合后返回
+     */
+    private CompletableFuture<StreamedResponse> streamResponseAsync(Map<String, Object> requestBody) {
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            String requestBodyJson = mapper.writeValueAsString(requestBody);
+            HttpClient httpClient = buildHttpClient();
+            HttpRequest request = buildRequest(requestBodyJson);
+
+            return httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofLines())
+                    .thenApply(response -> {
+                        if (response.statusCode() != 200) {
+                            throw new CompletionException(new RuntimeException("HTTP error: " + response.statusCode() + "\n" +
+                                    response.body().collect(Collectors.joining("\n"))));
+                        }
+
+                        StringBuilder reasonSb = new StringBuilder();
+                        StringBuilder contentSb = new StringBuilder();
                         boolean[] hasValidData = {false};
 
                         response.body().forEach(line -> {
@@ -414,7 +450,20 @@ public class OpenAI {
                                     hasValidData[0] = true;
                                     String jsonContent = extractJsonContent(line);
                                     Map<String, Object> chunk = mapper.readValue(jsonContent, Map.class);
-                                    chunkConsumer.accept(chunk);
+
+                                    List<Map<String, Object>> choices = (List<Map<String, Object>>) chunk.get("choices");
+                                    if (choices != null && !choices.isEmpty()) {
+                                        Map<String, Object> choice = choices.get(0);
+                                        Map<String, Object> message = (Map<String, Object>) choice.get("delta");
+                                        if (message != null) {
+                                            String reasoning_content = (String) message.get("reasoning_content");
+                                            if (reasoning_content != null)
+                                                reasonSb.append(reasoning_content);
+                                            String content = (String) message.get("content");
+                                            if (content != null)
+                                                contentSb.append(content);
+                                        }
+                                    }
                                 } catch (IOException e) {
                                     LoggerUtil.logExec(Level.WARNING, "Failed to parse chunk: " + line);
                                 }
@@ -422,13 +471,15 @@ public class OpenAI {
                         });
 
                         if (!hasValidData[0]) {
-                            throw new RuntimeException("Stream response was empty");
+                            throw new CompletionException(new RuntimeException("Stream response was empty"));
                         }
-                    });
 
-            future.join();
-            return null;
-        });
+                        String fullLog = "<thinking>\n" + reasonSb + "\n</thinking>\n\n" + contentSb;
+                        return new StreamedResponse(contentSb.toString(), fullLog);
+                    });
+        } catch (JsonProcessingException e) {
+            return CompletableFuture.failedFuture(e);
+        }
     }
 
     public static String filterThinkingTag(String content) {
