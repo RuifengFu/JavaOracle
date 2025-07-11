@@ -97,6 +97,7 @@ public class TestResult {
             kind = TestResultKind.DIFF;
         } else {
             int value = list.get(0);
+            this.jtregResult = results.values().stream().findFirst().orElse(null);
             if (value == 124) {
                 kind = TestResultKind.EXECUTE_TIMEOUT;
             } else if (value != 0) {
