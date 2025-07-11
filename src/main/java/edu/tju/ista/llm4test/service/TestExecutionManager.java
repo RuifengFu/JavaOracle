@@ -107,7 +107,11 @@ public class TestExecutionManager {
     private void recordTestResult(TestCase testCase) {
         TestResultKind kind = testCase.getResult() != null ? 
                 testCase.getResult().getKind() : TestResultKind.UNKNOWN;
-        statistics.recordResult(kind);
+        if (testCase.getResult() == null){
+            statistics.recordResult(TestResultKind.UNKNOWN);
+        } else {
+            statistics.recordResult(testCase.getResult());
+        }
         
         String logMessage = testCase.getFile() + " " + kind;
         if (testCase.getResult() != null && testCase.getResult().getCompilationFailed()) {
