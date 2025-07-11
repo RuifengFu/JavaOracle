@@ -228,53 +228,63 @@ public class TestCase {
     }
     
     /**
-     * 处理测试结果的通用逻辑，并支持多次修复尝试
-     * 改为非递归版本，避免线程池资源耗尽
-     * @param result 测试结果
+     * 最佳实践版本：完全异步地处理测试结果和修复流程，避免在任何线程池中引入阻塞操作。
+     * @param result 初始测试结果
      * @param testExecutor 测试执行器
      * @return CompletableFuture<Void>
      */
     private CompletableFuture<Void> processTestResultAndFixAsync(TestResult result, TestExecutor testExecutor) {
-        return concurrentManager.submitBatchTask(() -> {
-            TestResult currentResult = result;
-            int attempt = 0;
-            final int maxAttempts = 3;
-            
-            while (attempt < maxAttempts) {
-                // not final result, no need to log in result
-                LoggerUtil.logExec(Level.INFO, file + " is fixing: " + currentResult.getKind());
-                this.setResult(currentResult); // 确保TestCase对象的result字段是最新的
+        // 使用递归的CompletableFuture链来模拟异步循环，将初始状态传入
+        return fixLoopAsync(result, testExecutor, 0, 3);
+    }
 
-                if (!currentResult.isFail()) {
-                    LoggerUtil.logExec(Level.INFO, String.format("测试用例通过，停止修复流程 (TestCase: %s)", name));
-                    return null; // 测试通过，无需修复
-                }
-                
-                // 同步验证测试失败
-                verifyTestFail();
-                
-                if (this.getResult().isBug()) { // 如果被验证为Bug，停止修复
+    /**
+     * 异步修复循环的递归实现。
+     * 每一个步骤（验证、修复、重测）都分派到正确的线程池，并用 thenCompose 连接。
+     * @param currentResult 当前的测试结果
+     * @param testExecutor 测试执行器
+     * @param attempt 当前尝试次数
+     * @param maxAttempts 最大尝试次数
+     * @return CompletableFuture<Void>，代表修复流程的完成
+     */
+    private CompletableFuture<Void> fixLoopAsync(TestResult currentResult, TestExecutor testExecutor, int attempt, int maxAttempts) {
+        // 终止条件 1: 测试不再失败，流程成功结束。
+        if (!currentResult.isFail()) {
+            LoggerUtil.logExec(Level.INFO, String.format("测试用例通过，停止修复流程 (TestCase: %s)", name));
+            return CompletableFuture.completedFuture(null);
+        }
+
+        // 终止条件 2: 达到最大尝试次数，流程结束。
+        if (attempt >= maxAttempts) {
+            LoggerUtil.logExec(Level.INFO, String.format("达到最大修复尝试次数 (%d)，测试用例仍失败 (TestCase: %s)", maxAttempts, name));
+            return CompletableFuture.completedFuture(null);
+        }
+        
+        // 更新当前测试用例的状态
+        this.setResult(currentResult);
+        LoggerUtil.logExec(Level.INFO, file + " is fixing: " + currentResult.getKind());
+
+        // --- 开始异步链式调用 ---
+
+        // 步骤 1: 异步验证失败原因 (在I/O线程池中执行)
+        return verifyTestFailAsync()
+            .thenCompose(v -> {
+                // 终止条件 3: 如果验证结果是Bug，则停止修复。
+                if (this.getResult().isBug()) {
                     LoggerUtil.logExec(Level.INFO, String.format("测试用例被验证为Bug，停止修复 (TestCase: %s)", name));
-                    return null;
+                    return CompletableFuture.completedFuture(null);
                 }
-                
-                if (attempt >= maxAttempts) { // 达到最大尝试次数，停止
-                    LoggerUtil.logExec(Level.INFO, String.format("达到最大修复尝试次数 (%d)，测试用例仍失败 (TestCase: %s)", maxAttempts, name));
-                    return null;
-                }
-                
+
+                // 继续修复流程
                 LoggerUtil.logExec(Level.INFO, String.format("尝试修复测试用例 (TestCase: %s, 尝试次数: %d/%d)", name, attempt + 1, maxAttempts));
-                
-                // 同步修复
-                fix();
-                
-                // 同步重新测试
-                currentResult = testExecutor.executeTest(this);
-                attempt++;
-            }
-            
-            return null;
-        });
+
+                // 步骤 2: 异步修复 (在I/O线程池中执行)
+                return fixAsync()
+                    // 步骤 3: 异步重新执行测试 (在CPU线程池中执行)
+                    .thenCompose(v2 -> executeTestAsync(testExecutor))
+                    // 步骤 4: 将新结果传入，进行下一次循环（递归调用）
+                    .thenCompose(newResult -> fixLoopAsync(newResult, testExecutor, attempt + 1, maxAttempts));
+            });
     }
 
     // 同步方法保持不变，供向后兼容
