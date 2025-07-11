@@ -30,17 +30,24 @@ public class CodeExtractor {
     // Custom visitor to extract code blocks from the Markdown AST
     private static class CodeBlockExtractorVisitor extends AbstractVisitor {
         private final ArrayList<String> codeBlocks = new ArrayList<>();
+        private int cnt = 0;
+        private String lastBlock;
 
         public ArrayList<String> getCodeBlocks() {
+            if (cnt == 1 && codeBlocks.isEmpty()) {
+                codeBlocks.add(lastBlock); // if only one block, return it content
+            }
             return codeBlocks;
         }
 
         @Override
         public void visit(FencedCodeBlock fencedCodeBlock) {
             // Append the code block content to the builder
-            if (fencedCodeBlock.getInfo().equals("java")) {
+            cnt += 1;
+            if (fencedCodeBlock.getInfo().contains("java")) {
                 codeBlocks.add(fencedCodeBlock.getLiteral());
             }
+            lastBlock = fencedCodeBlock.getLiteral();
         }
 
 
