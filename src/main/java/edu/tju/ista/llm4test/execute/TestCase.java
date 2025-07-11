@@ -257,7 +257,7 @@ public class TestCase {
         // 终止条件 2: 达到最大尝试次数，流程结束。
         if (attempt >= maxAttempts) {
             LoggerUtil.logExec(Level.INFO, String.format("达到最大修复尝试次数 (%d)，测试用例仍失败 (TestCase: %s)", maxAttempts, name));
-            return CompletableFuture.completedFuture(null);
+            return verifyTestFailAsync();
         }
         
         // 更新当前测试用例的状态
@@ -312,8 +312,10 @@ public class TestCase {
             var rootCauseCall = callList.get(0);
             var arguments = rootCauseCall.arguments;
             var reportBug = ((boolean) arguments.get("report_bug"));
-            reportBug = reportBug & (!this.result.getCompilationFailed()); // 如果编译失败，则不报告Bug
-            arguments.put("report_bug", reportBug);
+            if (this.result != null) {
+                reportBug = reportBug && (!this.result.getCompilationFailed()); // 如果编译失败，则不报告Bug
+                arguments.put("report_bug", reportBug);
+            }
             if (reportBug) {
                 this.result.setKind(TestResultKind.VERIFIED_BUG);
             } else {
@@ -416,8 +418,12 @@ public class TestCase {
             String prompt = PromptGen.generatePrompt("ApplyChange", dataModel);
             String text = OpenAI.Doubao.messageCompletion(prompt);
             ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
-            String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
-            writeTestCaseToFile(generatedCode);
+            if (codeBlocks.isEmpty() && !text.contains("```")) {
+                writeTestCaseToFile(text);
+            } else {
+                String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
+                writeTestCaseToFile(generatedCode);
+            }
         } catch (Exception e) {
             LoggerUtil.logExec(Level.WARNING, "Applying change failed: " + file + "\n" + e.getMessage());
         }
