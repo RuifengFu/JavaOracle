@@ -176,22 +176,72 @@ public class OpenAI {
             return false;
         }
 
-        // 检查是否是 HTTP 错误
-        if (message.contains("HTTP error")) {
-            try {
-                int statusCode = extractStatusCode(message);
-                return shouldRetry(statusCode);
-            } catch (Exception ex) {
-                return false;
-            }
-        }
-
-        // 检查是否是空响应错误
-        if (message.contains("empty response") || message.contains("Stream response was empty")) {
+        // 检查是否是网络连接错误（包括SSL握手失败）
+        if (isNetworkError(message)) {
             return true;
         }
 
+        // 检查是否是 RuntimeException 的其他情况
+        if (e instanceof RuntimeException) {
+            // 检查是否是 HTTP 错误
+            if (message.contains("HTTP error")) {
+                try {
+                    int statusCode = extractStatusCode(message);
+                    return shouldRetry(statusCode);
+                } catch (Exception ex) {
+                    return false;
+                }
+            }
+
+            // 检查是否是空响应错误
+            if (message.contains("empty response") || message.contains("Stream response was empty")) {
+                return true;
+            }
+        }
+
+        // 检查是否是 IOException 或 InterruptedException 的网络相关错误
+        if (e instanceof IOException || e instanceof InterruptedException) {
+            return isNetworkError(message);
+        }
+
         return false;
+    }
+
+    private boolean isNetworkError(String message) {
+        String lowerMessage = message.toLowerCase();
+        return lowerMessage.contains("handshake close") ||
+               lowerMessage.contains("connection reset") ||
+               lowerMessage.contains("connection closed") ||
+               lowerMessage.contains("ssl handshake failed") ||
+               lowerMessage.contains("network is unreachable") ||
+               lowerMessage.contains("connection timed out") ||
+               lowerMessage.contains("connect timed out") ||
+               lowerMessage.contains("read timed out") ||
+               lowerMessage.contains("broken pipe") ||
+               lowerMessage.contains("connection refused") ||
+               lowerMessage.contains("no route to host") ||
+               lowerMessage.contains("socket timeout") ||
+               lowerMessage.contains("premature close") ||
+               lowerMessage.contains("unexpected end of file") ||
+               lowerMessage.contains("tunnel failed") ||
+               lowerMessage.contains("tunnel connection failed") ||
+               lowerMessage.contains("proxy tunnel failed") ||
+               lowerMessage.contains("unable to tunnel through proxy");
+    }
+
+    private void handleRetry(String operationName, int retryCount) throws InterruptedException {
+        if (retryCount >= MAX_RETRIES) {
+            throw new RuntimeException(
+                String.format("Maximum retry attempts (%d) reached for operation: %s", 
+                    MAX_RETRIES, operationName)
+            );
+        }
+
+        LoggerUtil.logExec(Level.WARNING, 
+            String.format("Retry attempt %d/%d for %s after %dms", 
+                retryCount + 1, MAX_RETRIES, operationName, RETRY_DELAY_MS));
+        
+        Thread.sleep(RETRY_DELAY_MS);
     }
 
     private int extractStatusCode(String errorMessage) {
@@ -421,7 +471,7 @@ public class OpenAI {
             return CompletableFuture.failedFuture(e);
         }
     }
-    
+
     /**
      * 异步处理流式响应，并将结果聚合后返回
      */
