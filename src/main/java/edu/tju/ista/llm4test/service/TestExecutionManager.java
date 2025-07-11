@@ -110,6 +110,9 @@ public class TestExecutionManager {
         statistics.recordResult(kind);
         
         String logMessage = testCase.getFile() + " " + kind;
+        if (testCase.getResult() != null && testCase.getResult().getCompilationFailed()) {
+            logMessage += " COMPILE_FAILED";
+        }
         if (testCase.getResult() != null && testCase.getResult().getJtregResult() != null) {
             logMessage += " " + testCase.getResult().getJtregResult().exitValue;
         }
