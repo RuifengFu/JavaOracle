@@ -81,6 +81,7 @@ public class OpenAI {
     public static OpenAI R1;
     public static OpenAI V3;
     public static OpenAI Doubao;
+    public static OpenAI Doubao_think; // more powerful
 
     static {
 
@@ -92,6 +93,8 @@ public class OpenAI {
         arkModel = "doubao-seed-1-6-flash-250615";
 
         Doubao = new OpenAI(arkApiKey, arkBaseUrl, arkModel);
+        Doubao_think = new OpenAI(arkApiKey, arkBaseUrl, "\n" +
+                "ep-20250712000334-ggxht");
 
         R1 = new OpenAI(GlobalConfig.getOpenaiR1Model());
         V3 = new OpenAI(GlobalConfig.getOpenaiV3Model());

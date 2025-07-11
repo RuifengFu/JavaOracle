@@ -54,7 +54,7 @@ public class InformationCollectionAgent extends Agent {
             this.webSearchTool = new BochaSearch();
         }
         
-        this.llm = OpenAI.R1;
+        this.llm = OpenAI.Doubao_think;
         this.objectMapper = new ObjectMapper();
     }
     

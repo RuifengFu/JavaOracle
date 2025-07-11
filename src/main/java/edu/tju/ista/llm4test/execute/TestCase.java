@@ -303,7 +303,7 @@ public class TestCase {
             String prompt = PromptGen.generatePrompt("RootCause", dataModel);
             ArrayList<Tool<?>> tools = new ArrayList<>();
             tools.add(new RootCauseOutputTool());
-            var callList = OpenAI.Doubao.funcCall(prompt, tools);
+            var callList = OpenAI.Doubao_think.funcCall(prompt, tools);
             if (callList.isEmpty()) {
                 LoggerUtil.logExec(Level.WARNING, "No function call found in the response");
                 this.result.setKind(TestResultKind.MAYBE_TEST_FAIL);

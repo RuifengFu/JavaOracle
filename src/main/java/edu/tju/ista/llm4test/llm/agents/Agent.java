@@ -10,7 +10,7 @@ import java.util.HashMap;
 public class Agent {
     protected String prompt;
     protected static final Configuration cfg = new Configuration(Configuration.VERSION_2_3_31);
-    protected OpenAI LLM = OpenAI.R1;
+    protected OpenAI LLM = OpenAI.Doubao_think;
 
     public Agent() {
         prompt = "You are a helpful assistant.";
