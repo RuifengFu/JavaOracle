@@ -250,85 +250,87 @@ public class HypothesisAgent extends Agent {
             Files.createDirectories(classesDir);
             Files.createDirectories(testClassesDir);
             
-            // 2. 编译Java文件 - 使用绝对路径和正确的类路径
-            Path javaFile = testClassesDir.resolve(hypothesisId + ".java");
-            
-            // 构建绝对路径的类路径
-            String classpath = classesDir.toAbsolutePath() + File.pathSeparator + testClassesDir.toAbsolutePath();
-            
-            List<String> compileCommand = new ArrayList<>();
-            compileCommand.add("javac");
-            compileCommand.add("-cp");
-            compileCommand.add(classpath);
-            compileCommand.add("-d");
-            compileCommand.add(testClassesDir.toAbsolutePath().toString());
-            compileCommand.add(javaFile.toAbsolutePath().toString());
-            
-            LoggerUtil.logExec(Level.INFO, "编译命令: " + String.join(" ", compileCommand));
-            
-            ProcessBuilder compilePb = new ProcessBuilder(compileCommand);
-            compilePb.directory(new File(projectRoot));  // 设置工作目录为项目根目录
-            compilePb.redirectErrorStream(true);
-            Process compileProcess = compilePb.start();
-            
-            BufferedReader compileReader = new BufferedReader(new InputStreamReader(compileProcess.getInputStream()));
-            String compileOutput = compileReader.lines().collect(Collectors.joining("\n"));
-            
-            boolean compileFinished = compileProcess.waitFor(30, TimeUnit.SECONDS);
-            if (!compileFinished) {
-                compileProcess.destroyForcibly();
-                result.setSuccess(false);
-                result.setOutput("编译超时");
-                return result;
-            }
-            
-            int compileExitCode = compileProcess.exitValue();
-            if (compileExitCode != 0) {
-                LoggerUtil.logExec(Level.WARNING, "✗ 编译失败: " + hypothesisId + " - " + compileOutput);
-                
-                // 尝试修复测试用例
-                String fixedCode = fixTestCase(code, hypothesisJson, "编译失败: " + compileOutput);
-                if (fixedCode != null && !fixedCode.equals(code)) {
-                    LoggerUtil.logExec(Level.INFO, "尝试使用修复后的测试用例: " + hypothesisId);
-                    
-                    // 保存修复后的代码并重新编译
-                    saveTestCase(fixedCode, hypothesisId + "_fixed");
-                    
-                    // 重新编译修复后的代码
-                    Path fixedJavaFile = testClassesDir.resolve(hypothesisId + "_fixed.java");
-                    compileCommand.set(compileCommand.size() - 1, fixedJavaFile.toAbsolutePath().toString());
-                    ProcessBuilder fixedCompilePb = new ProcessBuilder(compileCommand);
-                    fixedCompilePb.directory(new File(projectRoot));  // 设置工作目录
-                    fixedCompilePb.redirectErrorStream(true);
-                    Process fixedCompileProcess = fixedCompilePb.start();
-                    
-                    BufferedReader fixedCompileReader = new BufferedReader(new InputStreamReader(fixedCompileProcess.getInputStream()));
-                    String fixedCompileOutput = fixedCompileReader.lines().collect(Collectors.joining("\n"));
-                    
-                    boolean fixedCompileFinished = fixedCompileProcess.waitFor(30, TimeUnit.SECONDS);
-                    if (!fixedCompileFinished) {
-                        fixedCompileProcess.destroyForcibly();
-                        result.setSuccess(false);
-                        result.setOutput("修复后编译超时");
-                        return result;
-                    }
-                    
-                    int fixedCompileExitCode = fixedCompileProcess.exitValue();
-                    if (fixedCompileExitCode != 0) {
-                        result.setSuccess(false);
-                        result.setOutput("原始编译错误: " + compileOutput + "\n修复后编译错误: " + fixedCompileOutput);
-                        LoggerUtil.logExec(Level.WARNING, "✗ 修复后仍然编译失败: " + hypothesisId);
-                        return result;
-                    }
-                    
-                    // 使用修复后的类名执行
-                    hypothesisId = hypothesisId + "_fixed";
-                } else {
+            // 2. 编译和修复循环
+            final int MAX_FIX_ATTEMPTS = 3;
+            boolean compiledSuccessfully = false;
+            String currentCode = code;
+            String lastCompileOutput = "";
+
+            for (int attempt = 1; attempt <= MAX_FIX_ATTEMPTS; attempt++) {
+                LoggerUtil.logExec(Level.INFO, String.format("编译尝试 #%d/%d for %s", attempt, MAX_FIX_ATTEMPTS, hypothesisId));
+
+                // 2a. 编译当前代码
+                Path javaFile = testClassesDir.resolve(hypothesisId + ".java");
+                String classpath = classesDir.toAbsolutePath() + File.pathSeparator + testClassesDir.toAbsolutePath();
+                List<String> compileCommand = new ArrayList<>(Arrays.asList(
+                        "javac",
+                        "-cp", classpath,
+                        "-d", testClassesDir.toAbsolutePath().toString(),
+                        javaFile.toAbsolutePath().toString()
+                ));
+
+                LoggerUtil.logExec(Level.INFO, "编译命令: " + String.join(" ", compileCommand));
+
+                ProcessBuilder compilePb = new ProcessBuilder(compileCommand);
+                compilePb.directory(new File(projectRoot));
+                compilePb.redirectErrorStream(true);
+                Process compileProcess = compilePb.start();
+
+                BufferedReader compileReader = new BufferedReader(new InputStreamReader(compileProcess.getInputStream()));
+                String compileOutput = compileReader.lines().collect(Collectors.joining("\n"));
+                lastCompileOutput = compileOutput;
+
+                boolean compileFinished = compileProcess.waitFor(30, TimeUnit.SECONDS);
+                if (!compileFinished) {
+                    compileProcess.destroyForcibly();
                     result.setSuccess(false);
-                    result.setOutput("编译失败: " + compileOutput);
-                    LoggerUtil.logExec(Level.WARNING, "✗ 编译失败且无法修复: " + hypothesisId);
+                    result.setOutput("编译超时 (尝试 " + attempt + ")");
                     return result;
                 }
+
+                int compileExitCode = compileProcess.exitValue();
+                if (compileExitCode == 0) {
+                    compiledSuccessfully = true;
+                    LoggerUtil.logExec(Level.INFO, "✓ 编译成功 (尝试 " + attempt + ")");
+                    break; // 编译成功，退出循环
+                }
+
+                LoggerUtil.logExec(Level.WARNING, String.format("✗ 编译失败 (尝试 #%d) for %s", attempt, hypothesisId));
+                LoggerUtil.logExec(Level.WARNING, "编译输出:\n" + compileOutput);
+
+                if (attempt == MAX_FIX_ATTEMPTS) {
+                    LoggerUtil.logExec(Level.WARNING, "✗ 达到最大修复次数，放弃修复: " + hypothesisId);
+                    break; // 达到最大次数，退出循环
+                }
+
+                // 2b. 尝试修复
+                LoggerUtil.logExec(Level.INFO, "尝试修复测试用例 (修复 #" + attempt + ")");
+                String fixedCode = fixTestCase(currentCode, hypothesisJson, "编译失败: " + compileOutput);
+                if (fixedCode != null && !fixedCode.trim().isEmpty() && !fixedCode.equals(currentCode)) {
+                    LoggerUtil.logExec(Level.INFO, "✓ LLM提供了修复后的代码。");
+
+                    // 确保修复后代码中的类名与文件名一致
+                    String expectedClassName = hypothesisId;
+                    String actualClassName = extractClassNameFromCode(fixedCode);
+                    if (actualClassName != null && !actualClassName.equals(expectedClassName)) {
+                        fixedCode = fixedCode.replaceAll("public\\s+class\\s+" + Pattern.quote(actualClassName),
+                                "public class " + expectedClassName);
+                        LoggerUtil.logExec(Level.INFO, "✓ 修复后代码的类名已修改: " + actualClassName + " → " + expectedClassName);
+                    }
+                    
+                    currentCode = fixedCode;
+                    saveTestCase(currentCode, hypothesisId); // 使用新代码覆盖原文件
+                } else {
+                    LoggerUtil.logExec(Level.WARNING, "✗ LLM无法提供有效修复或修复代码无变化，放弃修复。");
+                    break; // 放弃修复，退出循环
+                }
+            }
+
+            if (!compiledSuccessfully) {
+                result.setSuccess(false);
+                result.setOutput("编译最终失败: " + lastCompileOutput);
+                LoggerUtil.logExec(Level.WARNING, "✗ 编译最终失败: " + hypothesisId);
+                return result;
             }
             
             // 3. 使用JavaExecuteTool执行编译后的类
