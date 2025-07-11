@@ -21,6 +21,7 @@ import java.util.*;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -133,7 +134,7 @@ public class OpenAI {
         return requestBody;
     }
 
-    private HttpClient buildHttpClient() {
+    protected HttpClient buildHttpClient() {
         if (GlobalConfig.isProxyEnabled()) {
             String proxyHost = GlobalConfig.getProxyHost();
             int proxyPort = GlobalConfig.getProxyPort();
@@ -167,10 +168,6 @@ public class OpenAI {
     }
 
     private boolean shouldRetry(Throwable t) {
-        if (!(t instanceof RuntimeException)) {
-            return false;
-        }
-
         String message = t.getMessage();
         if (message == null) {
             return false;
@@ -182,7 +179,7 @@ public class OpenAI {
         }
 
         // 检查是否是 RuntimeException 的其他情况
-        if (e instanceof RuntimeException) {
+        if (t instanceof RuntimeException) {
             // 检查是否是 HTTP 错误
             if (message.contains("HTTP error")) {
                 try {
@@ -200,7 +197,7 @@ public class OpenAI {
         }
 
         // 检查是否是 IOException 或 InterruptedException 的网络相关错误
-        if (e instanceof IOException || e instanceof InterruptedException) {
+        if (t instanceof IOException || t instanceof InterruptedException) {
             return isNetworkError(message);
         }
 
@@ -229,6 +226,15 @@ public class OpenAI {
                lowerMessage.contains("unable to tunnel through proxy");
     }
 
+    /**
+     * 生成随机的重试延迟时间（60-120秒之间）
+     * 使用ThreadLocalRandom确保线程安全和高性能
+     * @return 随机延迟时间（毫秒）
+     */
+    protected long getRandomRetryDelay() {
+        return ThreadLocalRandom.current().nextLong(RETRY_DELAY_MS) + RETRY_DELAY_MS;
+    }
+
     private void handleRetry(String operationName, int retryCount) throws InterruptedException {
         if (retryCount >= MAX_RETRIES) {
             throw new RuntimeException(
@@ -237,11 +243,12 @@ public class OpenAI {
             );
         }
 
+        long randomDelay = getRandomRetryDelay();
         LoggerUtil.logExec(Level.WARNING, 
             String.format("Retry attempt %d/%d for %s after %dms", 
-                retryCount + 1, MAX_RETRIES, operationName, RETRY_DELAY_MS));
+                retryCount + 1, MAX_RETRIES, operationName, randomDelay));
         
-        Thread.sleep(RETRY_DELAY_MS);
+        Thread.sleep(randomDelay);
     }
 
     private int extractStatusCode(String errorMessage) {
@@ -415,12 +422,13 @@ public class OpenAI {
                 Throwable cause = (ex instanceof CompletionException) ? ex.getCause() : ex;
 
                 if (attempt < MAX_RETRIES && shouldRetry(cause)) {
+                    long randomDelay = getRandomRetryDelay();
                     LoggerUtil.logExec(Level.WARNING,
                             String.format("Async retry attempt %d/%d for %s after %dms",
-                                    attempt + 1, MAX_RETRIES, operationName, RETRY_DELAY_MS));
+                                    attempt + 1, MAX_RETRIES, operationName, randomDelay));
 
                     // 使用延迟执行器进行非阻塞等待
-                    return CompletableFuture.supplyAsync(() -> null, CompletableFuture.delayedExecutor(RETRY_DELAY_MS, TimeUnit.MILLISECONDS))
+                    return CompletableFuture.supplyAsync(() -> null, CompletableFuture.delayedExecutor(randomDelay, TimeUnit.MILLISECONDS))
                             .thenCompose(v -> executeWithRetryAsync(operationName, operation, attempt + 1));
                 } else {
                     // 达到最大重试次数或遇到不可重试的错误
