@@ -52,7 +52,7 @@ public class JavaDocSearchTool implements Tool<String> {
     
     @Override
     public String getDescription() {
-        return "根据提供的自然语言查询在JavaDoc中检索相关文档。可以提供一个可选的分析上下文来优化搜索结果。";
+        return "Search for relevant documents in JavaDoc based on the provided natural language query. An optional analysis context can be provided to optimize search results.";
     }
 
     @Override
@@ -63,8 +63,8 @@ public class JavaDocSearchTool implements Tool<String> {
     @Override
     public Map<String, String> getParametersDescription() {
         return Map.of(
-            "query", "搜索查询，可以是类名、方法名或自然语言描述。",
-            "analysis_context", "（可选）提供额外的上下文（例如，关于一个特定的bug或特性）来查找更相关的信息。"
+            "query", "Search query, which can be a class name, method name, or natural language description.",
+            "analysis_context", "(Optional) Provide additional context (e.g., about a specific bug or feature) to find more relevant information."
         );
     }
 

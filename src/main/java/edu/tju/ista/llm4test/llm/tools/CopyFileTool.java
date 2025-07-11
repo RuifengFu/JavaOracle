@@ -23,7 +23,7 @@ public class CopyFileTool implements Tool<String> {
 
     @Override
     public String getDescription() {
-        return "复制文件。源文件路径和目标文件路径都可以是绝对路径或相对路径。";
+        return "Copy a file. Both source and destination file paths can be absolute or relative.";
     }
 
     @Override
@@ -34,8 +34,8 @@ public class CopyFileTool implements Tool<String> {
     @Override
     public Map<String, String> getParametersDescription() {
         return Map.of(
-                "sourcePath", "源文件的路径，可以是绝对路径或相对路径。",
-                "destinationPath", "目标文件的路径，可以是绝对路径或相对路径。"
+                "sourcePath", "The path of the source file, which can be absolute or relative.",
+                "destinationPath", "The path of the destination file, which can be absolute or relative."
         );
     }
 

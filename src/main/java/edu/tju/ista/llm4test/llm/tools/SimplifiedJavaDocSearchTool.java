@@ -38,7 +38,7 @@ public class SimplifiedJavaDocSearchTool implements Tool<String> {
     
     @Override
     public String getDescription() {
-        return "静态JavaDoc文档搜索工具 - 在JDK API文档中查找类文档、包信息和API说明。支持按类名查找、按路径访问、包浏览和文档结构探索。";
+        return "Static JavaDoc document search tool - Search for class documents, package information, and API descriptions in JDK API documents. Supports search by class name, access by path, package browsing, and document structure exploration.";
     }
     
     @Override
@@ -49,29 +49,29 @@ public class SimplifiedJavaDocSearchTool implements Tool<String> {
     @Override
     public Map<String, String> getParametersDescription() {
         return Map.of(
-            "search_type", "搜索类型 (必填):\n" +
-                          "• 'by_path' - 按文档路径直接访问HTML文档\n" +
-                          "• 'by_class' - 按类名查找API文档\n" +
-                          "• 'by_package' - 列出指定包中的所有类文档\n" +
-                          "• 'list_files' - 浏览文档目录结构",
+            "search_type", "Search type (required):\n" +
+                          "• 'by_path' - Directly access HTML document by document path\n" +
+                          "• 'by_class' - Search for API document by class name\n" +
+                          "• 'by_package' - List all class documents in specified package\n" +
+                          "• 'list_files' - Browse document directory structure",
             
-            "doc_path", "文档路径 (用于by_path):\n" +
-                       "• HTML文档的相对路径，如 'java/util/HashMap.html'\n" +
-                       "• 支持简化路径，如 'HashMap.html'\n" +
-                       "• 支持JDK模块化路径，如 'java.base/java/util/HashMap.html'\n" +
-                       "• 工具会自动尝试多种路径格式",
+            "doc_path", "Document path (for by_path):\n" +
+                       "• Relative path of HTML document, e.g. 'java/util/HashMap.html'\n" +
+                       "• Supports simplified path, e.g. 'HashMap.html'\n" +
+                       "• Supports JDK modular path, e.g. 'java.base/java/util/HashMap.html'\n" +
+                       "• The tool will automatically try multiple path formats",
             
-            "class_name", "类名 (用于by_class):\n" +
-                         "• 推荐使用完整类名，如 'java.util.HashMap'\n" +
-                         "• 支持简单类名，如 'HashMap'\n" +
-                         "• 会在常见包路径中自动查找\n" +
-                         "• 返回类的完整API文档",
+            "class_name", "Class name (for by_class):\n" +
+                         "• Recommend using full class name, e.g. 'java.util.HashMap'\n" +
+                         "• Supports simple class name, e.g. 'HashMap'\n" +
+                         "• Will automatically search in common package paths\n" +
+                         "• Returns complete API document of the class",
             
-            "package_name", "包名 (用于by_package和list_files):\n" +
-                           "• 完整包名，如 'java.util', 'java.io'\n" +
-                           "• 用于by_package时列出包中所有类文档\n" +
-                           "• 用于list_files时浏览指定包的目录结构\n" +
-                           "• 为空时list_files显示根目录结构"
+            "package_name", "Package name (for by_package and list_files):\n" +
+                           "• Full package name, e.g. 'java.util', 'java.io'\n" +
+                           "• For by_package, list all class documents in package\n" +
+                           "• For list_files, browse directory structure of specified package\n" +
+                           "• If empty, list_files shows root directory structure"
         );
     }
     

@@ -53,8 +53,7 @@ public class JtregExecuteTool implements Tool<TestResult> {
     
     @Override
     public String getDescription() {
-        return "使用jtreg执行指定的Java测试文件或Java源代码，返回测试执行结果。" +
-               "通过 is_file_path 参数明确指定 content 是文件路径还是源代码。";
+        return "Execute the specified Java test file or Java source code using jtreg, and return the test execution results. Use the is_file_path parameter to explicitly specify whether content is a file path or source code.";
     }
 
     @Override
@@ -65,9 +64,9 @@ public class JtregExecuteTool implements Tool<TestResult> {
     @Override
     public Map<String, String> getParametersDescription() {
         return Map.of(
-                "content", "Java源代码或测试文件的路径。",
-                "is_file_path", "如果 'content' 是文件路径则为 true，如果是源代码则为 false。",
-                "class_name", "（可选）当提供源代码时，指定主类名。"
+                "content", "Java source code or path to the test file.",
+                "is_file_path", "True if 'content' is a file path, false if it is source code.",
+                "class_name", "(Optional) When providing source code, specify the main class name."
         );
     }
 

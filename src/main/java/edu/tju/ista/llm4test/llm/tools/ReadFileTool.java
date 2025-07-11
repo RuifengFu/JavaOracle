@@ -22,7 +22,7 @@ public class ReadFileTool implements Tool<String> {
 
     @Override
     public String getDescription() {
-        return "读取指定文件的内容。文件路径可以是绝对路径或相对路径。";
+        return "Read the content of the specified file. The file path can be absolute or relative.";
     }
 
     @Override
@@ -33,7 +33,7 @@ public class ReadFileTool implements Tool<String> {
     @Override
     public Map<String, String> getParametersDescription() {
         return Map.of(
-                "filePath", "要读取的文件的路径，可以是绝对路径或相对路径。"
+                "filePath", "The path of the file to read, which can be absolute or relative."
         );
     }
 

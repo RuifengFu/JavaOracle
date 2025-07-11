@@ -42,7 +42,7 @@ public class SourceCodeSearchTool implements Tool<String> {
     
     @Override
     public String getDescription() {
-        return "根据提供的关键词（类名、方法名等）在JDK源码中检索相关代码";
+        return "Search for relevant code in JDK source code based on the provided keywords (class names, method names, etc.)";
     }
 
     @Override
@@ -52,7 +52,7 @@ public class SourceCodeSearchTool implements Tool<String> {
 
     @Override
     public Map<String, String> getParametersDescription() {
-        return Map.of("keyword", "要搜索的关键词，可以是类名、方法名或其他相关信息");
+        return Map.of("keyword", "The keyword to search for, which can be a class name, method name, or other relevant information");
     }
 
     @Override
@@ -65,7 +65,7 @@ public class SourceCodeSearchTool implements Tool<String> {
         if (args.get("input") instanceof String input) {
             return execute(input);
         } else {
-            return ToolResponse.failure("参数错误，必须提供 String 'input' 参数 " + args.get("input"));
+            return ToolResponse.failure("Parameter error, must provide String 'input' parameter " + args.get("input"));
         }
 
     }
@@ -136,7 +136,7 @@ public class SourceCodeSearchTool implements Tool<String> {
             }
             
             if (foundFiles.isEmpty()) {
-                return ToolResponse.failure("未找到与'" + input + "'相关的源代码文件");
+                return ToolResponse.failure("No source code files related to '" + input + "' found");
             }
             
             // 处理源码内容
@@ -179,22 +179,22 @@ public class SourceCodeSearchTool implements Tool<String> {
                         break;
                     }
                 } catch (IOException e) {
-                    LoggerUtil.logExec(Level.WARNING, "读取源码文件时出错: " + file + " - " + e.getMessage());
+                    LoggerUtil.logExec(Level.WARNING, "Error reading source code file: " + file + " - " + e.getMessage());
                 }
             }
             
             // 添加搜索摘要
             StringBuilder summary = new StringBuilder();
-            summary.append("## 源码搜索摘要\n\n");
-            summary.append("- **搜索输入**: ").append(input).append("\n");
-            summary.append("- **分析上下文**: ").append(analysisContext != null ? "已提供" : "未提供").append("\n");
-            summary.append("- **目标类**: ").append(context.getTargetClass() != null ? context.getTargetClass() : "无").append("\n");
+            summary.append("## Source Code Search Summary\n\n");
+            summary.append("- **Search Input**: ").append(input).append("\n");
+            summary.append("- **Analysis Context**: ").append(analysisContext != null ? "Provided" : "Not provided").append("\n");
+            summary.append("- **Target Class**: ").append(context.getTargetClass() != null ? context.getTargetClass() : "None").append("\n");
             if (context.getTargetMethod() != null) {
-                summary.append("- **目标方法**: ").append(context.getTargetMethod()).append("\n");
+                summary.append("- **Target Method**: ").append(context.getTargetMethod()).append("\n");
             }
-            summary.append("- **找到的文件**: ").append(foundFiles.size()).append("个\n");
-            summary.append("- **处理的文件**: ").append(processedSources.size()).append("个\n");
-            summary.append("- **文件列表**:\n");
+            summary.append("- **Found Files**: ").append(foundFiles.size()).append(" files\n");
+            summary.append("- **Processed Files**: ").append(processedSources.size()).append(" files\n");
+            summary.append("- **File List**:\n");
             for (String source : processedSources) {
                 summary.append("  - ").append(source).append("\n");
             }
@@ -205,9 +205,9 @@ public class SourceCodeSearchTool implements Tool<String> {
             
             return ToolResponse.success(finalContent.toString());
         } catch (Exception e) {
-            LoggerUtil.logExec(Level.SEVERE, "源码搜索失败: " + e.getMessage());
+            LoggerUtil.logExec(Level.SEVERE, "Source code search failed: " + e.getMessage());
             e.printStackTrace();
-            return ToolResponse.failure("源码搜索失败: " + e.getMessage());
+            return ToolResponse.failure("Source code search failed: " + e.getMessage());
         }
     }
     
@@ -216,21 +216,21 @@ public class SourceCodeSearchTool implements Tool<String> {
      */
     private SearchContext analyzeSearchInput(String input, String analysisContext) {
         StringBuilder promptBuilder = new StringBuilder();
-        promptBuilder.append("你是Java源码分析专家。请从用户查询中提取关键信息，帮助精确定位源码。\n\n");
-        promptBuilder.append("用户查询: ").append(input).append("\n\n");
+        promptBuilder.append("You are a Java source code analysis expert. Please extract key information from the user query to help pinpoint the source code. \n\n");
+        promptBuilder.append("User Query: ").append(input).append("\n\n");
         
         if (analysisContext != null && !analysisContext.trim().isEmpty()) {
-            promptBuilder.append("分析上下文: ").append(analysisContext).append("\n\n");
-            promptBuilder.append("请特别关注上下文中提到的相关类、方法和问题。\n\n");
+            promptBuilder.append("Analysis Context: ").append(analysisContext).append("\n\n");
+            promptBuilder.append("Please pay special attention to classes, methods, and issues mentioned in the context. \n\n");
         }
         
-        promptBuilder.append("请提供以下信息，JSON格式返回:\n");
-        promptBuilder.append("1. targetClass: 用户想查找的具体类名，如java.util.HashMap或HashMap，无则null\n");
-        promptBuilder.append("2. targetMethod: 用户想查找的方法，如put或size，无则null\n");
-        promptBuilder.append("3. keywords: 查找源码的关键词列表，至少3个\n");
-        promptBuilder.append("4. errorMessage: 可能的错误消息片段，无则null\n");
-        promptBuilder.append("5. bugRelated: 是否与bug分析相关，true或false\n");
-        promptBuilder.append("6. needBroadSearch: 是否需要宽泛搜索，true或false\n");
+        promptBuilder.append("Please provide the following information in JSON format: \n");
+        promptBuilder.append("1. targetClass: The specific class name the user wants to find, e.g., java.util.HashMap or HashMap, null if none\n");
+        promptBuilder.append("2. targetMethod: The method the user wants to find, e.g., put or size, null if none\n");
+        promptBuilder.append("3. keywords: A list of keywords to search for in the source code, at least 3\n");
+        promptBuilder.append("4. errorMessage: A possible error message fragment, null if none\n");
+        promptBuilder.append("5. bugRelated: Whether it is related to bug analysis, true or false\n");
+        promptBuilder.append("6. needBroadSearch: Whether a broad search is needed, true or false\n");
         
         String response = llm.messageCompletion(promptBuilder.toString(), 0.0);
         
@@ -298,7 +298,7 @@ public class SourceCodeSearchTool implements Tool<String> {
                 context.setNeedBroadSearch(needBroadSearch);
             }
         } catch (Exception e) {
-            LoggerUtil.logExec(Level.WARNING, "解析搜索上下文时出错: " + e.getMessage());
+            LoggerUtil.logExec(Level.WARNING, "Error parsing search context: " + e.getMessage());
             // 添加默认关键词
             context.addKeyword(input);
         }
@@ -369,7 +369,7 @@ public class SourceCodeSearchTool implements Tool<String> {
                 return result.get();
             }
         } catch (IOException e) {
-            LoggerUtil.logExec(Level.WARNING, "查找类文件时出错: " + e.getMessage());
+            LoggerUtil.logExec(Level.WARNING, "Error finding class file: " + e.getMessage());
         }
         
         return null;
@@ -432,7 +432,7 @@ public class SourceCodeSearchTool implements Tool<String> {
                 
                 results.addAll(methodFiles);
             } catch (IOException e) {
-                LoggerUtil.logExec(Level.WARNING, "查找方法实现时出错: " + e.getMessage());
+                LoggerUtil.logExec(Level.WARNING, "Error finding method implementation: " + e.getMessage());
             }
         }
         
@@ -488,7 +488,7 @@ public class SourceCodeSearchTool implements Tool<String> {
                 results.addAll(referencingFiles);
             }
         } catch (IOException e) {
-            LoggerUtil.logExec(Level.WARNING, "查找相关类时出错: " + e.getMessage());
+            LoggerUtil.logExec(Level.WARNING, "Error finding related classes: " + e.getMessage());
         }
         
         return results;
@@ -544,7 +544,7 @@ public class SourceCodeSearchTool implements Tool<String> {
                 
                 results.addAll(errorFiles);
             } catch (IOException e) {
-                LoggerUtil.logExec(Level.WARNING, "查找错误消息相关文件时出错: " + e.getMessage());
+                LoggerUtil.logExec(Level.WARNING, "Error finding error message related files: " + e.getMessage());
             }
         }
         
@@ -804,15 +804,15 @@ public class SourceCodeSearchTool implements Tool<String> {
         SourceCodeSearchTool tool = new SourceCodeSearchTool(sourceRoot);
         
         // 测试场景1: 搜索具体类
-        System.out.println("=== 测试具体类搜索 ===");
-        String classQuery = "HashMap put方法源码";
-        System.out.println("查询: " + classQuery);
+        System.out.println("=== Test Specific Class Search ===");
+        String classQuery = "HashMap put method source code";
+        System.out.println("Query: " + classQuery);
         ToolResponse<String> classResponse = tool.execute(classQuery);
-        System.out.println("搜索结果: " + (classResponse.isSuccess() ? "成功" : "失败"));
+        System.out.println("Search Result: " + (classResponse.isSuccess() ? "Success" : "Failed"));
         if (classResponse.isSuccess()) {
             String result = classResponse.getResult();
             if (result.length() > 800) {
-                System.out.println(result.substring(0, 800) + "...(更多内容省略)");
+                System.out.println(result.substring(0, 800) + "...(More content omitted)");
             } else {
                 System.out.println(result);
             }
@@ -821,17 +821,17 @@ public class SourceCodeSearchTool implements Tool<String> {
         }
         
         // 测试场景2: 带分析上下文的搜索
-        System.out.println("\n=== 测试带上下文的搜索 ===");
-        String contextQuery = "ArrayList并发修改";
-        String analysisContext = "测试发现ArrayList在并发环境下抛出ConcurrentModificationException，需要了解相关实现机制";
-        System.out.println("查询: " + contextQuery);
-        System.out.println("上下文: " + analysisContext);
+        System.out.println("\n=== Test Search with Context ===");
+        String contextQuery = "ArrayList concurrent modification";
+        String analysisContext = "Test found ArrayList throwing ConcurrentModificationException in concurrent environment, need to understand the relevant implementation mechanism";
+        System.out.println("Query: " + contextQuery);
+        System.out.println("Context: " + analysisContext);
         ToolResponse<String> contextResponse = tool.executeWithContext(contextQuery, analysisContext);
-        System.out.println("搜索结果: " + (contextResponse.isSuccess() ? "成功" : "失败"));
+        System.out.println("Search Result: " + (contextResponse.isSuccess() ? "Success" : "Failed"));
         if (contextResponse.isSuccess()) {
             String result = contextResponse.getResult();
             if (result.length() > 1000) {
-                System.out.println(result.substring(0, 1000) + "...(更多内容省略)");
+                System.out.println(result.substring(0, 1000) + "...(More content omitted)");
             } else {
                 System.out.println(result);
             }

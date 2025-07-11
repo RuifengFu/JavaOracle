@@ -22,7 +22,7 @@ public class CreateDirectoryTool implements Tool<String> {
 
     @Override
     public String getDescription() {
-        return "创建指定路径的目录，包括所有不存在的父目录。路径可以是绝对路径或相对路径。";
+        return "Create the directory at the specified path, including all non-existent parent directories. The path can be absolute or relative.";
     }
 
     @Override
@@ -33,7 +33,7 @@ public class CreateDirectoryTool implements Tool<String> {
     @Override
     public Map<String, String> getParametersDescription() {
         return Map.of(
-                "directoryPath", "要创建的目录的路径，可以是绝对路径或相对路径。"
+                "directoryPath", "The path of the directory to create, which can be absolute or relative."
         );
     }
 
