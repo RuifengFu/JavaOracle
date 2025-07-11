@@ -1,27 +1,27 @@
-你是一个Bug分析专家。请观察以下收集的信息，判断是否足够分析测试失败的原因。
+You are a Bug analysis expert. Please observe the following collected information and determine if it is sufficient to analyze the cause of the test failure.
 
-## 测试代码
+## Test Code
 ```java
 ${testCode}
 ```
 
-## 测试输出
+## Test Output
 ```
 ${testOutput}
 ```
 
-## 症状
+## Symptoms
 ${symptoms}
 
-## 收集的信息
+## Collected Information
 ${collectedInfos}
 
-## 判断要求
-判断当前收集的信息是否足够说明:
-1. 测试代码执行结果与源码/文档的对应关系
-2. JDK中是否存在实现bug
-3. 或者测试用例本身的问题
+## Judgment Requirements
+Determine if the currently collected information is sufficient to explain:
+1. The correspondence between the test code execution results and the source code/documentation
+2. Whether there is an implementation bug in the JDK
+3. Or issues in the test case itself
 
-请选择合适的工具:
-- 如果信息足够分析，请选择 info_sufficient
-- 如果需要更多信息，请选择 info_insufficient 
+Please select the appropriate tool:
+- If the information is sufficient for analysis, choose info_sufficient
+- If more information is needed, choose info_insufficient 

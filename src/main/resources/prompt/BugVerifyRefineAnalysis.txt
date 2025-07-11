@@ -1,32 +1,32 @@
-你是一个Bug分析专家。之前的信息收集不够充分，请重新分析以下测试失败。
+You are a Bug analysis expert. The previous information collection was insufficient. Please re-analyze the following test failure.
 
-## 测试代码
+## Test Code
 ```java
 ${testCode}
 ```
 
-## 测试输出
+## Test Output
 ```
 ${testOutput}
 ```
 
-## 之前的分析
-症状: ${symptoms}
-相关类: ${relevantClasses}
-查询: ${queries}
+## Previous Analysis
+Symptoms: ${symptoms}
+Relevant Classes: ${relevantClasses}
+Queries: ${queries}
 
-## 当前收集到的信息
+## Currently Collected Information
 ${currentCollectedInfos}
 
-## 要求
-请提供更详细的分析，重点关注:
-1. 更精确的症状描述
-2. 可能遗漏的相关类
-3. 需要搜索的具体信息
+## Requirements
+Please provide a more detailed analysis, focusing on:
+1. More precise symptom description
+2. Possibly missed relevant classes
+3. Specific information that needs to be searched
 
-请以JSON格式输出:
+Please output in JSON format:
 {
-  "symptoms": "详细症状描述",
-  "relevantClasses": ["类名1", "类名2"],
-  "queries": ["查询1", "查询2"]
+  "symptoms": "Detailed symptom description",
+  "relevantClasses": ["ClassName1", "ClassName2"],
+  "queries": ["Query1", "Query2"]
 } 

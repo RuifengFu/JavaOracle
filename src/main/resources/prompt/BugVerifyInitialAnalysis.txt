@@ -1,4 +1,4 @@
-你是一位Java Bug分析专家。请分析以下测试用例和其失败输出，确定问题的性质。
+You are a Java Bug analysis expert. Please analyze the following test case and its failure output to determine the nature of the issue.
 
 <TestCase>
 ${testCase}
@@ -12,16 +12,16 @@ ${testOutput}
 ${initialAnalysis}
 </Initial Analysis>
 
-请提供关于这个Bug的初步分析:
-1. Bug的主要症状是什么?
-2. 可能涉及的Java类或API有哪些?
-3. 错误可能发生在代码的哪个部分?
-4. 需要查询哪些额外信息来深入了解这个问题?
+Please provide a preliminary analysis of this Bug:
+1. What is the main symptom of the Bug?
+2. What Java classes or APIs might be involved?
+3. In which part of the code might the error occur?
+4. What additional information needs to be queried to gain a deeper understanding of this issue?
 
-请以json格式输出你的分析结果：
+Please output your analysis results in JSON format:
 {
-  "symptoms": "简要描述Bug的症状",
-  "relevantClasses": ["类名1", "类名2"],
-  "errorLocation": "错误可能发生的代码部分",
-  "queries": ["需要查询的信息1", "需要查询的信息2"]
+  "symptoms": "Brief description of the Bug symptoms",
+  "relevantClasses": ["ClassName1", "ClassName2"],
+  "errorLocation": "Code section where the error might occur",
+  "queries": ["Information to query 1", "Information to query 2"]
 } 

@@ -1,28 +1,28 @@
-你是一位软件测试工程师，需要修复一个用于验证假设的测试用例。
+You are a software test engineer who needs to fix a test case for verifying hypotheses.
 
-<原始测试用例>
+<Original Test Case>
 ${testCase}
-</原始测试用例>
+</Original Test Case>
 
-<假设信息>
+<Hypothesis Information>
 ${hypothesis}
-</假设信息>
+</Hypothesis Information>
 
-<编译/执行错误>
+<Compilation/Execution Error>
 ${errorMessage}
-</编译/执行错误>
+</Compilation/Execution Error>
 
-<任务>
-1. 分析编译或执行错误的原因
-2. 修复测试用例，确保能够正确编译和执行
-3. 保持测试用例验证假设的核心逻辑不变
-4. 确保类名与文件名一致
-</任务>
+<Task>
+1. Analyze the cause of the compilation or execution error
+2. Fix the test case to ensure it can compile and execute correctly
+3. Keep the core logic of the test case for verifying the hypothesis unchanged
+4. Ensure the class name matches the file name
+</Task>
 
-<要求>
-1. 如果是编译错误，请修复语法问题、缺少的import语句等
-2. 如果是执行错误，请检查逻辑错误和异常处理
-3. 保持测试用例的核心验证逻辑不变
-4. 确保测试用例能够正确验证假设
-5. 返回完整的修复后测试用例代码
-</要求> 
+<Requirements>
+1. If it is a compilation error, fix syntax issues, missing import statements, etc.
+2. If it is an execution error, check for logical errors and exception handling
+3. Keep the core validation logic of the test case unchanged
+4. Ensure the test case can correctly verify the hypothesis
+5. Return the complete fixed test case code
+</Requirements>

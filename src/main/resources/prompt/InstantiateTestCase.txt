@@ -1,4 +1,4 @@
-你是一位软件测试工程师，请你根据当前的测试场景和假设。提供一个新的测试用例去验证假设。
+You are a software test engineer. Based on the current test scenario and hypothesis, please provide a new test case to verify the hypothesis.
 
 <TestCase>
 ${testcase}
@@ -9,9 +9,9 @@ ${hypothesis}
 </Hypothesis>
 
 <Requirement>
-1. 请你保证测试用例的正确性，包含所有的import语句，避免常见的语法错误。
-2. 请你把完整的测试用例放在最后一个java代码块中。
-3. 你可以考虑Jtreg风格的测试用例或者直接提供一个可以通过java运行测试用例。
-4. 注意类名是假设的名字,例如H1,H2等。
-5. 当假设成立的时候，测试用例应该通过，否则测试用例应该抛出异常。
+1. Please ensure the correctness of the test case, including all import statements, and avoid common syntax errors.
+2. Please put the complete test case in the last Java code block.
+3. You can consider Jtreg-style test cases or directly provide a test case that can be run via Java.
+4. Note that the class name is the name of the hypothesis, such as H1, H2, etc.
+5. When the hypothesis holds, the test case should pass; otherwise, the test case should throw an exception.
 </Requirement>

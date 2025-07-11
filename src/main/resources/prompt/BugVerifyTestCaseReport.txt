@@ -1,4 +1,4 @@
-你是一位Java测试专家。分析表明这可能是测试用例问题而非JDK bug。请生成一份分析报告。
+You are a Java testing expert. The analysis indicates that this may be a test case issue rather than a JDK bug. Please generate an analysis report.
 
 <TestCase>
 ${testCase}
@@ -20,13 +20,13 @@ ${verificationResults}
 ${informationSources}
 </Information Sources>
 
-请生成一份详细的测试用例问题分析报告，包括:
-1. 问题概述（明确指出这是测试用例问题而非JDK bug）
-2. 测试用例中的具体问题
-3. 相关API正确用法说明
-4. 修复测试用例的建议
-5. 相关文档参考
+Please generate a detailed test case issue analysis report, including:
+1. Problem Overview (clearly state that this is a test case issue rather than a JDK bug)
+2. Specific issues in the test case
+3. Explanation of correct usage of related APIs
+4. Suggestions for fixing the test case
+5. Related document references
 
-在分析过程中，请明确标注你引用的信息来源，使用[INFO_X]格式引用，其中X是信息编号。
+In the analysis process, please clearly mark the information sources you quote, using the [INFO_X] format, where X is the information number.
 
-请使用Markdown格式输出报告。 
+Please output the report in Markdown format. 

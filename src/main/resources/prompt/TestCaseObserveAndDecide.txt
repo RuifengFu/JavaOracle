@@ -1,61 +1,61 @@
 
-你是一位资深测试工程师，负责监督测试用例失败的最小化过程。
-根据上次尝试的总结，决定下一步的策略行动。
 
-**上次尝试的总结：**
+You are a senior test engineer responsible for overseeing the minimization process of test case failures.
+Based on the summary of the last attempt, decide on the next strategic action.
+
+**Summary of Last Attempt:**
 ```
 ${observation_summary}
 ```
 
-<#if current_result?? && original_failure??>
-**错误比较任务：**
-比较原始失败和当前测试结果，判断它们是否代表相同的根本失败：
 
-原始失败：
+**Error Comparison Task:**
+Compare the original failure and the current test result to determine if they represent the same root failure:
+
+Original Failure:
 ${original_failure}
 
-当前输出：
+Current Output:
 ${current_result.output}
 
-当前测试状态：${current_result.fail?string("失败", "通过")}
+Current Test Status: ${current_result.fail?string("Failed", "Passed")}
 
 </#if>
 
-**任务：**
-从以下行动中选择一个。你的选择将决定最小化循环的下一步。
-我们希望在代码中适量包含输出之类的内容来帮助理解错误。
+**Task:**
+Choose one from the following actions. Your choice will determine the next step in the minimization loop.
+We hope to include an appropriate amount of output and such in the code to help understand the error.
 
+**Available Actions:**
+- **continue_minimization**: Continue to the next iteration
+- **finish_minimization**: Complete the minimization process
+- **redo_simplification**: Abandon this modification and revert to the previous code
 
-**可用行动：**
-- **continue_minimization**: 继续下一次迭代
-- **finish_minimization**: 完成最小化过程
-- **redo_simplification**: 放弃这次的修改，回退到之前的代码
+**Decision Guidance:**
 
-**决策指导：**
+**Choose `continue_minimization` in these cases:**
+- The error characteristics are the same and the code was successfully simplified
+- This reduction did not change the characteristics of the error (error type and key information remain consistent)
+- The code was successfully simplified, and there is still room for further simplification
+- This attempt is reasonable and provides valuable information for subsequent simplifications
+- The test still fails as expected, and the nature of the error has not changed
+- Still contains a large amount of code logic and test functions unrelated to the test failure
 
-**选择 `continue_minimization` 的情况：**
-- 错误特征相同且代码成功简化
-- 这次减少没有改变出错的特征（错误类型和关键信息仍然一致）
-- 代码成功简化，且仍有进一步简化的空间
-- 这次尝试是合理的，为后续简化提供了有价值的信息
-- 测试仍然按预期失败，错误本质没有改变
-- 仍然包含大量的与测试失败无关的代码逻辑和测试函数
+**Choose `finish_minimization` in these cases:**
+- The code is already simple enough, and the benefits of further simplification are minimal
+- Multiple attempts have failed to find a better simplification scheme
+- The current test case is already relatively concise, with clear main logic
+- Has reached a reasonable level of simplification
+- For example, if the code is only about a dozen lines containing some output statements
 
-**选择 `finish_minimization` 的情况：**
-- 代码已经足够简单，进一步简化的收益很小
-- 多次尝试都无法找到更好的简化方案
-- 当前测试用例已经相对简洁，主要逻辑清晰
-- 已经达到了合理的简化程度
-- 例如如果代码只有十几行左右包含一些输出语句
+**Choose `redo_simplification` in these cases:**
+- The error has significantly changed or the test has stopped failing
+- The error output is inconsistent with the original failure (error type changed, key error information lost)
+- The test changed from failure to pass, losing the characteristics of the original bug
+- This simplification was too aggressive and damaged the core logic of the test
+- Introduced new compilation errors or runtime errors
+- In short, this code should be rolled back
 
-**选择 `redo_simplification` 的情况：**
-- 错误显著改变或测试停止失败
-- 错误输出与原始失败不一致（错误类型改变、关键错误信息丢失）
-- 测试从失败变为通过，丢失了原始bug的特征
-- 这次简化过于激进，破坏了测试的核心逻辑
-- 引入了新的编译错误或运行时错误
-- 总之这次代码应该被回滚
-
-**指令：**
-你必须恰好调用提供的工具中的一个（`continue_minimization`、`finish_minimization`、`redo_simplification`），不需要任何参数。
-专注于核心失败是否得到保留。不要提供任何其他文本或解释。 
+**Instructions:**
+You must call exactly one of the provided tools (`continue_minimization`, `finish_minimization`, `redo_simplification`), without any parameters.
+Focus on whether the core failure is preserved. Do not provide any other text or explanations. 
