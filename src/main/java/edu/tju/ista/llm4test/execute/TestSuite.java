@@ -193,7 +193,7 @@ public class TestSuite {
             int successCount = successfulTestCases.size();
             int failureCount = totalCount - successCount;
             
-            System.out.println(String.format("过滤完成 - 总计: %d, 成功: %d, 失败: %d (失败的已丢弃)", 
+            LoggerUtil.logResult(Level.INFO, String.format("过滤完成 - 总计: %d, 成功: %d, 失败: %d (失败的已丢弃)",
                     totalCount, successCount, failureCount));
             
             LoggerUtil.logExec(Level.INFO, String.format("成功测试用例过滤完成，保留 %d/%d 个测试用例进行后续处理", 
