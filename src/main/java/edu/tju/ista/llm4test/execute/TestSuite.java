@@ -12,11 +12,17 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
 
+import edu.tju.ista.llm4test.concurrent.ConcurrentExecutionManager;
+
+/**
+ * 测试套件，负责管理和执行一组测试用例
+ */
 public class TestSuite {
 
     private final String rootPath;
@@ -106,7 +112,10 @@ public class TestSuite {
     }
     
     /**
-     * 从缓存文件加载成功的测试用例
+     * 从缓存文件中并行加载成功的测试用例
+     * @param testCaseFactory TestCase创建工厂
+     * @param testExecutor 测试执行器 (此处未使用，但保留签名一致性)
+     * @return 成功的测试用例列表
      */
     private List<TestCase> loadSuccessfulTestCasesFromCache(Function<File, TestCase> testCaseFactory, TestExecutor testExecutor) {
         String cachePath = GlobalConfig.getValidTestCasesPath(rootPath);
@@ -118,28 +127,39 @@ public class TestSuite {
         }
         
         try {
-            List<String> validTestCases = Files.readAllLines(cacheFile);
-            List<TestCase> successfulTestCases = new ArrayList<>();
-            
-            for (String line : validTestCases) {
-                String testCasePath = line.trim();
-                // 跳过空行和注释行
-                if (testCasePath.isEmpty() || testCasePath.startsWith("#")) {
-                    continue;
-                }
-                
-                File testFile = new File(GlobalConfig.getJdkTestPath() + "/jdk/" + testCasePath);
-                if (isValidTestFile(testFile)) {
-                    TestCase testCase = testCaseFactory.apply(testFile);
-                    // 设置为成功状态，跳过实际执行
-                    testCase.setResult(new TestResult(TestResultKind.SUCCESS));
-                    successfulTestCases.add(testCase);
-                } else {
-                    LoggerUtil.logExec(Level.WARNING, "缓存中的测试文件无效或不存在: " + testFile.getAbsolutePath());
-                }
-            }
-            
-            LoggerUtil.logExec(Level.INFO, "从缓存文件 " + cachePath + " 加载了 " + successfulTestCases.size() + " 个成功测试用例");
+            List<String> validTestCasesPaths = Files.readAllLines(cacheFile);
+            ConcurrentExecutionManager concurrentManager = ConcurrentExecutionManager.getInstance();
+
+            List<CompletableFuture<TestCase>> futures = validTestCasesPaths.stream()
+                    // 过滤掉空行或注释行
+                    .map(String::trim)
+                    .filter(line -> !line.isEmpty() && !line.startsWith("#"))
+                    // 将每个路径处理任务提交到TestTask线程池中并行执行
+                    .map(testCasePath -> concurrentManager.submitTestTask(() -> {
+                        File testFile = new File(GlobalConfig.getJdkTestPath() + "/jdk/" + testCasePath);
+                        if (isValidTestFile(testFile)) {
+                            TestCase testCase = testCaseFactory.apply(testFile);
+                            // 关键：在缓存加载模式下，我们假设它已经成功，直接设置结果
+                            testCase.setResult(new TestResult(TestResultKind.SUCCESS));
+                            return testCase;
+                        } else {
+                            LoggerUtil.logExec(Level.WARNING, "缓存中的测试文件无效或不存在: " + testFile.getAbsolutePath());
+                            return null; // 返回null以便后续过滤
+                        }
+                    }))
+                    .collect(Collectors.toList());
+
+            // 等待所有并行的TestCase创建任务完成
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+
+            // 从future中获取结果，并过滤掉处理失败的（null）
+            List<TestCase> successfulTestCases = futures.stream()
+                    .map(CompletableFuture::join)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+
+            LoggerUtil.logExec(Level.INFO, "从缓存文件 " + cachePath + " 并行加载了 " + successfulTestCases.size() + " 个成功测试用例");
+            LoggerUtil.logResult(Level.INFO, "从缓存文件 " + cachePath + " 并行加载了 " + successfulTestCases.size() + " 个成功测试用例");
             return successfulTestCases;
             
         } catch (IOException e) {
