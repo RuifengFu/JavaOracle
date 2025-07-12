@@ -68,7 +68,6 @@ public class ConcurrentExecutionManager {
         
         double testCoreMultiplier = GlobalConfig.getTestCoreMultiplier();
         double testMaxMultiplier = GlobalConfig.getTestMaxMultiplier();
-        int testQueueSize = GlobalConfig.getTestQueueSize();
         
         int corePoolSize = (int) (cpuCores * testCoreMultiplier);
         int maxPoolSize = (int) (cpuCores * testMaxMultiplier);
@@ -81,17 +80,17 @@ public class ConcurrentExecutionManager {
             corePoolSize,                           // 核心线程数
             maxPoolSize,                            // 最大线程数
             60L, TimeUnit.SECONDS,                  // 非核心线程空闲超时
-            new ArrayBlockingQueue<>(testQueueSize), // 有界队列控制缓冲
+            new LinkedBlockingQueue<>(),            // 使用无界队列避免任务拒绝和调用者阻塞
             new NamedThreadFactory("Test-Worker"), // 命名线程工厂
-            new ThreadPoolExecutor.CallerRunsPolicy() // 背压策略：调用者执行
+            new ThreadPoolExecutor.CallerRunsPolicy() // 背压策略：在无界队列下基本不会触发
         );
         
         // 批量处理线程池：使用虚拟线程或轻量级线程池
         this.batchExecutor = createBatchExecutor(calculatedGenerateThreads);  // 使用 generate multiplier for batch
         
         LoggerUtil.logExec(Level.INFO, 
-            String.format("并发执行管理器初始化完成 - CPU核心数: %d, 生成倍率: %.1f, 测试核心倍率: %.1f, 测试最大倍率: %.1f, 队列大小: %d, 虚拟线程配置: %s, 虚拟线程支持: %s, LLM执行器: %s, 测试执行器: ThreadPoolExecutor", 
-                cpuCores, generateMultiplier, testCoreMultiplier, testMaxMultiplier, testQueueSize, 
+            String.format("并发执行管理器初始化完成 - CPU核心数: %d, 生成倍率: %.1f, 测试核心倍率: %.1f, 测试最大倍率: %.1f, 队列: 无界, 虚拟线程配置: %s, 虚拟线程支持: %s, LLM执行器: %s, 测试执行器: ThreadPoolExecutor", 
+                cpuCores, generateMultiplier, testCoreMultiplier, testMaxMultiplier, 
                 GlobalConfig.isVirtualThreadsEnabled(), virtualThreadsSupported,
                 virtualThreadsSupported ? "虚拟线程执行器（无并发限制）" : "传统线程池"));
         
@@ -140,7 +139,7 @@ public class ConcurrentExecutionManager {
             Math.min(calculatedThreads, effectiveMax),         // 核心线程数
             Math.min(calculatedThreads, effectiveMax),         // 最大线程数
             60L, TimeUnit.SECONDS,              // 空闲超时
-            new LinkedBlockingQueue<>(1000),    // 队列
+            new LinkedBlockingQueue<>(),    // 队列
             new NamedThreadFactory("LLM-Worker"),
             new ThreadPoolExecutor.CallerRunsPolicy()
         );
@@ -164,7 +163,7 @@ public class ConcurrentExecutionManager {
             calculatedThreads / 2,     // 核心线程数
             calculatedThreads,         // 最大线程数
             120L, TimeUnit.SECONDS,                 // 空闲超时
-            new LinkedBlockingQueue<>(100),         // 有界队列
+            new LinkedBlockingQueue<>(),         // 有界队列
             new NamedThreadFactory("Batch-Processor"),
             new ThreadPoolExecutor.DiscardOldestPolicy() // 丢弃最旧任务
         );
