@@ -5,13 +5,15 @@ import edu.tju.ista.llm4test.config.GlobalConfig;
 
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
+import java.util.concurrent.Semaphore;
 
 /**
  * 并发执行管理器
  * 
  * 使用现代化 executor 架构：
- * - LLM调用：虚拟线程（轻量化，适合IO密集型）
+ * - LLM调用：虚拟线程（轻量化，适合IO密集型）+ QPS控制
  * - 测试执行：ForkJoinPool（适合CPU密集型）
  * - 批量处理：虚拟线程（后台低优先级任务）
  */
@@ -28,10 +30,21 @@ public class ConcurrentExecutionManager {
     // 批量处理线程池 - 使用虚拟线程
     private final ExecutorService batchExecutor;
     
+    // LLM任务并发控制
+    private final Semaphore llmConcurrencyLimiter;
+    
+    // 简单的QPS限流器 - 基于时间窗口
+    private final AtomicLong lastResetTime = new AtomicLong(System.currentTimeMillis());
+    private final AtomicInteger currentWindowRequests = new AtomicInteger(0);
+    private final int maxQPS; // 每秒最大请求数
+    
     // 监控指标
     private final AtomicInteger activeLLMTasks = new AtomicInteger(0);
     private final AtomicInteger activeTestTasks = new AtomicInteger(0);
     private final AtomicInteger activeBatchTasks = new AtomicInteger(0);
+    
+    // 等待队列中的任务数
+    private final AtomicInteger waitingLLMTasks = new AtomicInteger(0);
     
     // 是否支持虚拟线程
     private final boolean virtualThreadsSupported;
@@ -42,6 +55,10 @@ public class ConcurrentExecutionManager {
     private ConcurrentExecutionManager() {
         int cpuCores = Runtime.getRuntime().availableProcessors();
         this.virtualThreadsSupported = isVirtualThreadsSupported();
+        
+        // 初始化QPS控制参数
+        this.maxQPS = GlobalConfig.getLlmMaxQps();
+        this.llmConcurrencyLimiter = new Semaphore(GlobalConfig.getLlmMaxConcurrency());
         
         double generateMultiplier = GlobalConfig.getThreadMultiplierGenerate();
         double executeMultiplier = GlobalConfig.getThreadMultiplierExecute();  // 保留原有倍率作为备用
@@ -76,7 +93,7 @@ public class ConcurrentExecutionManager {
             String.format("并发执行管理器初始化完成 - CPU核心数: %d, 生成倍率: %.1f, 测试核心倍率: %.1f, 测试最大倍率: %.1f, 队列大小: %d, 虚拟线程配置: %s, 虚拟线程支持: %s, LLM执行器: %s, 测试执行器: ThreadPoolExecutor", 
                 cpuCores, generateMultiplier, testCoreMultiplier, testMaxMultiplier, testQueueSize, 
                 GlobalConfig.isVirtualThreadsEnabled(), virtualThreadsSupported,
-                virtualThreadsSupported ? "虚拟线程" : "传统线程池"));
+                virtualThreadsSupported ? "虚拟线程执行器（无并发限制）" : "传统线程池"));
         
         // 注册关闭钩子
         Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown));
@@ -106,34 +123,24 @@ public class ConcurrentExecutionManager {
      * 创建LLM执行器
      */
     private ExecutorService createLLMExecutor(int calculatedThreads) {
-        int maxThreads = GlobalConfig.getMaxVirtualThreads();
-        int effectiveMax = Math.min(calculatedThreads, maxThreads);
-        
         if (virtualThreadsSupported) {
             try {
-                // 使用有界的虚拟线程池来限制并发
-                Object builder = Thread.class.getMethod("ofVirtual").invoke(null);
-                ThreadFactory virtualFactory = (ThreadFactory) builder.getClass().getMethod("factory").invoke(builder);
-                
-                return new ThreadPoolExecutor(
-                    0,                              // 核心线程数0（虚拟线程轻量）
-                    effectiveMax,                   // 最大并发限制
-                    0L, TimeUnit.MILLISECONDS,      // 无空闲超时
-                    new LinkedBlockingQueue<>(),    // 无界队列
-                    virtualFactory,                 // 虚拟线程工厂
-                    new ThreadPoolExecutor.CallerRunsPolicy() // 背压策略
-                );
+                // 使用真正的虚拟线程执行器 - 每个任务一个虚拟线程
+                return Executors.newVirtualThreadPerTaskExecutor();
             } catch (Exception e) {
-                LoggerUtil.logExec(Level.WARNING, "创建有界虚拟线程执行器失败，使用传统线程池: " + e.getMessage());
+                LoggerUtil.logExec(Level.WARNING, "创建虚拟线程执行器失败，使用传统线程池: " + e.getMessage());
             }
         }
         
-        // 降级到传统线程池，也应用并发限制
+        // 降级到传统线程池
+        int maxThreads = GlobalConfig.getMaxVirtualThreads();
+        int effectiveMax = Math.min(calculatedThreads, maxThreads);
+        
         return new ThreadPoolExecutor(
-            Math.min(calculatedThreads, effectiveMax),         // 核心线程数，不超过50和配置上限
-            Math.min(calculatedThreads, effectiveMax),         // 最大线程数，不超过50和配置上限
+            Math.min(calculatedThreads, effectiveMax),         // 核心线程数
+            Math.min(calculatedThreads, effectiveMax),         // 最大线程数
             60L, TimeUnit.SECONDS,              // 空闲超时
-            new LinkedBlockingQueue<>(1000),    // 更大的队列
+            new LinkedBlockingQueue<>(1000),    // 队列
             new NamedThreadFactory("LLM-Worker"),
             new ThreadPoolExecutor.CallerRunsPolicy()
         );
@@ -145,10 +152,8 @@ public class ConcurrentExecutionManager {
     private ExecutorService createBatchExecutor(int calculatedThreads) {
         if (virtualThreadsSupported) {
             try {
-                // 为批量处理使用虚拟线程，轻量级且适合后台任务
-                return (ExecutorService) Executors.class
-                    .getMethod("newVirtualThreadPerTaskExecutor")
-                    .invoke(null);
+                // 使用真正的虚拟线程执行器 - 每个任务一个虚拟线程
+                return Executors.newVirtualThreadPerTaskExecutor();
             } catch (Exception e) {
                 LoggerUtil.logExec(Level.WARNING, "创建虚拟线程批量执行器失败，使用传统线程池: " + e.getMessage());
             }
@@ -180,17 +185,65 @@ public class ConcurrentExecutionManager {
     }
     
     /**
-     * 提交LLM任务（IO密集型）- 使用虚拟线程优化
+     * 检查并等待QPS限制
+     */
+    private void waitForQPS() {
+        if (maxQPS <= 0) return; // 如果QPS设置为0或负数，表示不限制
+        
+        long currentTime = System.currentTimeMillis();
+        long lastReset = lastResetTime.get();
+        
+        // 检查是否需要重置计数器（每秒重置一次）
+        if (currentTime - lastReset >= 1000) {
+            if (lastResetTime.compareAndSet(lastReset, currentTime)) {
+                currentWindowRequests.set(0);
+            }
+        }
+        
+        // 原子性增加请求计数
+        int currentCount = currentWindowRequests.incrementAndGet();
+        
+        // 如果超过QPS限制，需要等待
+        if (currentCount > maxQPS) {
+            try {
+                long waitTime = 1000 - (currentTime - lastResetTime.get());
+                if (waitTime > 0) {
+                    Thread.sleep(waitTime);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("QPS等待被中断", e);
+            }
+        }
+    }
+    
+    /**
+     * 提交LLM任务（IO密集型）- 使用虚拟线程优化 + QPS控制
      */
     public <T> CompletableFuture<T> submitLLMTask(Callable<T> task) {
-        activeLLMTasks.incrementAndGet();
+        waitingLLMTasks.incrementAndGet();
+        
         return CompletableFuture.supplyAsync(() -> {
             try {
+                // 1. 等待并发许可
+                llmConcurrencyLimiter.acquire();
+                
+                // 2. 等待QPS限制
+                waitForQPS();
+                
+                // 3. 执行任务
+                activeLLMTasks.incrementAndGet();
                 return task.call();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("LLM任务被中断", e);
             } catch (Exception e) {
                 throw new RuntimeException("LLM任务执行失败", e);
             } finally {
+                // 4. 释放资源
                 activeLLMTasks.decrementAndGet();
+                waitingLLMTasks.decrementAndGet();
+                llmConcurrencyLimiter.release();
             }
         }, llmExecutor);
     }
@@ -199,12 +252,27 @@ public class ConcurrentExecutionManager {
      * 提交LLM任务（Runnable版本）
      */
     public CompletableFuture<Void> submitLLMTask(Runnable task) {
-        activeLLMTasks.incrementAndGet();
+        waitingLLMTasks.incrementAndGet();
+        
         return CompletableFuture.runAsync(() -> {
             try {
+                // 1. 等待并发许可
+                llmConcurrencyLimiter.acquire();
+                
+                // 2. 等待QPS限制
+                waitForQPS();
+                
+                // 3. 执行任务
+                activeLLMTasks.incrementAndGet();
                 task.run();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("LLM任务被中断", e);
             } finally {
+                // 4. 释放资源
                 activeLLMTasks.decrementAndGet();
+                waitingLLMTasks.decrementAndGet();
+                llmConcurrencyLimiter.release();
             }
         }, llmExecutor);
     }
@@ -260,15 +328,19 @@ public class ConcurrentExecutionManager {
      */
     public String getLLMPoolStatus() {
         if (virtualThreadsSupported) {
-            return String.format("LLM虚拟线程池 - 活跃任务: %d", activeLLMTasks.get());
+            return String.format("LLM虚拟线程池 - 活跃任务: %d, 等待任务: %d, 当前QPS: %d/%d, 并发许可: %d/%d", 
+                activeLLMTasks.get(), waitingLLMTasks.get(), 
+                currentWindowRequests.get(), maxQPS,
+                llmConcurrencyLimiter.availablePermits(), GlobalConfig.getLlmMaxConcurrency());
         } else if (llmExecutor instanceof ThreadPoolExecutor tpe) {
-            return String.format("LLM线程池 - 活跃: %d/%d, 队列: %d, 完成: %d", 
+            return String.format("LLM线程池 - 活跃: %d/%d, 队列: %d, 完成: %d, 等待: %d, QPS: %d/%d", 
                 tpe.getActiveCount(), tpe.getPoolSize(), 
-                tpe.getQueue().size(), tpe.getCompletedTaskCount());
+                tpe.getQueue().size(), tpe.getCompletedTaskCount(),
+                waitingLLMTasks.get(), currentWindowRequests.get(), maxQPS);
         }
         return "LLM线程池状态不可用";
     }
-    
+
     /**
      * 获取测试线程池状态
      */
@@ -280,7 +352,7 @@ public class ConcurrentExecutionManager {
         }
         return "测试线程池状态不可用";
     }
-    
+
     /**
      * 获取批量处理状态
      */
@@ -293,7 +365,7 @@ public class ConcurrentExecutionManager {
         }
         return "批量线程池状态不可用";
     }
-    
+
     /**
      * 获取总体状态
      */
@@ -303,7 +375,7 @@ public class ConcurrentExecutionManager {
                 getLLMPoolStatus(), getTestPoolStatus(), getBatchPoolStatus(),
                 GlobalConfig.isVirtualThreadsEnabled(), virtualThreadsSupported));
     }
-    
+
     /**
      * 检查系统负载并提供优化建议
      */
@@ -313,7 +385,10 @@ public class ConcurrentExecutionManager {
         report.append(String.format("虚拟线程配置启用: %s\n", GlobalConfig.isVirtualThreadsEnabled()));
         report.append(String.format("虚拟线程实际支持: %s\n", virtualThreadsSupported));
         report.append(String.format("CPU核心数: %d\n", Runtime.getRuntime().availableProcessors()));
+        report.append(String.format("LLM QPS限制: %d requests/s\n", maxQPS));
+        report.append(String.format("LLM并发限制: %d tasks\n", GlobalConfig.getLlmMaxConcurrency()));
         report.append(String.format("当前活跃LLM任务: %d\n", activeLLMTasks.get()));
+        report.append(String.format("等待中LLM任务: %d\n", waitingLLMTasks.get()));
         report.append(String.format("当前活跃测试任务: %d\n", activeTestTasks.get()));
         report.append(String.format("当前活跃批量任务: %d\n", activeBatchTasks.get()));
         
@@ -322,6 +397,19 @@ public class ConcurrentExecutionManager {
             report.append("建议: 虚拟线程支持已被配置禁用，如需更好的IO性能可在config.properties中设置virtualThreads.enabled=true\n");
         } else if (!virtualThreadsSupported) {
             report.append("建议: 升级到Java 19+以获得虚拟线程支持，可显著提升IO密集型任务性能\n");
+        } else {
+            report.append("✓ 已启用虚拟线程: LLM和批量处理任务使用虚拟线程，支持高并发IO操作\n");
+            report.append("✓ 虚拟线程优势: 轻量级、无需线程池限制、自动处理IO阻塞\n");
+            report.append(String.format("✓ QPS控制: 限制为每秒最多 %d 个LLM请求\n", maxQPS));
+            report.append(String.format("✓ 并发控制: 限制为最多 %d 个并发LLM任务\n", GlobalConfig.getLlmMaxConcurrency()));
+            
+            // 性能警告
+            if (waitingLLMTasks.get() > 10) {
+                report.append("⚠️ 高等待警告: 等待中的LLM任务较多，建议适当调整QPS或并发限制\n");
+            }
+            if (activeLLMTasks.get() > 100) {
+                report.append("⚠️ 高并发警告: 当前LLM任务数较多，虚拟线程能很好地处理这种情况\n");
+            }
         }
         
         LoggerUtil.logExec(Level.INFO, report.toString());

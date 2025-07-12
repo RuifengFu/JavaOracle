@@ -32,6 +32,13 @@ public class GlobalConfig {
     private static final double DEFAULT_TEST_MAX_MULTIPLIER = 1.5;
     private static final int DEFAULT_TEST_QUEUE_SIZE = 200;
     
+    // LLM QPS控制默认配置
+    private static final int DEFAULT_LLM_MAX_QPS = 10;  // 默认每秒最多10个请求
+    private static final int DEFAULT_LLM_MAX_CONCURRENCY = 50;  // 默认最大并发50个任务
+    
+    // Flash模式配置
+    private static final boolean DEFAULT_USE_FLASH = false;  // 默认不使用Flash模式（便宜模型）
+    
     // JDK模块相关默认配置
     private static final String DEFAULT_JDK_ROOT_PATH = "jdk17u-dev";
     private static final String DEFAULT_JDK_BASE_SOURCE_PATH = "jdk17u-dev/src/java.base/share/classes";
@@ -326,6 +333,27 @@ public class GlobalConfig {
      */
     public static int getTestQueueSize() {
         return ConfigUtil.getInt("testQueueSize", DEFAULT_TEST_QUEUE_SIZE);
+    }
+    
+    /**
+     * 获取LLM最大QPS
+     */
+    public static int getLlmMaxQps() {
+        return ConfigUtil.getInt("llm.maxQps", DEFAULT_LLM_MAX_QPS);
+    }
+    
+    /**
+     * 获取LLM最大并发
+     */
+    public static int getLlmMaxConcurrency() {
+        return ConfigUtil.getInt("llm.maxConcurrency", DEFAULT_LLM_MAX_CONCURRENCY);
+    }
+    
+    /**
+     * 是否使用Flash模式
+     */
+    public static boolean isUseFlash() {
+        return ConfigUtil.getBoolean("useFlash", DEFAULT_USE_FLASH);
     }
     
     // --- API Configuration ---
