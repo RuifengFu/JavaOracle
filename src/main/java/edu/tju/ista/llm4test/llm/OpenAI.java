@@ -99,9 +99,9 @@ public class OpenAI {
         R1 = new OpenAI(GlobalConfig.getOpenaiR1Model());
         V3 = new OpenAI(GlobalConfig.getOpenaiV3Model());
         if (GlobalConfig.isUseFlash()) {
-            DoubaoThinking = DoubaoFlash;
-            R1 = DoubaoFlash;
-            V3 = DoubaoFlash;
+            DoubaoThinking = new OpenAI(arkApiKey, arkBaseUrl, arkModel);
+            R1 = new OpenAI(arkApiKey, arkBaseUrl, arkModel);
+            V3 = new OpenAI(arkApiKey, arkBaseUrl, arkModel);
         }
         V3.JSON_OUTPUT = true;
 
