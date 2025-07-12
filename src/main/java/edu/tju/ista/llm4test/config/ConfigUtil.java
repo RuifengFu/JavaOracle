@@ -98,6 +98,26 @@ public class ConfigUtil {
     }
     
     /**
+     * 获取浮点数配置值
+     * 
+     * @param key 配置键
+     * @param defaultValue 默认值
+     * @return 浮点数配置值或默认值
+     */
+    public static double getDouble(String key, double defaultValue) {
+        String value = properties.getProperty(key);
+        if (value == null || value.trim().isEmpty()) {
+            return defaultValue;
+        }
+        try {
+            return Double.parseDouble(value.trim());
+        } catch (NumberFormatException e) {
+            System.err.println("警告: 配置项 '" + key + "' 的值 '" + value + "' 不是有效的浮点数，使用默认值: " + defaultValue);
+            return defaultValue;
+        }
+    }
+    
+    /**
      * 检查配置项是否存在
      * 
      * @param key 配置键

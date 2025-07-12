@@ -43,23 +43,39 @@ public class ConcurrentExecutionManager {
         int cpuCores = Runtime.getRuntime().availableProcessors();
         this.virtualThreadsSupported = isVirtualThreadsSupported();
         
-        // LLM线程池：优先使用虚拟线程，轻量化处理IO密集型任务
-        this.llmExecutor = createLLMExecutor();
+        double generateMultiplier = GlobalConfig.getThreadMultiplierGenerate();
+        double executeMultiplier = GlobalConfig.getThreadMultiplierExecute();  // 保留原有倍率作为备用
         
-        // 测试执行线程池：使用 ForkJoinPool，专为CPU密集型任务优化
-        this.testExecutor = new ForkJoinPool(
-            cpuCores * 3 / 2,                                    // 并行度 = CPU核心数 * 1.5
-            ForkJoinPool.defaultForkJoinWorkerThreadFactory,
-            new UncaughtExceptionHandler(),              // 异常处理
-            false                                        // 非异步模式
+        int calculatedGenerateThreads = (int) (cpuCores * generateMultiplier);
+        int calculatedExecuteThreads = (int) (cpuCores * executeMultiplier);
+        
+        double testCoreMultiplier = GlobalConfig.getTestCoreMultiplier();
+        double testMaxMultiplier = GlobalConfig.getTestMaxMultiplier();
+        int testQueueSize = GlobalConfig.getTestQueueSize();
+        
+        int corePoolSize = (int) (cpuCores * testCoreMultiplier);
+        int maxPoolSize = (int) (cpuCores * testMaxMultiplier);
+        
+        // LLM线程池：优先使用虚拟线程，轻量化处理IO密集型任务
+        this.llmExecutor = createLLMExecutor(calculatedGenerateThreads);
+        
+        // 测试执行线程池：使用 ThreadPoolExecutor，适合执行外部命令
+        this.testExecutor = new ThreadPoolExecutor(
+            corePoolSize,                           // 核心线程数
+            maxPoolSize,                            // 最大线程数
+            60L, TimeUnit.SECONDS,                  // 非核心线程空闲超时
+            new ArrayBlockingQueue<>(testQueueSize), // 有界队列控制缓冲
+            new NamedThreadFactory("Test-Worker"), // 命名线程工厂
+            new ThreadPoolExecutor.CallerRunsPolicy() // 背压策略：调用者执行
         );
         
         // 批量处理线程池：使用虚拟线程或轻量级线程池
-        this.batchExecutor = createBatchExecutor();
+        this.batchExecutor = createBatchExecutor(calculatedGenerateThreads);  // 使用 generate multiplier for batch
         
         LoggerUtil.logExec(Level.INFO, 
-            String.format("并发执行管理器初始化完成 - CPU核心数: %d, 虚拟线程配置: %s, 虚拟线程支持: %s, LLM执行器: %s, 测试执行器: ForkJoinPool", 
-                cpuCores, GlobalConfig.isVirtualThreadsEnabled(), virtualThreadsSupported,
+            String.format("并发执行管理器初始化完成 - CPU核心数: %d, 生成倍率: %.1f, 测试核心倍率: %.1f, 测试最大倍率: %.1f, 队列大小: %d, 虚拟线程配置: %s, 虚拟线程支持: %s, LLM执行器: %s, 测试执行器: ThreadPoolExecutor", 
+                cpuCores, generateMultiplier, testCoreMultiplier, testMaxMultiplier, testQueueSize, 
+                GlobalConfig.isVirtualThreadsEnabled(), virtualThreadsSupported,
                 virtualThreadsSupported ? "虚拟线程" : "传统线程池"));
         
         // 注册关闭钩子
@@ -89,51 +105,61 @@ public class ConcurrentExecutionManager {
     /**
      * 创建LLM执行器
      */
-    private ExecutorService createLLMExecutor() {
+    private ExecutorService createLLMExecutor(int calculatedThreads) {
+        int maxThreads = GlobalConfig.getMaxVirtualThreads();
+        int effectiveMax = Math.min(calculatedThreads, maxThreads);
+        
         if (virtualThreadsSupported) {
             try {
-                // 使用虚拟线程执行器，非常适合IO密集型的LLM调用
-                return (ExecutorService) Executors.class
-                    .getMethod("newVirtualThreadPerTaskExecutor")
-                    .invoke(null);
+                // 使用有界的虚拟线程池来限制并发
+                Object builder = Thread.class.getMethod("ofVirtual").invoke(null);
+                ThreadFactory virtualFactory = (ThreadFactory) builder.getClass().getMethod("factory").invoke(builder);
+                
+                return new ThreadPoolExecutor(
+                    0,                              // 核心线程数0（虚拟线程轻量）
+                    effectiveMax,                   // 最大并发限制
+                    0L, TimeUnit.MILLISECONDS,      // 无空闲超时
+                    new LinkedBlockingQueue<>(),    // 无界队列
+                    virtualFactory,                 // 虚拟线程工厂
+                    new ThreadPoolExecutor.CallerRunsPolicy() // 背压策略
+                );
             } catch (Exception e) {
-                LoggerUtil.logExec(Level.WARNING, "创建虚拟线程执行器失败，使用传统线程池: " + e.getMessage());
+                LoggerUtil.logExec(Level.WARNING, "创建有界虚拟线程执行器失败，使用传统线程池: " + e.getMessage());
             }
         }
         
-        // 降级到传统线程池
-        int cpuCores = Runtime.getRuntime().availableProcessors();
+        // 降级到传统线程池，也应用并发限制
         return new ThreadPoolExecutor(
-            Math.min(50, cpuCores * 2),      // 核心线程数，不超过50
-            50,                              // 最大线程数固定为50
-            60L, TimeUnit.SECONDS,           // 空闲超时
-            new LinkedBlockingQueue<>(1000), // 更大的队列以容纳等待的任务
+            Math.min(calculatedThreads, effectiveMax),         // 核心线程数，不超过50和配置上限
+            Math.min(calculatedThreads, effectiveMax),         // 最大线程数，不超过50和配置上限
+            60L, TimeUnit.SECONDS,              // 空闲超时
+            new LinkedBlockingQueue<>(1000),    // 更大的队列
             new NamedThreadFactory("LLM-Worker"),
-            new ThreadPoolExecutor.CallerRunsPolicy() // 背压策略
+            new ThreadPoolExecutor.CallerRunsPolicy()
         );
     }
     
     /**
      * 创建批量处理执行器
      */
-    private ExecutorService createBatchExecutor() {
-//        if (virtualThreadsSupported) {
-//            try {
-//                // 为批量处理使用虚拟线程，轻量级且适合后台任务
-//                return (ExecutorService) Executors.class
-//                    .getMethod("newVirtualThreadPerTaskExecutor")
-//                    .invoke(null);
-//            } catch (Exception e) {
-//                LoggerUtil.logExec(Level.WARNING, "创建虚拟线程批量执行器失败，使用传统线程池: " + e.getMessage());
-//            }
-//        }
+    private ExecutorService createBatchExecutor(int calculatedThreads) {
+        if (virtualThreadsSupported) {
+            try {
+                // 为批量处理使用虚拟线程，轻量级且适合后台任务
+                return (ExecutorService) Executors.class
+                    .getMethod("newVirtualThreadPerTaskExecutor")
+                    .invoke(null);
+            } catch (Exception e) {
+                LoggerUtil.logExec(Level.WARNING, "创建虚拟线程批量执行器失败，使用传统线程池: " + e.getMessage());
+            }
+        }
         
         // 降级到传统线程池
         return new ThreadPoolExecutor(
-            2,                               // 核心线程数
-            6,                               // 最大线程数
-            120L, TimeUnit.SECONDS,          // 空闲超时
-            new LinkedBlockingQueue<>(100),  // 有界队列
+            calculatedThreads / 2,     // 核心线程数
+            calculatedThreads,         // 最大线程数
+            120L, TimeUnit.SECONDS,                 // 空闲超时
+            new LinkedBlockingQueue<>(100),         // 有界队列
             new NamedThreadFactory("Batch-Processor"),
             new ThreadPoolExecutor.DiscardOldestPolicy() // 丢弃最旧任务
         );
@@ -247,10 +273,10 @@ public class ConcurrentExecutionManager {
      * 获取测试线程池状态
      */
     public String getTestPoolStatus() {
-        if (testExecutor instanceof ForkJoinPool fjp) {
-            return String.format("测试ForkJoinPool - 活跃: %d, 并行度: %d, 窃取: %d, 队列: %d", 
-                fjp.getActiveThreadCount(), fjp.getParallelism(), 
-                fjp.getStealCount(), fjp.getQueuedSubmissionCount());
+        if (testExecutor instanceof ThreadPoolExecutor tpe) {
+            return String.format("测试ThreadPool - 活跃: %d/%d, 队列: %d, 完成: %d", 
+                tpe.getActiveCount(), tpe.getPoolSize(), 
+                tpe.getQueue().size(), tpe.getCompletedTaskCount());
         }
         return "测试线程池状态不可用";
     }

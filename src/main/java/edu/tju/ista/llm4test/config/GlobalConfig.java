@@ -23,10 +23,14 @@ public class GlobalConfig {
         "Dependency/junit-4.13.1.jar"
     };
     private static final long DEFAULT_MAX_FILE_SIZE = 10000;
-    private static final int DEFAULT_THREAD_MULTIPLIER_GENERATE = 3;
-    private static final int DEFAULT_THREAD_MULTIPLIER_EXECUTE = 2;
+    private static final double DEFAULT_THREAD_MULTIPLIER_GENERATE = 3.0;
+    private static final double DEFAULT_THREAD_MULTIPLIER_EXECUTE = 2.0;
     private static final int DEFAULT_EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS = 30;
     private static final String DEFAULT_TEMPLATE_MODE = "SpecTest";
+    private static final int DEFAULT_MAX_VIRTUAL_THREADS = 500;
+    private static final double DEFAULT_TEST_CORE_MULTIPLIER = 0.5;
+    private static final double DEFAULT_TEST_MAX_MULTIPLIER = 1.5;
+    private static final int DEFAULT_TEST_QUEUE_SIZE = 200;
     
     // JDK模块相关默认配置
     private static final String DEFAULT_JDK_ROOT_PATH = "jdk17u-dev";
@@ -150,15 +154,15 @@ public class GlobalConfig {
     /**
      * 获取生成模式的线程倍数
      */
-    public static int getThreadMultiplierGenerate() {
-        return ConfigUtil.getInt("threadMultiplierGenerate", DEFAULT_THREAD_MULTIPLIER_GENERATE);
+    public static double getThreadMultiplierGenerate() {
+        return ConfigUtil.getDouble("threadMultiplierGenerate", DEFAULT_THREAD_MULTIPLIER_GENERATE);
     }
     
     /**
      * 获取执行模式的线程倍数
      */
-    public static int getThreadMultiplierExecute() {
-        return ConfigUtil.getInt("threadMultiplierExecute", DEFAULT_THREAD_MULTIPLIER_EXECUTE);
+    public static double getThreadMultiplierExecute() {
+        return ConfigUtil.getDouble("threadMultiplierExecute", DEFAULT_THREAD_MULTIPLIER_EXECUTE);
     }
     
     /**
@@ -294,6 +298,34 @@ public class GlobalConfig {
      */
     public static boolean isUseCacheMode() {
         return ConfigUtil.getBoolean("useCacheMode", DEFAULT_USE_CACHE_MODE);
+    }
+    
+    /**
+     * 获取最大虚拟线程并发限制
+     */
+    public static int getMaxVirtualThreads() {
+        return ConfigUtil.getInt("maxVirtualThreads", DEFAULT_MAX_VIRTUAL_THREADS);
+    }
+    
+    /**
+     * 获取测试执行器的核心线程倍数
+     */
+    public static double getTestCoreMultiplier() {
+        return ConfigUtil.getDouble("testCoreMultiplier", DEFAULT_TEST_CORE_MULTIPLIER);
+    }
+    
+    /**
+     * 获取测试执行器的最大线程倍数
+     */
+    public static double getTestMaxMultiplier() {
+        return ConfigUtil.getDouble("testMaxMultiplier", DEFAULT_TEST_MAX_MULTIPLIER);
+    }
+    
+    /**
+     * 获取测试执行器的队列大小
+     */
+    public static int getTestQueueSize() {
+        return ConfigUtil.getInt("testQueueSize", DEFAULT_TEST_QUEUE_SIZE);
     }
     
     // --- API Configuration ---
