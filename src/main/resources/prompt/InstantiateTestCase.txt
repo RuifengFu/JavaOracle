@@ -13,5 +13,5 @@ ${hypothesis}
 2. Please put the complete test case in the last Java code block.
 3. You can consider Jtreg-style test cases or directly provide a test case that can be run via Java.
 4. Note that the class name is the name of the hypothesis, such as H1, H2, etc.
-5. When the hypothesis holds, the test case should pass; otherwise, the test case should throw an exception.
+5. When the hypothesis holds, the test case should pass. otherwise, the test case should throw an exception.
 </Requirement>
