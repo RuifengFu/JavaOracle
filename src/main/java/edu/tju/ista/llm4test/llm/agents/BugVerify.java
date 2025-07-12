@@ -827,7 +827,7 @@ public class BugVerify extends Agent {
                 String verifyMessage = entry.getValue();
                 
                 // 使用批量处理线程池，避免占用测试线程池
-                CompletableFuture<Void> future = manager.submitBatchTask(() -> {
+                CompletableFuture<Void> future = manager.submitTestTask(() -> {
                     LoggerUtil.logExec(Level.INFO, "开始处理bug: " + filePath);
                     
                     BugVerify agent = new BugVerify(javadocPath, sourcePath, bugReportPath);
