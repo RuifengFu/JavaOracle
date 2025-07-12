@@ -114,15 +114,8 @@ public class TestExecutor {
         return concurrentManager.submitBatchTask(() -> differentialTesting(file));
     }
     
-    /**
-     * 异步执行测试（使用TestCase）
-     * @param testCase 测试用例
-     * @return 测试结果的CompletableFuture
-     */
-    public CompletableFuture<TestResult> executeTestAsync(TestCase testCase) {
-        return concurrentManager.submitBatchTask(() -> differentialTesting(testCase));
-    }
-    
+
+
     /**
      * 差异化测试 - 在多个JDK上运行测试并比较结果（同步版本）
      * @param file 测试文件

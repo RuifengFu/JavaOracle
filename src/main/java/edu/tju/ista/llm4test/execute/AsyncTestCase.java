@@ -314,27 +314,7 @@ public class AsyncTestCase {
     }
 
 
-    /**
-     * 带重试的异步修复
-     */
-    private CompletableFuture<TestResult> fixWithRetryAsync(TestExecutor testExecutor, int maxRetries) {
-        return CompletableFuture.supplyAsync(() -> result)
-            .thenCompose(currentResult -> {
-                if (!currentResult.isFail() || maxRetries <= 0) {
-                    return CompletableFuture.completedFuture(currentResult);
-                }
-                
-                return fixAsync()
-                    .thenCompose(v -> testExecutor.executeTestAsync(file))
-                    .thenCompose(newResult -> {
-                        this.setResult(newResult);
-                        if (newResult.isFail() && maxRetries > 1) {
-                            return fixWithRetryAsync(testExecutor, maxRetries - 1);
-                        }
-                        return CompletableFuture.completedFuture(newResult);
-                    });
-            });
-    }
+
 
     // 同步版本的方法（向后兼容）
     public void verifyTestFail() {
