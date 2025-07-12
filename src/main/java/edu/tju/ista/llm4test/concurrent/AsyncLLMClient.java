@@ -5,7 +5,6 @@ import edu.tju.ista.llm4test.llm.tools.Tool;
 import edu.tju.ista.llm4test.llm.tools.ToolCall;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
 
-import java.util.Map;
 import java.util.List;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -93,7 +92,7 @@ public class AsyncLLMClient {
         
         // 创建Doubao客户端池
         for (int i = 0; i < poolSize; i++) {
-            doubaoClientPool.offer(OpenAI.Doubao);
+            doubaoClientPool.offer(OpenAI.DoubaoFlash);
         }
     }
     

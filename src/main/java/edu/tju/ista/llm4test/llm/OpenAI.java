@@ -23,12 +23,10 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import static java.lang.Thread.sleep;
 
@@ -80,8 +78,8 @@ public class OpenAI {
 
     public static OpenAI R1;
     public static OpenAI V3;
-    public static OpenAI Doubao;
-    public static OpenAI Doubao_think; // more powerful
+    public static OpenAI DoubaoFlash; // fast and cheap
+    public static OpenAI DoubaoThinking; // more powerful
 
     static {
 
@@ -92,12 +90,19 @@ public class OpenAI {
 
         arkModel = "doubao-seed-1-6-flash-250615";
 
-        Doubao = new OpenAI(arkApiKey, arkBaseUrl, arkModel);
-        Doubao_think = new OpenAI(arkApiKey, arkBaseUrl, "\n" +
+        DoubaoFlash = new OpenAI(arkApiKey, arkBaseUrl, arkModel);
+        DoubaoThinking = new OpenAI(arkApiKey, arkBaseUrl, "\n" +
                 "ep-20250712000334-ggxht");
+
+
 
         R1 = new OpenAI(GlobalConfig.getOpenaiR1Model());
         V3 = new OpenAI(GlobalConfig.getOpenaiV3Model());
+        if (GlobalConfig.isUseFlash()) {
+            DoubaoThinking = DoubaoFlash;
+            R1 = DoubaoFlash;
+            V3 = DoubaoFlash;
+        }
         V3.JSON_OUTPUT = true;
 
     }

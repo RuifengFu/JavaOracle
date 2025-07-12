@@ -1,6 +1,5 @@
 package edu.tju.ista.llm4test.execute;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.tju.ista.llm4test.concurrent.ConcurrentExecutionManager;
 import edu.tju.ista.llm4test.llm.OpenAI;
 import edu.tju.ista.llm4test.llm.tools.RootCauseOutputTool;
@@ -23,7 +22,6 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
-import java.util.logging.Logger;
 
 public class TestCase {
 
@@ -303,7 +301,7 @@ public class TestCase {
             String prompt = PromptGen.generatePrompt("RootCause", dataModel);
             ArrayList<Tool<?>> tools = new ArrayList<>();
             tools.add(new RootCauseOutputTool());
-            var callList = OpenAI.Doubao_think.funcCall(prompt, tools);
+            var callList = OpenAI.DoubaoThinking.funcCall(prompt, tools);
             if (callList.isEmpty()) {
                 LoggerUtil.logExec(Level.WARNING, "No function call found in the response");
                 this.result.setKind(TestResultKind.MAYBE_TEST_FAIL);
@@ -416,7 +414,7 @@ public class TestCase {
             dataModel.put("originTestcase", testcase);
             dataModel.put("modified", change);
             String prompt = PromptGen.generatePrompt("ApplyChange", dataModel);
-            String text = OpenAI.Doubao.messageCompletion(prompt);
+            String text = OpenAI.DoubaoFlash.messageCompletion(prompt);
             ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
             if (codeBlocks.isEmpty() && !text.contains("```")) {
                 writeTestCaseToFile(text);

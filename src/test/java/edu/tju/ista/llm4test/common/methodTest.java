@@ -1,6 +1,5 @@
 package edu.tju.ista.llm4test.common;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thoughtworks.qdox.model.JavaClass;
 import com.thoughtworks.qdox.model.JavaMethod;
 import edu.tju.ista.llm4test.execute.TestExecutor;
@@ -24,7 +23,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 public class methodTest {
 
@@ -70,7 +68,7 @@ public class methodTest {
         System.out.println(method_info.toString());
         try {
             String prompt = PromptGen.generatePrompt("FuzzDriver", objectMap);
-            String text = OpenAI.Doubao.messageCompletion(prompt);
+            String text = OpenAI.DoubaoFlash.messageCompletion(prompt);
 //            System.out.println("Answer: \n" + text);
             ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
             for (String code: codeBlocks) {
@@ -134,7 +132,7 @@ public class methodTest {
         dataModel.put("testOutput", result.toString());
 
         String prompt = PromptGen.generatePrompt("RootCause", dataModel);
-        var call = OpenAI.Doubao.funcCall(prompt, List.of(new RootCauseOutputTool())).get(0);
+        var call = OpenAI.DoubaoFlash.funcCall(prompt, List.of(new RootCauseOutputTool())).get(0);
         var map = call.arguments;
         System.out.println(map);
         System.out.println(map.get("report_bug"));

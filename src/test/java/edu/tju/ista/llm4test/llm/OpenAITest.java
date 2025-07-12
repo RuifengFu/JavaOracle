@@ -23,7 +23,7 @@ public class OpenAITest {
 
     @Test
     public void testExtractCode() {
-        String text = OpenAI.Doubao.messageCompletion("write a quicksort");
+        String text = OpenAI.DoubaoFlash.messageCompletion("write a quicksort");
         ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
         for (String code: codeBlocks) {
             System.out.println("Code: \n" + code);

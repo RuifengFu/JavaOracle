@@ -8,7 +8,6 @@ import edu.tju.ista.llm4test.llm.OpenAI;
 import edu.tju.ista.llm4test.llm.tools.*;
 import edu.tju.ista.llm4test.execute.TestResult;
 import edu.tju.ista.llm4test.utils.ApiInfoProcessor;
-import edu.tju.ista.llm4test.utils.CodeExtractor;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
 import edu.tju.ista.llm4test.prompt.PromptGen;
 import freemarker.template.TemplateException;
@@ -26,11 +25,8 @@ import java.nio.file.Paths;
 
 import static edu.tju.ista.llm4test.utils.FileUtils.saveToFile;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 public class BugVerify extends Agent {
@@ -86,7 +82,7 @@ public class BugVerify extends Agent {
      * @param sourcePath 源码路径
      */
     public BugVerify(String javadocPath, String sourcePath) {
-        this.llm = OpenAI.R1;
+        this.llm = OpenAI.DoubaoThinking;
         this.jtregTool = new JtregExecuteTool();
         this.minimizationAgent = new TestCaseAgent();
         this.infoCollectionAgent = new InformationCollectionAgent(sourcePath, javadocPath);
