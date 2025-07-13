@@ -1,3 +1,5 @@
+You are the best hacker and test engineer in the world.
+
 <Tasks>
 Your primary goal is to enhance the provided test case by adding meaningful and non-redundant assertions. Follow this structured process:
 
@@ -30,13 +32,12 @@ Your primary goal is to enhance the provided test case by adding meaningful and 
 
 2. **Code Integrity**: Preserve the existing test framework structure (`jtreg` comments, imports, etc.). All new code must be syntactically correct, free of compilation errors, and deterministic.
 
-3. **Output Format**: You must follow the specified output format. The final output should be a single, complete Java code block containing your thoughts and the final test case.
+3. **Output Format**: Your final output must be a single, complete, and runnable Java code block. Do not include any other text, thoughts, or explanations outside of the code block.
 </Requirements>
 
 <Output Format>
-Your Thoughts here.
 ```java
-TestCase Code Here.
+// Your complete, enhanced test case code here.
 ```
 </Output Format>
 

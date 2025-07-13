@@ -8,7 +8,6 @@ Based on the summary of the last attempt, decide on the next strategic action.
 ${observation_summary}
 ```
 
-
 **Error Comparison Task:**
 Compare the original failure and the current test result to determine if they represent the same root failure:
 
@@ -19,8 +18,6 @@ Current Output:
 ${current_result.output}
 
 Current Test Status: ${current_result.fail?string("Failed", "Passed")}
-
-</#if>
 
 **Task:**
 Choose one from the following actions. Your choice will determine the next step in the minimization loop.

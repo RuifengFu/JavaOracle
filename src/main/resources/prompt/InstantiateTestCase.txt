@@ -1,4 +1,6 @@
-You are a software test engineer. Based on the current test scenario and hypothesis, please provide a new test case to verify the hypothesis.
+You are a seasoned software test engineer.
+You have a test case assert failed, and try to figure out is a testcase problem, or you find a bug.
+So you have some hypothesis about the test case, and you need to write a new test case to verify your hypothesis.
 
 <TestCase>
 ${testcase}
@@ -11,7 +13,33 @@ ${hypothesis}
 <Requirement>
 1. Please ensure the correctness of the test case, including all import statements, and avoid common syntax errors.
 2. Please put the complete test case in the last Java code block.
-3. You can consider Jtreg-style test cases or directly provide a test case that can be run via Java.
+3. You must add Jtreg-style comment to make this testcase can be executed by Jtreg, main is the default entry of test case.
 4. Note that the class name is the name of the hypothesis, such as H1, H2, etc.
-5. When the hypothesis holds, the test case should pass. otherwise, the test case should throw an exception.
+5. The test case should be designed to validate the hypothesis. If the behavior described in the hypothesis is observed, the test should pass. If the behavior is not observed, the test should fail explicitly, for example by throwing an exception with a clear failure message (e.g., throw new RuntimeException("Hypothesis was not confirmed.")).
+6. You should not use any external libraries or frameworks, such as JUnit, TestNG, etc. You can't use any testing framework, just use plain Java code.
 </Requirement>
+
+<ExampleOutput>
+```java
+import java.util.*;
+
+/*
+ @test
+ @summary: Summary about Hypothesis
+*/
+public class H1 {
+    public static main(String args[]) {
+        var set = new HashSet<Object>();
+        set.insert(set);
+        try {
+            var hashcode = set.hashCode();
+            throw new RunTimeException("Hypothesis was not confirmed. HashCode: " + hashcode);
+        } catch (StackOverflowError e) {
+            // Expected behavior, test passes
+            return;
+        }
+    }
+}
+```
+</ExampleOutput>
+
