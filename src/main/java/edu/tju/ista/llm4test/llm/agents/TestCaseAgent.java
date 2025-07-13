@@ -46,7 +46,7 @@ public class TestCaseAgent extends Agent {
 
     public TestCaseAgent() {
         super("You are an expert test case minimizer. Your goal is to reduce a given Java test case to its minimal form while preserving the original failure.");
-        this.LLM = OpenAI.R1;
+        this.LLM = OpenAI.DoubaoThinking;
         this.toolRegistry = new ToolRegistry();
         this.history = new ArrayList<>();
         this.feedbackHistory = new ArrayList<>(); // 初始化反馈历史
@@ -57,7 +57,6 @@ public class TestCaseAgent extends Agent {
     private void registerTools() {
         toolRegistry.register(new WriteFileTool());
         toolRegistry.register(new JtregExecuteTool());
-        toolRegistry.register(new CheckSimplicityTool(this.LLM));
         toolRegistry.register(new CopyFileTool());
         toolRegistry.register(new ListDirTool());
     }
@@ -113,6 +112,20 @@ public class TestCaseAgent extends Agent {
 
             // ACT: Execute the action
             List<ToolResponse<?>> toolResponses = act(actionJson);
+
+            // After a write, we must execute the test to observe the outcome.
+            if (lastExecutedTools.contains("write_to_file")) {
+                addToHistory("LOOP: Auto-executing test after file write.");
+                Tool<?> jtregTool = toolRegistry.get("jtreg_execute");
+                Map<String, Object> jtregParams = new HashMap<>();
+                jtregParams.put("content", workspace_testcase_path);
+                jtregParams.put("is_file_path", true);
+                jtregParams.put("class_name", testCase.getName());
+                ToolResponse<?> jtregResponse = jtregTool.execute(jtregParams);
+                toolResponses.add(jtregResponse);
+                this.lastExecutedTools.add(jtregTool.getName());
+            }
+
 
             // OBSERVE: Process the result and generate feedback for next iteration
             ObserveResult observeResult = observe(toolResponses, currentCode, originalFailureOutput, testFilePath);
@@ -294,11 +307,7 @@ public class TestCaseAgent extends Agent {
             // Prepare function tools for the LLM
             List<Tool<?>> tools = new ArrayList<>();
             tools.add(toolRegistry.get("write_to_file"));
-            tools.add(toolRegistry.get("jtreg_execute"));
-            tools.add(toolRegistry.get("check_simplicity"));
-            tools.add(ACTION_CONTINUE);
             tools.add(ACTION_FINISH);
-            tools.add(ACTION_REDO);
 
 
             List<ToolCall> toolCalls = this.LLM.funcCall(prompt, tools);
@@ -307,19 +316,6 @@ public class TestCaseAgent extends Agent {
 
             if (toolCalls == null) {
                 toolCalls = new ArrayList<>();
-            }
-
-            boolean hasWriteToFile = toolCalls.stream().anyMatch(tc -> "write_to_file".equals(tc.toolName));
-            boolean hasJtregExecute = toolCalls.stream().anyMatch(tc -> "jtreg_execute".equals(tc.toolName));
-
-            if (hasWriteToFile && !hasJtregExecute) {
-                addToHistory("THINK: Auto-adding jtreg_execute to verify changes");
-                Map<String, Object> jtregParams = new HashMap<>();
-                jtregParams.put("content", workspace_testcase_path);
-                jtregParams.put("is_file_path", true);
-                jtregParams.put("class_name", testCase.getName());
-                toolCalls.add(new ToolCall("jtreg_execute", jtregParams));
-                addToHistory("THINK: Now proposed " + toolCalls.size() + " actions");
             }
 
             return toolCalls;
