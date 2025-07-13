@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.logging.Level;
 
+@Deprecated
 public class CheckSimplicityTool implements Tool<Boolean> {
 
     private final OpenAI llm;
@@ -67,7 +68,7 @@ Code:
 
         try {
             String prompt = String.format(PROMPT_TEMPLATE, code);
-            String response = llm.messageCompletion(prompt, 0.2, false); // Low temperature for deterministic answer
+            String response = llm.messageCompletion(prompt, 0.0, false); // Low temperature for deterministic answer
 
             // Clean up response to get just the boolean word
             String cleanedResponse = response.replaceAll("<thinking>[\\s\\S]*?</thinking>", "").trim().toLowerCase();
