@@ -204,23 +204,48 @@ public class BugVerify extends Agent {
         LoggerUtil.logExec(Level.INFO, "验证完成，结果数: " + verificationResults.size());
         
         // 6. 形成结论和报告
-        String report = generateReport(hypotheses, verificationResults);
+        String reportJson = generateReport(hypotheses, verificationResults);
         LoggerUtil.logExec(Level.INFO, "Bug验证报告已生成");
         
         // 保存最终报告
         if (testCaseName != null) {
-            String fileName = "TestErrorAnalysis.md";
-            if (report.contains("BUG REPORT")) {
-                fileName = "BugReport.md";
-                if (report.contains("TESTCASE ERROR ANALYSIS")) {
-                    fileName = "BugReportWithError.md";
+            String fileName;
+            String reportContent;
+
+            try {
+                ObjectMapper objectMapper = new ObjectMapper();
+                JsonNode rootNode = objectMapper.readTree(reportJson);
+                String bugType = rootNode.path("bug_type").asText("UNKNOWN");
+                reportContent = rootNode.path("report").asText();
+
+                switch (bugType) {
+                    case "JDK_BUG":
+                        fileName = "BugReport.md";
+                        break;
+                    case "TESTCASE_ERROR":
+                        fileName = "TestCaseErrorAnalysis.md";
+                        break;
+                    case "BOTH":
+                        fileName = "BugReportWithError.md";
+                        break;
+                    default:
+                        fileName = "WrongFormatReport.md";
+                        LoggerUtil.logExec(Level.WARNING, "Unknown bug_type in report JSON: " + bugType);
+                        break;
                 }
-            } else if (fileName.contains("TESTCASE ERROR ANALYSIS")) {
-                fileName = "TestCaseErrorAnalysis.md";
-            } else {
+
+                if (reportContent.isEmpty()){
+                     LoggerUtil.logExec(Level.WARNING, "Report content is empty. Saving raw JSON.");
+                     fileName = "EmptyReportContent.md";
+                     reportContent = reportJson;
+                }
+            } catch (IOException e) {
+                LoggerUtil.logExec(Level.WARNING, "Failed to parse report JSON. Saving raw output. Error: " + e.getMessage());
                 fileName = "WrongFormatReport.md";
+                reportContent = reportJson;
             }
-            saveToFile(Paths.get(bugReportPath, testCaseName, fileName).toString(), report);
+            
+            saveToFile(verifyContextPath.resolve(fileName).toString(), reportContent);
             
             // 记录最终结果
             var result = fileName.replace(".md", "");
@@ -228,7 +253,7 @@ public class BugVerify extends Agent {
             LoggerUtil.logExec(Level.INFO, "BugVerifyAgent: " + testCase.getFile().getAbsolutePath() + " " + result);
         }
         
-        return report;
+        return reportJson;
     }
     
     /**
@@ -642,12 +667,12 @@ public class BugVerify extends Agent {
             // 保存完整的prompt到文件
             savePromptToFile(prompt, promptType, hasTestCaseIssueHypothesis, testIssueHypothesisId);
             
-            conclusion = llm.messageCompletion(prompt);
+            conclusion = llm.messageCompletion(prompt, 0.7, true);
             return conclusion;
         } catch (TemplateException | IOException e) {
             LoggerUtil.logExec(Level.SEVERE, "生成报告prompt失败: " + e.getMessage());
             e.printStackTrace();
-            return "生成报告失败: " + e.getMessage();
+            return "{\"bug_type\": \"GENERATION_ERROR\", \"report\": \"生成报告失败: " + e.getMessage().replace("\"", "'") + "\"}";
         }
     }
     

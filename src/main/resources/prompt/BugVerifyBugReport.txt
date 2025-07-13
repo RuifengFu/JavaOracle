@@ -39,13 +39,34 @@ Problem Overview (Overview):
 Clearly summarize your core findings in one or two sentences. Directly and explicitly state whether this is a product/JDK BUG or a test case design defect.
 
 Steps to Reproduce:
-Based on the provided TestCase;, clearly list the specific operation steps that can stably reproduce the issue.
+Based on the provided <TestCase>, clearly list the specific operation steps that can stably reproduce the issue.
 
 Root Cause Analysis:
-This is the core of the report. You must combine all input information to conduct in-depth, logical analysis to reveal the root cause of the problem. And prove that this is a real BUG or test case design defect.
-[Quotation Rules] When you need to quote content from <Information Sources>; to support your argument, you must directly quote the relevant original text from the information source verbatim into your analysis.
+This is the most critical part of the report. Your analysis must be in-depth, logical, and conclusive.
+- **Synthesize All Information**: You must integrate findings from the <TestCase>, <Test Output>, <Hypotheses>, <Verification Results>, and <Information Sources>.
+- **Connect the Dots**: Clearly explain the chain of events that leads to the failure.
+- **Prove Your Conclusion**: Use the information provided, especially from <Information Sources>, to rigorously prove whether this is a genuine JDK bug or a flaw in the test case.
+- **Quotation Rules**: When you quote content from <Information Sources> to support your argument, you must directly quote the relevant original text from the information source verbatim into your analysis.
 
 Correct example: "The behavior here meets expectations because the official documentation clearly states: ‘[Paste the relevant original text from the information source here]’."
 
 Related API/Class Usage Notes (Notes on API/Class Usage):
 If the issue involves misuse or misunderstanding of a certain Java API or class, explain here the correct usage of the API or class, key precautions, or potential pitfalls. Similarly, all explanations must be based on information sources.
+
+<Output Format>
+You must wrap your entire response in a single JSON object with the following structure. Do not add any text outside of this JSON object.
+
+```json
+{
+  "bug_type": "JDK_BUG" | "TESTCASE_ERROR" | "BOTH",
+  "report": "..."
+}
+```
+
+- `bug_type`: Set this field based on your final conclusion.
+  - Use "JDK_BUG" if the root cause is a defect in the JDK.
+  - Use "TESTCASE_ERROR" if the root cause is a logical error or misuse in the test case.
+  - Use "BOTH" if both the JDK and the test case have issues.
+- `report`: This field must contain the complete markdown report, starting with the appropriate heading (`# BUG REPORT` or `# TESTCASE ERROR ANALYSIS`) as described in the "Report Generation Instructions".
+
+</Output Format>
