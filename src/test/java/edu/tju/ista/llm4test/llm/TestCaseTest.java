@@ -61,4 +61,13 @@ public class TestCaseTest {
         System.out.println(testCase.getSourceCode());
         System.out.println(testCase.getSourceWithoutComment());
     }
+
+    @Test
+    public void removeHeader() {
+        File file = new File("jdk17u-dev/test/jdk/java/awt/List/ListNullTest.java");
+        var testCase = new TestCase(file);
+        testCase.removeHeader();
+        System.out.println(testCase.getSourceCode());
+        System.out.println(testCase.getSourceWithoutComment());
+    }
 }

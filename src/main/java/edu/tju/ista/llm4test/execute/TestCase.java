@@ -659,4 +659,29 @@ public class TestCase {
         }
         return sb.toString();
     }
+
+    public boolean removeHeader() { // just for save context
+        String source = getSourceCode();
+        // 使用Pattern和Matcher来处理替换
+        Pattern pattern = Pattern.compile("(?s)/\\*.*?\\*/");
+        Matcher matcher = pattern.matcher(source);
+
+        StringBuilder result = new StringBuilder();
+        int lastEnd = 0;
+        boolean flag = false;
+        while (matcher.find()) {
+            result.append(source.substring(lastEnd, matcher.start()));
+
+            String comment = matcher.group();
+            if (comment.toLowerCase().contains("copyright")) {
+                flag = true; // 如果包含Copyright则清空
+            } else {
+                result.append(comment);
+            }
+            lastEnd = matcher.end();
+        }
+        result.append(source.substring(lastEnd));
+        writeTestCaseToFile(result.toString().trim());
+        return flag; // 返回是否删除了Copyright
+    }
 }

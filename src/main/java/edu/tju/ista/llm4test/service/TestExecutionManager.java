@@ -134,6 +134,7 @@ public class TestExecutionManager {
     private TestCase createTestCaseForGeneration(File originFile) {
         File targetFile = getTargetFilePath(originFile);
         TestCase testCase = new TestCase(targetFile);
+        testCase.removeHeader();
         testCase.setOriginFile(originFile);
         
         // 设置API文档处理器，支持后续重新计算
