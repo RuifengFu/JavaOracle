@@ -2,6 +2,7 @@ package edu.tju.ista.llm4test.llm.agents;
 
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.javaparser.utils.Log;
 import edu.tju.ista.llm4test.execute.TestCase;
 import edu.tju.ista.llm4test.execute.TestExecutor;
 import edu.tju.ista.llm4test.execute.TestResult;
@@ -23,7 +24,7 @@ import freemarker.template.TemplateException;
 import java.util.HashMap;
 
 /**
- * A dynamic, autonomous agent for test case minimization.
+ * A dynamic, autonomous agent for test case Reduce.
  * It follows a Think-Act-Observe loop to iteratively reduce a failing test case.
  */
 public class TestCaseAgent extends Agent {
@@ -99,9 +100,10 @@ public class TestCaseAgent extends Agent {
             // THINK: Decide on the next action (with feedback from previous attempts)
             String previousFeedback = feedbackHistory.isEmpty() ? "" : String.join("\n", feedbackHistory);
             List<ToolCall> actionJson = think(currentCode, originalFailureOutput, previousFeedback, testFilePath);
-            if (actionJson == null || actionJson.isEmpty()) {
-                addToHistory("LOOP: THINK failed, ending minimization");
-                break;
+            // TODO fix!
+            if (actionJson.isEmpty()) {
+                addToHistory(Level.WARNING, "LOOP: THINK failed, jump this iteration");
+                continue;
             }
 
             // Check for finish action
@@ -150,6 +152,13 @@ public class TestCaseAgent extends Agent {
         var executor = new TestExecutor();
         var result = executor.executeTest(minimizedTestCase);
         minimizedTestCase.setResult(result);
+        String originCode = testCase.getSourceCode();
+        String reducedCode = minimizedTestCase.getSourceCode();
+        if (originCode.equals(reducedCode)) {
+            LoggerUtil.logExec(Level.WARNING, "Minimization did not change the test case: " + minimizedTestCase.getFile());
+        } else {
+            LoggerUtil.logExec(Level.INFO, "Reduce successful: " + minimizedTestCase.getFile() + " reduce: " + (originCode.length() - reducedCode.length()));
+        }
         return minimizedTestCase;
     }
 
@@ -199,7 +208,7 @@ public class TestCaseAgent extends Agent {
                     directoryListing
                 );
             } catch (Exception e) {
-                addToHistory("SETUP: Failed to generate prompt - " + e.getMessage());
+                addToHistory(Level.SEVERE, "SETUP: Failed to generate prompt - " + e.getMessage());
                 return;
             }
             
@@ -251,11 +260,11 @@ public class TestCaseAgent extends Agent {
                         ToolResponse<?> response = tool.execute(args);
                         
                         if (!response.isSuccess()) {
-                            addToHistory("SETUP: Failed to execute " + toolName + " - " + response.getFailMessage());
+                            addToHistory(Level.SEVERE, "SETUP: Failed to execute " + toolName + " - " + response.getFailMessage());
                         }
                         
                     } catch (Exception e) {
-                        addToHistory("SETUP: Error with " + toolName + " - " + e.getMessage());
+                        addToHistory(Level.WARNING,"SETUP: Error with " + toolName + " - " + e.getMessage());
                     }
                 }
             } else {
@@ -273,12 +282,12 @@ public class TestCaseAgent extends Agent {
      */
     private String getDirectoryListing(File directory) {
         if (directory == null || !directory.isDirectory()) {
-            return "Directory not found or not accessible";
+            throw new IllegalArgumentException("Invalid directory: " + (directory != null ? directory.getAbsolutePath() : "null"));
         }
         
         File[] files = directory.listFiles();
         if (files == null) {
-            return "Unable to list directory contents";
+            throw new IllegalStateException("Failed to list files in directory: " + directory.getAbsolutePath());
         }
         
         StringBuilder listing = new StringBuilder();
@@ -378,7 +387,7 @@ public class TestCaseAgent extends Agent {
             return responses;
 
         } catch (Exception e) {
-            addToHistory("ACT: Parse error - " + e.getMessage());
+            addToHistory(Level.WARNING, "ACT: Parse error - " + e.getMessage());
             responses.add(ToolResponse.failure("Failed to parse or execute action: " + e.getMessage()));
             return responses;
         }
@@ -389,7 +398,7 @@ public class TestCaseAgent extends Agent {
      */
     private ObserveResult observe(List<ToolResponse<?>> toolResponses, String previousCode, String originalFailure, Path testFilePath) {
         if (toolResponses == null || toolResponses.isEmpty()) {
-            addToHistory("OBSERVE: No tool responses to process.");
+            addToHistory(Level.FINE, "OBSERVE: No tool responses to process.");
             return new ObserveResult(previousCode, "No tool responses to process.", ACTION_CONTINUE.getName());
         }
 
@@ -468,7 +477,7 @@ public class TestCaseAgent extends Agent {
                 Files.writeString(testFilePath, previousCode);
                 feedback += "Reverting code. ";
             } catch (IOException e) {
-                addToHistory("OBSERVE: FATAL - Cannot revert file on REDO! " + e.getMessage());
+                addToHistory(Level.SEVERE, "OBSERVE: FATAL - Cannot revert file on REDO! " + e.getMessage());
             }
         } else if (lastTestResult != null && lastTestResult.isFail() && !ACTION_FINISH.getName().equals(nextAction)) {
             // Keep the successful reduction
@@ -480,7 +489,7 @@ public class TestCaseAgent extends Agent {
                 Files.writeString(testFilePath, previousCode);
                 feedback += "Reverting code due to test behavior change. ";
             } catch (IOException e) {
-                addToHistory("OBSERVE: FATAL - Cannot revert file! " + e.getMessage());
+                addToHistory(Level.SEVERE,"OBSERVE: FATAL - Cannot revert file! " + e.getMessage());
             }
         }
         
@@ -500,11 +509,11 @@ public class TestCaseAgent extends Agent {
                 addToHistory("OBSERVE: LLM chose action: " + actionName);
                 return actionName;
             } else {
-                addToHistory("OBSERVE: LLM failed to choose an action, defaulting to continue.");
+                addToHistory(Level.WARNING,"OBSERVE: LLM failed to choose an action, defaulting to continue.");
                 return ACTION_CONTINUE.getName();
             }
         } catch (Exception e) {
-            addToHistory("OBSERVE: Error during LLM decision, defaulting to continue. " + e.getMessage());
+            addToHistory(Level.WARNING,"OBSERVE: Error during LLM decision, defaulting to continue. " + e.getMessage());
             return ACTION_CONTINUE.getName();
         }
     }
@@ -524,8 +533,12 @@ public class TestCaseAgent extends Agent {
     }
 
     private void addToHistory(String message) {
+        addToHistory(Level.INFO, message);
+    }
+
+    private void addToHistory(Level level, String message) {
         String filePrefix = workspace_testcase_path != null ? "[" + workspace_testcase_path + "] " : "";
-        LoggerUtil.logExec(Level.INFO, "[TestCaseAgent] " + filePrefix + message);
+        LoggerUtil.logExec(level, "[TestCaseAgent] " + filePrefix + message);
         history.add(message);
     }
     /**
