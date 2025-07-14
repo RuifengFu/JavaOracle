@@ -53,4 +53,12 @@ public class TestCaseTest {
                 getApiInfoWithSource();
         System.out.println(res);
     }
+
+    @Test
+    public void replaceComment() {
+        File file = new File("jdk17u-dev/test/jdk/java/awt/List/ListNullTest.java");
+        var testCase = new TestCase(file);
+        System.out.println(testCase.getSourceCode());
+        System.out.println(testCase.getSourceWithoutComment());
+    }
 }

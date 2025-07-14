@@ -14,14 +14,12 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 
 public class TestCase {
 
@@ -79,6 +77,46 @@ public class TestCase {
             this.sourceCode = "";
         }
         return this.sourceCode;
+    }
+
+    /**
+     * 获取去除非行级注释的源代码
+     * 为了保证行号的正确性我们把这里的注释替换成空行
+     * @return 去除多行注释后的源代码
+     */
+    public String getSourceWithoutComment() {
+        String source = getSourceCode();
+        if (source == null || source.isEmpty()) {
+            return source;
+        }
+        
+        // 使用Pattern和Matcher来处理替换
+        Pattern pattern = Pattern.compile("(?s)/\\*.*?\\*/");
+        Matcher matcher = pattern.matcher(source);
+        
+        StringBuilder result = new StringBuilder();
+        int lastEnd = 0;
+        
+        while (matcher.find()) {
+            // 添加匹配前的内容
+            result.append(source.substring(lastEnd, matcher.start()));
+            
+            // 计算注释中的换行符数量
+            String comment = matcher.group();
+            long newlineCount = comment.chars().filter(ch -> ch == '\n').count();
+            
+            // 用相同数量的换行符替换
+            for (int i = 0; i < newlineCount; i++) {
+                result.append('\n');
+            }
+            
+            lastEnd = matcher.end();
+        }
+        
+        // 添加最后一部分
+        result.append(source.substring(lastEnd));
+        
+        return result.toString();
     }
 
     public void updateApiDoc() {
@@ -291,7 +329,13 @@ public class TestCase {
             return;
         }
         try {
-            String testcase = getTestcaseWithLineNumber();
+            String source = this.getSourceWithoutComment();
+            StringBuilder sb = new StringBuilder();
+            var lines = source.split("\n");
+            for (int i = 0; i < lines.length; i++) {
+                sb.append(i).append("\t:").append(lines[i]);
+            }
+            var testcase = sb.toString();
 
             Map<String, Object> dataModel = new HashMap<>();
             dataModel.put("testcase", testcase);
