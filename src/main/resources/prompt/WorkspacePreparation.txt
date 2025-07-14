@@ -16,7 +16,7 @@ ${directoryListing}
 
 Your task is to analyze the test case and determine if any additional files need to be copied to the current workspace.
 Look for:
-1. Import statements that reference files from the original test directory
+1. Import statements that reference files from the original test directory, based on @bulid or @lib tags in the test case comments.
 2. File reading operations in the test code  
 3. Resource files or dependencies mentioned in the test
 4. Configuration files that might be needed
