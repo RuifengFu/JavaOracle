@@ -209,12 +209,12 @@
         <!--            <version>5.2</version>-->
         <!--        </dependency>-->
         <!--        &lt;!&ndash; https://mvnrepository.com/artifact/org.testng/testng &ndash;&gt;-->
-        <!--        <dependency>-->
-        <!--            <groupId>org.testng</groupId>-->
-        <!--            <artifactId>testng</artifactId>-->
-        <!--            <version>7.10.2</version>-->
-        <!--            <scope>test</scope>-->
-        <!--        </dependency>-->
+                <dependency>
+                    <groupId>org.testng</groupId>
+                    <artifactId>testng</artifactId>
+                    <version>7.10.2</version>
+                    <scope>test</scope>
+                </dependency>
         <!--        &lt;!&ndash; https://mvnrepository.com/artifact/org.junit.jupiter/junit-jupiter-engine &ndash;&gt;-->
         <!--        <dependency>-->
         <!--            <groupId>org.junit.jupiter</groupId>-->
