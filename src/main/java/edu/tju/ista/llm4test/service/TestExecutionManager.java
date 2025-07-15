@@ -56,7 +56,8 @@ public class TestExecutionManager {
             System.out.println("没有成功的测试用例，生成模式结束");
             return;
         }
-        
+
+        DebugUtils.getInstance().createPart("VerifyFail");
         // 第二阶段：处理测试用例
         System.out.println("开始处理 " + successfulTestCases.size() + " 个测试用例...");
         processTestCases(successfulTestCases);

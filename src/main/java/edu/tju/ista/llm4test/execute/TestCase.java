@@ -6,6 +6,7 @@ import edu.tju.ista.llm4test.llm.tools.RootCauseOutputTool;
 import edu.tju.ista.llm4test.llm.tools.Tool;
 import edu.tju.ista.llm4test.prompt.PromptGen;
 import edu.tju.ista.llm4test.utils.CodeExtractor;
+import edu.tju.ista.llm4test.utils.DebugUtils;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
 import edu.tju.ista.llm4test.utils.ApiInfoProcessor;
 
@@ -351,10 +352,15 @@ public class TestCase {
                 this.result.setKind(TestResultKind.MAYBE_TEST_FAIL);
                 return;
             }
+
+
             var rootCauseCall = callList.get(0);
             var arguments = rootCauseCall.arguments;
             var reportBug = ((boolean) arguments.get("report_bug"));
             if (this.result != null) {
+                if (reportBug) {
+                    DebugUtils.getInstance().saveToFile("VerifyFail", this.name, prompt + "\n\n" + callList);
+                }
                 reportBug = reportBug && (!this.result.getCompilationFailed()); // 如果编译失败，则不报告Bug
                 arguments.put("report_bug", reportBug);
             }
