@@ -230,22 +230,25 @@ public class BugVerify extends Agent {
                         break;
                     default:
                         fileName = "WrongFormatReport.md";
+                        if (reportContent != null && !reportContent.isEmpty()) {
+                            if (reportContent.contains("BugReport")) {
+                                fileName = "BugReport.md";
+                            } else if (reportContent.contains("Test Case Issue Analysis") || reportContent.contains("Test Case Error Analysis")) {
+                                fileName = "TestCaseErrorAnalysis.md";
+                            }
+                        }
                         LoggerUtil.logExec(Level.WARNING, "Unknown bug_type in report JSON: " + bugType);
                         break;
                 }
 
-                if (reportContent.isEmpty()){
-                     LoggerUtil.logExec(Level.WARNING, "Report content is empty. Saving raw JSON.");
-                     fileName = "EmptyReportContent.md";
-                     reportContent = reportJson;
-                }
+                saveToFile(verifyContextPath.getParent().resolve(fileName).toString(), reportContent);
             } catch (IOException e) {
                 LoggerUtil.logExec(Level.WARNING, "Failed to parse report JSON. Saving raw output. Error: " + e.getMessage());
                 fileName = "WrongFormatReport.md";
                 reportContent = reportJson;
+                saveToFile(verifyContextPath.getParent().resolve(fileName).toString(), reportContent);
             }
-            
-            saveToFile(verifyContextPath.resolve(fileName).toString(), reportContent);
+
             
             // 记录最终结果
             var result = fileName.replace(".md", "");
