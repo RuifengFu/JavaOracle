@@ -50,7 +50,7 @@
     },
     {
       "name": "k2",
-      "displayName": "k2",
+      "displayName": "MoonShot k2",
       "apiKey": "${MOONSHOT_API_KEY}",
       "baseUrl": "${MOONSHOT_API_KEY}",
       "model": "kimi-k2-0711-preview",

@@ -42,7 +42,7 @@ public class OpenAI {
 
     private String MODEL;
 
-    private final double TEMPERATURE = 0;
+    private final double TEMPERATURE = 0.7;
 
     private int MAX_TOKENS = 8192;
     private boolean STREAM = true;
@@ -113,6 +113,7 @@ public class OpenAI {
     public static OpenAI V3;
     public static OpenAI DoubaoFlash; // fast and cheap
     public static OpenAI DoubaoThinking; // more powerful
+    public static OpenAI K2;
 
     static {
         try {
@@ -122,11 +123,13 @@ public class OpenAI {
             V3 = new OpenAI(models.get("deepseek-chat"));
             DoubaoFlash = new OpenAI(models.get("doubao-flash"));
             DoubaoThinking = new OpenAI(models.get("doubao-thinking"));
+            K2 = new OpenAI(models.get("k2"));
 
             if (GlobalConfig.isUseFlash() && models.containsKey("doubao-flash")) {
                 DoubaoThinking = new OpenAI(models.get("doubao-flash"));
                 R1 = new OpenAI(models.get("doubao-flash"));
                 V3 = new OpenAI(models.get("doubao-flash"));
+                K2 = new OpenAI(models.get("doubao-flash"));
             }
             
             V3.JSON_OUTPUT = true;
