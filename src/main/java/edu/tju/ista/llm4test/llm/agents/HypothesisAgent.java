@@ -47,7 +47,7 @@ public class HypothesisAgent extends Agent {
     private final String projectRoot;
     
     public HypothesisAgent() {
-        this.llm = OpenAI.R1;
+        this.llm = OpenAI.DoubaoThinking;
         this.executeTool = new JavaExecuteTool();
         this.jtregTool = new JtregExecuteTool();
         // 获取项目根目录
