@@ -401,4 +401,45 @@ public class GlobalConfig {
     public static String getWebSearchRerankApiUrl() {
         return ConfigUtil.getOrDefault("websearch.rerank.api.url", "https://api.bochaai.com/v1/rerank");
     }
+    
+    // --- JSON-based Model Configuration ---
+    
+    /**
+     * Get model configuration from JSON
+     */
+    public static ModelConfig getModelConfig(String modelName) {
+        try {
+            return ModelConfig.getModelByName(modelName);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+    
+    /**
+     * Get all available model names from JSON configuration
+     */
+    public static java.util.List<String> getAllModelNames() {
+        try {
+            return ModelConfig.getAllModelNames();
+        } catch (Exception e) {
+            return java.util.Arrays.asList(getOpenaiModel());
+        }
+    }
+    
+    /**
+     * Get default model configuration
+     */
+    public static ModelConfig getDefaultModelConfig() {
+        ModelConfig config = new ModelConfig();
+        config.setName("default");
+        config.setDisplayName("Default Model");
+        config.setApiKey(getOpenaiApiKey());
+        config.setBaseUrl(getOpenaiBaseUrl());
+        config.setModel(getOpenaiModel());
+        config.setTemperature(0.0);
+        config.setMaxTokens(8192);
+        config.setStream(true);
+        config.setJsonOutput(false);
+        return config;
+    }
 } 

@@ -11,6 +11,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 
+import edu.tju.ista.llm4test.config.ConfigError;
 import edu.tju.ista.llm4test.config.GlobalConfig;
 import edu.tju.ista.llm4test.llm.tools.Tool;
 import edu.tju.ista.llm4test.llm.tools.ToolFactory;
@@ -27,7 +28,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
-
+import edu.tju.ista.llm4test.config.ModelConfig;
 import static java.lang.Thread.sleep;
 
 /*
@@ -63,8 +64,25 @@ public class OpenAI {
     }
 
     public OpenAI(String modelName) {
-        this();
-        MODEL = modelName;
+        ModelConfig config = null;
+        try {
+            // Try to load from JSON configuration
+            config = edu.tju.ista.llm4test.config.ModelConfig.getModelByName(modelName);
+        } catch (Exception e) {
+            LoggerUtil.logExec(Level.WARNING, "Failed to get config for: " + modelName);
+        }
+        if (config != null) {
+            this.API_KEY = config.getApiKey();
+            this.BASE_URL = config.getBaseUrl();
+            this.MODEL = config.getModel();
+            this.MAX_TOKENS = config.getMaxTokens();
+            this.STREAM = config.isStream();
+            this.JSON_OUTPUT = config.isJsonOutput();
+        } else {
+            this.API_KEY = GlobalConfig.getOpenaiApiKey();
+            this.BASE_URL = GlobalConfig.getOpenaiBaseUrl();
+            this.MODEL = modelName;
+        }
         System.out.println("BASE_URL: " + BASE_URL);
         System.out.println("API_KEY: " + API_KEY);
         System.out.println("MODEL: " + MODEL);
@@ -76,35 +94,46 @@ public class OpenAI {
         MODEL = modelName;
     }
 
+    public OpenAI(edu.tju.ista.llm4test.config.ModelConfig config) {
+        if (config == null) {
+            API_KEY = GlobalConfig.getOpenaiApiKey();
+            BASE_URL = GlobalConfig.getOpenaiBaseUrl();
+            MODEL = GlobalConfig.getOpenaiModel();
+            return;
+        }
+        this.API_KEY = config.getApiKey();
+        this.BASE_URL = config.getBaseUrl();
+        this.MODEL = config.getModel();
+        this.MAX_TOKENS = config.getMaxTokens();
+        this.STREAM = config.isStream();
+        this.JSON_OUTPUT = config.isJsonOutput();
+    }
+
     public static OpenAI R1;
     public static OpenAI V3;
     public static OpenAI DoubaoFlash; // fast and cheap
     public static OpenAI DoubaoThinking; // more powerful
 
     static {
+        try {
+            java.util.Map<String, edu.tju.ista.llm4test.config.ModelConfig> models = 
+                edu.tju.ista.llm4test.config.ModelConfig.getModelsMap();
+            R1 = new OpenAI(models.get("deepseek-reasoner"));
+            V3 = new OpenAI(models.get("deepseek-chat"));
+            DoubaoFlash = new OpenAI(models.get("doubao-flash"));
+            DoubaoThinking = new OpenAI(models.get("doubao-thinking"));
 
-        
-        String arkApiKey = GlobalConfig.getDoubaoApiKey();
-        String arkBaseUrl = GlobalConfig.getDoubaoBaseUrl();
-        String arkModel = GlobalConfig.getDoubaoModel();
-
-        arkModel = "doubao-seed-1-6-flash-250615";
-
-        DoubaoFlash = new OpenAI(arkApiKey, arkBaseUrl, arkModel);
-        DoubaoThinking = new OpenAI(arkApiKey, arkBaseUrl, "\n" +
-                "ep-20250712000334-ggxht");
-
-
-
-        R1 = new OpenAI(GlobalConfig.getOpenaiR1Model());
-        V3 = new OpenAI(GlobalConfig.getOpenaiV3Model());
-        if (GlobalConfig.isUseFlash()) {
-            DoubaoThinking = new OpenAI(arkApiKey, arkBaseUrl, arkModel);
-            R1 = new OpenAI(arkApiKey, arkBaseUrl, arkModel);
-            V3 = new OpenAI(arkApiKey, arkBaseUrl, arkModel);
+            if (GlobalConfig.isUseFlash() && models.containsKey("doubao-flash")) {
+                DoubaoThinking = new OpenAI(models.get("doubao-flash"));
+                R1 = new OpenAI(models.get("doubao-flash"));
+                V3 = new OpenAI(models.get("doubao-flash"));
+            }
+            
+            V3.JSON_OUTPUT = true;
+        } catch (Exception e) {
+            LoggerUtil.logExec(Level.SEVERE, "Can not find LLM config!!!");
+            throw new ConfigError("Can not find LLM config, make sure you have config.json!!!");
         }
-        V3.JSON_OUTPUT = true;
-
     }
 
     /**
