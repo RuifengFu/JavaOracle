@@ -9,6 +9,7 @@ import edu.tju.ista.llm4test.execute.TestResult;
 import edu.tju.ista.llm4test.llm.OpenAI;
 import edu.tju.ista.llm4test.llm.tools.*;
 import edu.tju.ista.llm4test.prompt.PromptGen;
+import edu.tju.ista.llm4test.utils.DebugUtils;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
 
 import java.io.File;
@@ -44,6 +45,10 @@ public class TestCaseAgent extends Agent {
     private Path workspace_root;
     private TestCase testCase;
     private TestCase minimizedTestCase;
+
+    static {
+        DebugUtils.getInstance().createPart("TestCaseAgent");
+    }
 
     public TestCaseAgent() {
         super("You are an expert test case minimizer. Your goal is to reduce a given Java test case to its minimal form while preserving the original failure.");
@@ -311,6 +316,7 @@ public class TestCaseAgent extends Agent {
             // the relative path (just the filename) is cleaner and sufficient for the LLM.
             String relativeTestPath = testFilePath.getFileName().toString();
             String prompt = PromptGen.generateTestCaseMinimizationReducePrompt(originalFailureOutput, currentCode, relativeTestPath, previousFeedback);
+            DebugUtils.getInstance().saveToFileWithTimestamp("TestCaseAgent", testCase.name + "_think_prompt", prompt);
             addToHistory("THINK: Analyzing current code and proposing reduction...");
 
             // Prepare function tools for the LLM
