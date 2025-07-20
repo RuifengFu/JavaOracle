@@ -52,7 +52,7 @@
       "name": "k2",
       "displayName": "MoonShot k2",
       "apiKey": "${MOONSHOT_API_KEY}",
-      "baseUrl": "${MOONSHOT_API_KEY}",
+      "baseUrl": "${MOONSHOT_BASE_URL}",
       "model": "kimi-k2-0711-preview",
       "temperature": 0.0,
       "maxTokens": 8192,
