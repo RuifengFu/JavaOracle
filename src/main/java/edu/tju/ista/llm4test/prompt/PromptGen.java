@@ -53,7 +53,6 @@ public class PromptGen {
             // BugVerify相关模板
             TEMPLATE_MAP.put("BugVerifyInitialAnalysis", loadResourceAsString("/prompt/BugVerifyInitialAnalysis.txt"));
             TEMPLATE_MAP.put("BugVerifyFormHypotheses", loadResourceAsString("/prompt/BugVerifyFormHypotheses.txt"));
-            TEMPLATE_MAP.put("BugVerifyTestCaseReport", loadResourceAsString("/prompt/BugVerifyTestCaseReport.txt"));
             TEMPLATE_MAP.put("BugVerifyBugReport", loadResourceAsString("/prompt/BugVerifyBugReport.txt"));
             TEMPLATE_MAP.put("BugVerifyJsonExtract", loadResourceAsString("/prompt/BugVerifyJsonExtract.txt"));
             TEMPLATE_MAP.put("InstantiateTestCase", loadResourceAsString("/prompt/InstantiateTestCase.txt"));
@@ -141,16 +140,6 @@ public class PromptGen {
         dataModel.put("testOutput", testOutput);
         dataModel.put("collectedInformation", collectedInformation);
         return generatePrompt("BugVerifyFormHypotheses", dataModel);
-    }
-
-    public static String generateBugVerifyTestCaseReportPrompt(String testCase, String testOutput, String hypotheses, String verificationResults, String informationSources) throws TemplateException, IOException {
-        Map<String, Object> dataModel = new HashMap<>();
-        dataModel.put("testCase", testCase);
-        dataModel.put("testOutput", testOutput);
-        dataModel.put("hypotheses", hypotheses);
-        dataModel.put("verificationResults", verificationResults);
-        dataModel.put("informationSources", informationSources);
-        return generatePrompt("BugVerifyTestCaseReport", dataModel);
     }
 
     public static String generateBugVerifyBugReportPrompt(String testCase, String testOutput, String hypotheses, String verificationResults, String informationSources) throws TemplateException, IOException {

@@ -30,6 +30,7 @@ Follow this rigorous analysis process:
 
 3.  **Diagnose the Discrepancy**:
     -   Compare the observed behavior from Step 1 with the specified behavior from Step 2.
+    -   Is test output is reasonable for the given input based on the API documentation?
     -   Is there a direct conflict? Or is the behavior in an area not covered by the documentation?
 
 4.  **Determine the Initial Root Cause**:
@@ -40,19 +41,32 @@ Follow this rigorous analysis process:
         -   **Environment/Dependency Issues**: The failure is caused by the test environment setup, not the JDK itself.
         -   **Undefined Behavior**: The test relies on behavior that is not guaranteed by the API documentation.
 
-5.  **Final Verdict Sanity Check**:
-    -   Before finalizing your `report_bug` decision, perform one last challenge: **Assume the test is at fault.** Is there any plausible interpretation of the documentation or the test's logic that would explain the failure *without* it being a JDK bug?
-    -   Only if you can confidently reject all such possibilities should you consider setting `report_bug: true`.
+5.  **Test-Centric Verification** (CRITICAL - Prevent False Bug Reports):
+    -   **STOP and perform this verification before considering any bug report**
+    -   **Challenge every assumption**: Systematically verify if the test itself could be the problem
+    -   **Explicitly check these test failure patterns**:
+        a) **Test Logic Flaw**: Does the test make incorrect assumptions about API behavior?
+        b) **Assertion Error**: Is the test's expected result actually wrong according to the API docs?
+        c) **Trivial Assertion Mismatch**: Check for minor formatting issues like extra/missing whitespace, typos, case sensitivity issues (UpperCase vs LowerCase), or punctuation differences in expected vs actual output
+        d) **Setup Issues**: Are there resource cleanup, timing, or environment problems in the test?
+        e) **Edge Case Misunderstanding**: Is the test expecting behavior for undefined/unspecified edge cases?
+    -   **Decision Point**: If ANY of the above apply, immediately conclude `report_bug: false` and classify as "Test Logic Error" or "API Misuse"
+
+6.  **Final Bug Determination** (Only after step 5):
+    -   Only proceed if you have **conclusively eliminated** all test-related causes
+    -   **Required for `report_bug: true`**:
+        a) **Unambiguous documentation violation**: The JDK behavior directly contradicts explicit API documentation
+        b) **Severe JDK malfunction**: JVM crash, deadlock, or fundamental API contract breach
+    -   **When in doubt, it's a test issue, not a JDK bug**
 
 # Output Requirements
-1.  Your final output **must** be a single function call to `root_cause_analysis`.
-2.  Populate the parameters of the function call based on your analysis.
-3.  **`report_bug` Parameter Guidance**: This is your most critical decision. **The default value must be `false`**.
-    -   You may only set `report_bug: true` after exhaustively ruling out all other possibilities and obtaining **conclusive evidence** of a JDK bug. The burden of proof is on you.
-    -   This requires satisfying **at least one** of these strict conditions:
-        a) The JDK's behavior **unambiguously violates** a specific, documented contract in the `<API docs>`.
-        b) The failure is a severe internal JDK issue (e.g., a JVM crash, deadlock, critical performance regression, resource leak) that cannot plausibly be attributed to the test code.
-    -   **If there is any doubt, the answer is `false`.**
+1.  Your final output **must** be a single function call to `root_cause_analysis`
+2.  **Critical `report_bug` Rules**:
+    -   **Default: `report_bug: false`** - This is your starting point
+    -   **Test-first analysis**: Always classify failures as test issues unless proven otherwise
+    -   **Burden of proof**: You need **irrefutable evidence** of JDK bug behavior
+    -   **No ambiguity allowed**: If you cannot be 100% certain, use `report_bug: false`
+    -   **Common test issues to default to**: "API Misuse", "Logic Error in Test", "Test setup issue"
 
 # Tool Call Schema
 You must call the following function:

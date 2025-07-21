@@ -54,5 +54,10 @@ We hope to include an appropriate amount of output and such in the code to help 
 - In short, this code should be rolled back
 
 **Instructions:**
-You must call exactly one of the provided tools (`continue_minimization`, `finish_minimization`, `redo_simplification`), without any parameters.
-Focus on whether the core failure is preserved. Do not provide any other text or explanations. 
+You must use exactly one of the provided function tools to return your decision:
+- Use `continue_minimization` tool to continue minimization
+- Use `finish_minimization` tool to complete the process  
+- Use `redo_simplification` tool to revert this modification
+
+Call the appropriate function tool directly with no parameters.
+You must contain the decision in the tool call.
