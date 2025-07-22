@@ -27,7 +27,7 @@ ${test_failure_output}
     - **Dead Code:** Aggressively remove entire methods, helper classes, or `if`/`else` branches that are not part of the failure path.
     - **Harden Variables:** If a variable is always the same value on the path to failure, replace it with that hardcoded value and remove the logic that calculated it.
     - **Simplify Control Flow:** Can a loop be replaced by the one or two iterations that matter? Can a complex condition be simplified to `true` or `false`?
-    - **Eliminate Boilerplate:** Remove all comments (except jtreg tags like `@test`, `@bug`), unused imports, and local variables that don't contribute to the failure.
+    - **Eliminate Boilerplate:** Remove all comments **EXCEPT** jtreg tags like `@test`, `@bug`, `@summary`, `@library`, `@run`, `@key`, `@requires` - these are **CRITICAL** and must **NEVER** be removed. Remove unused imports and local variables that don't contribute to the failure.
 
 **3. When Reduction Stalls -> Switch to Debugging:**
 - If you cannot identify any more code to remove, your task is to **increase observability**.
