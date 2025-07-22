@@ -39,6 +39,13 @@ public class GlobalConfig {
     // Flash模式配置
     private static final boolean DEFAULT_USE_FLASH = false;  // 默认不使用Flash模式（便宜模型）
     
+    // 消融测试配置
+    private static final boolean DEFAULT_ENABLE_ABLATION_TEST = false;  // 是否启用消融测试
+    private static final boolean DEFAULT_INCLUDE_HYPOTHESIS = true;     // 是否在报告中包含假设
+    private static final boolean DEFAULT_INCLUDE_INFO_SOURCE = true;    // 是否在报告中包含信息源
+    private static final boolean DEFAULT_USE_MINIMIZED_TESTCASE = true; // 是否使用最小化测试用例
+    private static final boolean DEFAULT_INCLUDE_API_DOCS = true;       // 是否在报告中包含API文档
+    
     // JDK模块相关默认配置
     private static final String DEFAULT_JDK_ROOT_PATH = "jdk17u-dev";
     private static final String DEFAULT_JDK_BASE_SOURCE_PATH = "jdk17u-dev/src/java.base/share/classes";
@@ -354,6 +361,41 @@ public class GlobalConfig {
      */
     public static boolean isUseFlash() {
         return ConfigUtil.getBoolean("useFlash", DEFAULT_USE_FLASH);
+    }
+    
+    /**
+     * 是否启用消融测试
+     */
+    public static boolean isEnableAblationTest() {
+        return ConfigUtil.getBoolean("enableAblationTest", DEFAULT_ENABLE_ABLATION_TEST);
+    }
+    
+    /**
+     * 是否在报告中包含假设
+     */
+    public static boolean isIncludeHypothesis() {
+        return ConfigUtil.getBoolean("includeHypothesis", DEFAULT_INCLUDE_HYPOTHESIS);
+    }
+    
+    /**
+     * 是否在报告中包含信息源
+     */
+    public static boolean isIncludeInfoSource() {
+        return ConfigUtil.getBoolean("includeInfoSource", DEFAULT_INCLUDE_INFO_SOURCE);
+    }
+    
+    /**
+     * 是否使用最小化测试用例
+     */
+    public static boolean isUseMinimizedTestcase() {
+        return ConfigUtil.getBoolean("useMinimizedTestcase", DEFAULT_USE_MINIMIZED_TESTCASE);
+    }
+    
+    /**
+     * 是否在报告中包含API文档
+     */
+    public static boolean isIncludeApiDocs() {
+        return ConfigUtil.getBoolean("includeApiDocs", DEFAULT_INCLUDE_API_DOCS);
     }
     
     // --- API Configuration ---

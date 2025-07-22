@@ -43,7 +43,7 @@ public class BugVerify extends Agent {
     private final HypothesisAgent hypothesisAgent;
     
     // LLM实例
-    private final OpenAI llm;
+    private final OpenAI llm = OpenAI.K2;
 
     public TestCase getTestCase() {
         return testCase;
@@ -82,7 +82,6 @@ public class BugVerify extends Agent {
      * @param sourcePath 源码路径
      */
     public BugVerify(String javadocPath, String sourcePath) {
-        this.llm = OpenAI.DoubaoThinking;
         this.jtregTool = new JtregExecuteTool();
         this.minimizationAgent = new TestCaseAgent();
         this.infoCollectionAgent = new InformationCollectionAgent(sourcePath, javadocPath);
@@ -172,6 +171,7 @@ public class BugVerify extends Agent {
                 LoggerUtil.logExec(Level.SEVERE, "An exception occurred during test case minimization. Continuing with the original test case. " + e);
             }
         }
+
 
         // 1. 初始分析
         String initialInsight = performInitialAnalysis();
@@ -504,8 +504,82 @@ public class BugVerify extends Agent {
     
     /**
      * 结论形成阶段 - 生成最终报告
+     * 支持消融实验：生成多个配置组合的prompt并获取结果
      */
     private String generateReport(List<String> hypotheses, Map<String, TestResult> verificationResults) {
+        boolean enableAblationTest = edu.tju.ista.llm4test.config.GlobalConfig.isEnableAblationTest();
+        
+        if (enableAblationTest) {
+            LoggerUtil.logExec(Level.INFO, "开始消融实验：生成3个配置组合");
+            
+            // 定义3个消融实验配置
+            List<AblationConfig> configs = Arrays.asList(
+                new AblationConfig(true, true, true, true, true, 1),   // 完整配置
+                new AblationConfig(true, false, true, true, false, 2), // 无信息源
+                new AblationConfig(false, true, true, true, false, 3)  // 无假设
+            );
+            
+            // 并行执行3个配置
+            var manager = ConcurrentExecutionManager.getInstance();
+            List<CompletableFuture<AblationResult>> futures = new ArrayList<>();
+            
+            for (AblationConfig config : configs) {
+                CompletableFuture<AblationResult> future = manager.submitLLMTask(() -> {
+                    try {
+                        String result = generateReportWithConfig(hypotheses, verificationResults, config);
+                        LoggerUtil.logExec(Level.INFO, "消融实验配置 " + config.id + " 完成");
+                        return new AblationResult(config, result);
+                    } catch (Exception e) {
+                        LoggerUtil.logExec(Level.WARNING, "消融实验配置 " + config.id + " 失败: " + e.getMessage());
+                        return new AblationResult(config, 
+                            "{\"bug_type\": \"ABLATION_ERROR\", \"report\": \"配置 " + config.id + " 执行失败\"}");
+                    }
+                });
+                futures.add(future);
+            }
+            
+            // 等待所有实验完成
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+            
+            // 保存所有结果
+            List<AblationResult> results = futures.stream()
+                .map(CompletableFuture::join)
+                .collect(Collectors.toList());
+            
+            saveAblationResults(results);
+            
+            // 返回第一个配置的结果
+            return results.get(0).result;
+        } else {
+            // 非消融实验，使用原有配置
+            boolean includeHypothesis = edu.tju.ista.llm4test.config.GlobalConfig.isIncludeHypothesis();
+            boolean includeInfoSource = edu.tju.ista.llm4test.config.GlobalConfig.isIncludeInfoSource();
+            boolean useMinimizedTestcase = edu.tju.ista.llm4test.config.GlobalConfig.isUseMinimizedTestcase();
+            boolean includeApiDocs = edu.tju.ista.llm4test.config.GlobalConfig.isIncludeApiDocs();
+            
+            AblationConfig config = new AblationConfig(includeHypothesis, includeInfoSource, 
+                useMinimizedTestcase, includeApiDocs, true, 0);
+            
+            return generateReportWithConfig(hypotheses, verificationResults, config);
+        }
+    }
+    
+    /**
+     * 使用指定配置生成报告
+     */
+    private String generateReportWithConfig(List<String> hypotheses, Map<String, TestResult> verificationResults, 
+                                          AblationConfig config) {
+        
+        // 根据配置选择测试用例
+        String actualTestCode = testCode;
+        if (!config.useMinimizedTestcase && testCase.getOriginFile() != null) {
+            try {
+                actualTestCode = Files.readString(testCase.getOriginFile().toPath());
+            } catch (IOException e) {
+                LoggerUtil.logExec(Level.WARNING, "读取原始测试用例失败: " + e.getMessage());
+            }
+        }
+        
         // 构建验证结果
         StringBuilder resultsBuilder = new StringBuilder();
         for (Map.Entry<String, TestResult> entry : verificationResults.entrySet()) {
@@ -518,37 +592,121 @@ public class BugVerify extends Agent {
         
         // 构建假设信息
         StringBuilder hypothesesBuilder = new StringBuilder();
-        for (String hypothesis : hypotheses) {
-            hypothesesBuilder.append(hypothesis).append("\n\n");
+        if (config.includeHypothesis) {
+            for (String hypothesis : hypotheses) {
+                hypothesesBuilder.append(hypothesis).append("\n\n");
+            }
         }
         
-        // 检查是否有测试用例问题相关的假设被验证
-        boolean hasTestCaseIssueHypothesis = false;
-        String testIssueHypothesisId = "";
-        
-        for (String hypothesisJson : hypotheses) {
-            String category = extractJsonFieldValue(hypothesisJson, "category");
-            String hypothesisId = extractJsonFieldValue(hypothesisJson, "id");
+        // 构建信息源内容
+        StringBuilder infoSourceBuilder = new StringBuilder();
+        if (config.includeInfoSource || config.includeApiDocs) {
+            infoSourceBuilder.append("# 信息收集和分析过程\n\n");
             
-            if (category != null && (
-                    category.equals("TEST_ERROR") || 
-                    category.equals("SPEC_VIOLATION") || 
-                    category.equals("UNDEFINED_BEHAVIOR"))) {
-                
-                // 检查验证结果是否支持这个假设
-                TestResult result = verificationResults.get(hypothesisId);
-                if (result != null && result.isSuccess()) {
-                    hasTestCaseIssueHypothesis = true;
-                    testIssueHypothesisId = hypothesisId;
-                    break;
+            if (config.includeInfoSource) {
+                buildInfoSourceContent(infoSourceBuilder);
+            }
+            
+            if (testCase != null && config.includeApiDocs) {
+                String apiInfoWithSource = testCase.getApiInfoWithSource();
+                if (apiInfoWithSource != null && !apiInfoWithSource.isEmpty()) {
+                    infoSourceBuilder.append("\n# 测试用例API信息和源码\n\n").append(apiInfoWithSource).append("\n");
                 }
             }
         }
         
-        // 构建增强的信息源内容，包含分析过程
-        StringBuilder infoSourceBuilder = new StringBuilder();
-        infoSourceBuilder.append("# 信息收集和分析过程\n\n");
+        // 生成prompt并获取结果
+        try {
+            String prompt = PromptGen.generateBugVerifyBugReportPrompt(
+                actualTestCode, testOutput, hypothesesBuilder.toString(),
+                resultsBuilder.toString(), infoSourceBuilder.toString());
+            
+            return llm.messageCompletion(prompt, 0.7, true);
+        } catch (TemplateException | IOException e) {
+            LoggerUtil.logExec(Level.SEVERE, "生成报告失败: " + e.getMessage());
+            return "{\"bug_type\": \"GENERATION_ERROR\", \"report\": \"生成报告失败\"}";
+        }
+    }
+    
+    /**
+     * 消融实验配置类
+     */
+    private static class AblationConfig {
+        final boolean includeHypothesis;
+        final boolean includeInfoSource;
+        final boolean useMinimizedTestcase;
+        final boolean includeApiDocs;
+        final boolean isDefaultConfig;
+        final int id;
         
+        AblationConfig(boolean includeHypothesis, boolean includeInfoSource, 
+                      boolean useMinimizedTestcase, boolean includeApiDocs, 
+                      boolean isDefaultConfig, int id) {
+            this.includeHypothesis = includeHypothesis;
+            this.includeInfoSource = includeInfoSource;
+            this.useMinimizedTestcase = useMinimizedTestcase;
+            this.includeApiDocs = includeApiDocs;
+            this.isDefaultConfig = isDefaultConfig;
+            this.id = id;
+        }
+    }
+    
+    /**
+     * 消融实验结果类
+     */
+    private static class AblationResult {
+        final AblationConfig config;
+        final String result;
+        
+        AblationResult(AblationConfig config, String result) {
+            this.config = config;
+            this.result = result;
+        }
+    }
+    
+    /**
+     * 保存消融实验结果
+     */
+    private void saveAblationResults(List<AblationResult> results) {
+        if (verifyContextFolder == null || testCaseName == null) return;
+        
+        try {
+            Path testcaseWorkSpace = Paths.get(bugReportPath, testCaseName);
+            Path ablationDir = testcaseWorkSpace.resolve("ablation_results");
+            Files.createDirectories(ablationDir);
+            
+            // 保存每个配置的结果
+            for (AblationResult result : results) {
+                String fileName = "ablation_config_" + result.config.id + ".json";
+                saveToFile(ablationDir.resolve(fileName).toString(), result.result);
+            }
+            
+            // 保存对比摘要
+            StringBuilder summary = new StringBuilder();
+            summary.append("# 消融实验结果摘要\n\n");
+            summary.append("共执行了 ").append(results.size()).append(" 个配置组合\n\n");
+            
+            for (AblationResult result : results) {
+                summary.append("## 配置 ").append(result.config.id).append("\n");
+                summary.append("- 包含假设: ").append(result.config.includeHypothesis).append("\n");
+                summary.append("- 包含信息源: ").append(result.config.includeInfoSource).append("\n");
+                summary.append("- 使用最小化测试用例: ").append(result.config.useMinimizedTestcase).append("\n");
+                summary.append("- 包含API文档: ").append(result.config.includeApiDocs).append("\n\n");
+            }
+            
+            saveToFile(ablationDir.resolve("ablation_summary.md").toString(), summary.toString());
+            
+            LoggerUtil.logExec(Level.INFO, "已保存消融实验结果到: " + ablationDir);
+            
+        } catch (IOException e) {
+            LoggerUtil.logExec(Level.WARNING, "保存消融实验结果失败: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * 构建信息源内容
+     */
+    private void buildInfoSourceContent(StringBuilder infoSourceBuilder) {
         // 添加信息收集统计
         Map<InformationCollectionAgent.InfoType, Integer> typeStats = new HashMap<>();
         Map<InformationCollectionAgent.InfoType, Integer> typeSizes = new HashMap<>();
@@ -557,7 +715,6 @@ public class BugVerify extends Agent {
         for (Map.Entry<String, Object> entry : collectedInfo.entrySet()) {
             if (entry.getValue() instanceof String) {
                 String content = (String) entry.getValue();
-                // 从内容中提取信息类型
                 InformationCollectionAgent.InfoType type = extractInfoType(content);
                 typeStats.merge(type, 1, Integer::sum);
                 typeSizes.merge(type, content.length(), Integer::sum);
@@ -577,112 +734,22 @@ public class BugVerify extends Agent {
         }
         infoSourceBuilder.append("\n");
         
-        // 添加信息质量评估
-        infoSourceBuilder.append("## 信息质量评估\n\n");
-        
-        // 从InformationCollectionAgent获取详细报告
-        if (infoCollectionAgent != null) {
-            String detailedReport = infoCollectionAgent.getDetailedReport();
-            if (detailedReport != null && !detailedReport.isEmpty()) {
-                infoSourceBuilder.append("### 完整信息收集报告\n\n");
-                infoSourceBuilder.append(detailedReport).append("\n\n");
-            }
-        }
-        
-        infoSourceBuilder.append("## 关键信息摘要\n\n");
-        
-        // 按重要性排序显示前5条最重要的信息
-        List<Map.Entry<String, Object>> sortedInfo = collectedInfo.entrySet().stream()
-            .filter(entry -> entry.getValue() instanceof String)
-            .sorted((e1, e2) -> {
-                // 简单的重要性排序：源码 > API文档 > 网络搜索
-                String content1 = (String) e1.getValue();
-                String content2 = (String) e2.getValue();
-                InformationCollectionAgent.InfoType type1 = extractInfoType(content1);
-                InformationCollectionAgent.InfoType type2 = extractInfoType(content2);
-                return Integer.compare(getTypeWeight(type2), getTypeWeight(type1));
-            })
-            .limit(5)
-            .collect(Collectors.toList());
-        
-        for (int i = 0; i < sortedInfo.size(); i++) {
-            Map.Entry<String, Object> entry = sortedInfo.get(i);
-            String content = (String) entry.getValue();
-            InformationCollectionAgent.InfoType type = extractInfoType(content);
-            
-            infoSourceBuilder.append("### 关键信息 ").append(i + 1).append(" (").append(type).append(")\n\n");
-            infoSourceBuilder.append("来源: ").append(entry.getKey()).append("\n\n");
-            
-            // 提取内容预览（前500字符）
-            String preview = content.length() > 500 ? content.substring(0, 500) + "..." : content;
-            infoSourceBuilder.append("内容预览:\n```\n").append(preview).append("\n```\n\n");
-        }
-        
-        // 添加完整的收集信息（用于LLM分析）
-        infoSourceBuilder.append("# 完整信息源内容（用于分析）\n\n");
-        
+        // 添加完整信息
+        infoSourceBuilder.append("## 完整信息源内容\n\n");
         int sourceCount = 0;
         for (Map.Entry<String, Object> entry : collectedInfo.entrySet()) {
             if (entry.getValue() instanceof String) {
                 sourceCount++;
-                infoSourceBuilder.append("## 信息源 ").append(sourceCount).append(": ").append(entry.getKey()).append("\n\n");
+                infoSourceBuilder.append("### 信息源 ").append(sourceCount).append(": ").append(entry.getKey()).append("\n\n");
                 infoSourceBuilder.append((String) entry.getValue()).append("\n\n");
-                infoSourceBuilder.append("---\n\n");
             }
-        }
-        
-        // 添加信息源映射摘要
-        infoSourceBuilder.append("# 信息源映射摘要\n\n");
-        for (Map.Entry<String, String> entry : infoSourceMap.entrySet()) {
-            infoSourceBuilder.append("- ").append(entry.getKey()).append(": ").append(entry.getValue()).append("\n");
-        }
-        
-        // 添加测试用例的API文档信息
-        if (testCase != null) {
-            infoSourceBuilder.append("\n# 测试用例API信息和源码\n\n");
-            String apiInfoWithSource = testCase.getApiInfoWithSource();
-            if (apiInfoWithSource != null && !apiInfoWithSource.isEmpty()) {
-                infoSourceBuilder.append(apiInfoWithSource).append("\n");
-            } else {
-                infoSourceBuilder.append("无API信息和源码数据\n");
-            }
-        }
-        
-        LoggerUtil.logExec(Level.INFO, String.format("最终报告包含 %d 个信息源，信息源内容大小: %d 字符", 
-            sourceCount, infoSourceBuilder.length()));
-        
-        // 根据是否为测试用例问题调整提示模板
-        try {
-            String prompt;
-            String promptType;
-            if (hasTestCaseIssueHypothesis) {
-                prompt = PromptGen.generateBugVerifyTestCaseReportPrompt(
-                    testCode, testOutput, hypothesesBuilder.toString(), 
-                    resultsBuilder.toString(), infoSourceBuilder.toString());
-                promptType = "test_case_report";
-            } else {
-                prompt = PromptGen.generateBugVerifyBugReportPrompt(
-                    testCode, testOutput, hypothesesBuilder.toString(), 
-                    resultsBuilder.toString(), infoSourceBuilder.toString());
-                promptType = "bug_report";
-            }
-            
-            // 保存完整的prompt到文件
-            savePromptToFile(prompt, promptType, hasTestCaseIssueHypothesis, testIssueHypothesisId);
-            
-            conclusion = llm.messageCompletion(prompt, 0.7, true);
-            return conclusion;
-        } catch (TemplateException | IOException e) {
-            LoggerUtil.logExec(Level.SEVERE, "生成报告prompt失败: " + e.getMessage());
-            e.printStackTrace();
-            return "{\"bug_type\": \"GENERATION_ERROR\", \"report\": \"生成报告失败: " + e.getMessage().replace("\"", "'") + "\"}";
         }
     }
     
     /**
      * 保存生成报告的完整prompt到文件
      */
-    private void savePromptToFile(String prompt, String promptType, boolean hasTestCaseIssue, String testIssueHypothesisId) {
+    private void savePromptToFile(String prompt, boolean hasTestCaseIssue, String testIssueHypothesisId) {
         if (verifyContextFolder == null || testCaseName == null) return;
         
         try {
@@ -691,7 +758,7 @@ public class BugVerify extends Agent {
             Files.createDirectories(promptsDir);
             
             // 直接保存prompt内容
-            String promptFileName = "generate_report_" + promptType + "_prompt.txt";
+            String promptFileName = "generate_report_prompt.txt";
             saveToFile(promptsDir.resolve(promptFileName).toString(), prompt);
             
             LoggerUtil.logExec(Level.INFO, "已保存生成报告的prompt: " + promptFileName);
@@ -889,6 +956,13 @@ public class BugVerify extends Agent {
                         } else {
                             testOutput = "无法获取测试输出";
                             LoggerUtil.logResult(Level.SEVERE, testcase.getFile().getAbsolutePath() + ": 无法获取测试输出");
+                        }
+
+                        testcase.verifyTestFail();
+                        if (testcase.getResult().isBug()) {
+                            LoggerUtil.logResult(Level.INFO, "测试用例存在bug: " + testCaseName + "\n" + testcase.verifyMessage);
+                        } else {
+                            return null;
                         }
 
                         // 设置测试数据并分析

@@ -1,5 +1,6 @@
 package edu.tju.ista.llm4test.prompt;
 
+import edu.tju.ista.llm4test.execute.TestResult;
 import freemarker.template.Configuration;
 import freemarker.template.Template;
 import freemarker.template.TemplateException;
@@ -210,7 +211,7 @@ public class PromptGen {
         return generatePrompt("TestCaseObserveAndDecide", dataModel);
     }
 
-    public static String generateTestCaseObserveAndDecidePrompt(String observationSummary, String originalFailure, Object currentResult) throws TemplateException, IOException {
+    public static String generateTestCaseObserveAndDecidePrompt(String observationSummary, String originalFailure, TestResult currentResult) throws TemplateException, IOException {
         Map<String, Object> dataModel = new HashMap<>();
         dataModel.put("observation_summary", observationSummary);
         dataModel.put("original_failure", originalFailure);
