@@ -60,7 +60,7 @@ Follow this rigorous analysis process:
     -   **When in doubt, it's a test issue, not a JDK bug**
 
 # Output Requirements
-1.  Your final output **must** be a single function call to `root_cause_analysis`
+1.  Your **must** call `root_cause_analysis` in toolc call.
 2.  **Critical `report_bug` Rules**:
     -   **Default: `report_bug: false`** - This is your starting point
     -   **Test-first analysis**: Always classify failures as test issues unless proven otherwise
@@ -69,7 +69,7 @@ Follow this rigorous analysis process:
     -   **Common test issues to default to**: "API Misuse", "Logic Error in Test", "Test setup issue"
 
 # Tool Call Schema
-You must call the following function:
+You must call the following function in tool call not in content:
 
 **`root_cause_analysis(root_cause, bug_location, bug_type, fix_advice, report_bug)`**
 
