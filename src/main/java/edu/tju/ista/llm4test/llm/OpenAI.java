@@ -403,6 +403,73 @@ public class OpenAI {
     }
 
     /**
+     * 执行函数调用并返回ToolCall、content和reasoning_content (同步阻塞版本)
+     */
+    public record FuncCallResult(List<ToolCall> toolCalls, String content, String reasoningContent) {}
+    
+    public FuncCallResult funcCallWithContent(String prompt, List<Tool<?>> tools) {
+        try {
+            // 调用异步版本并阻塞等待结果
+            return funcCallWithContentAsync(prompt, tools).join();
+        } catch (Exception e) {
+            // 解包CompletionException
+            Throwable cause = (e instanceof CompletionException) ? e.getCause() : e;
+            LoggerUtil.logExec(Level.SEVERE, "OpenAI function calling failed: " + cause.getMessage());
+            return new FuncCallResult(new ArrayList<>(), "", "");
+        }
+    }
+
+    private List<ToolCall> parseToolCalls(Object toolCallsObj) {
+        List<ToolCall> result = new ArrayList<>();
+        if (toolCallsObj instanceof List) {
+            List<?> toolCalls = (List<?>) toolCallsObj;
+            for (Object call : toolCalls) {
+                if (call instanceof Map) {
+                    Map<?, ?> callMap = (Map<?, ?>) call;
+                    Map<?, ?> function = (Map<?, ?>) callMap.get("function");
+                    if (function != null) {
+                        try {
+                            result.add(new ToolCall((String) function.get("name"), (String) function.get("arguments")));
+                        } catch (JsonProcessingException e) {
+                            LoggerUtil.logExec(Level.WARNING, "Failed to parse function call arguments: " + e.getMessage());
+                        }
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 异步执行函数调用并返回ToolCall、content和reasoning_content (非阻塞版本)
+     */
+    public CompletableFuture<FuncCallResult> funcCallWithContentAsync(String prompt, List<Tool<?>> tools) {
+        try {
+            Map<String, Object> requestBody = getBaseRequestMap(prompt);
+            requestBody.put("tools", ToolFactory.toToolsArray(tools));
+            requestBody.put("stream", false);
+            requestBody.put("max_tokens", 4096);
+
+            return executeWithRetryAsync("funcCallWithContent", () -> getResponseBodyAsync(requestBody), 0)
+                    .thenApply(responseBody -> {
+                        List<Map<String, Object>> choices = (List<Map<String, Object>>) responseBody.get("choices");
+                        if (choices != null && !choices.isEmpty()) {
+                            Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
+                            String content = (String) message.get("content");
+                            String reasoning = (String) message.get("reasoning_content");
+                            List<ToolCall> calls = parseToolCalls(message.get("tool_calls"));
+                            
+                            return new FuncCallResult(calls, content != null ? content : "", reasoning != null ? reasoning : "");
+                        }
+                        return new FuncCallResult(new ArrayList<>(), "", "");
+                    });
+        } catch (Exception e) {
+            LoggerUtil.logExec(Level.SEVERE, "Failed to start OpenAI function calling async: " + e.getMessage());
+            return CompletableFuture.failedFuture(e);
+        }
+    }
+
+    /**
      * 异步执行函数调用 (非阻塞版本)
      */
     public CompletableFuture<List<ToolCall>> funcCallAsync(String prompt, List<Tool<?>> tools) {
