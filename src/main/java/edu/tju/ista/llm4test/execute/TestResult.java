@@ -67,7 +67,7 @@ public class TestResult {
      */
     public boolean isFail() {
         return switch (kind) {
-            case COMPILE_FAIL, TEST_FAIL, DIFF, MAYBE_TEST_FAIL -> true;
+            case COMPILE_FAIL, TEST_FAIL, DIFF, MAYBE_TEST_FAIL, VERIFIED_BUG -> true;
             default -> false;
         };
     }
