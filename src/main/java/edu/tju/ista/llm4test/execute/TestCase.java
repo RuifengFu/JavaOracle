@@ -334,7 +334,7 @@ public class TestCase {
             StringBuilder sb = new StringBuilder();
             var lines = source.split("\n");
             for (int i = 0; i < lines.length; i++) {
-                sb.append(i).append("\t:").append(lines[i]);
+                sb.append(i).append("\t:").append(lines[i]).append("\n");
             }
             var testcase = sb.toString();
 
@@ -346,7 +346,7 @@ public class TestCase {
             String prompt = PromptGen.generatePrompt("RootCause", dataModel);
             ArrayList<Tool<?>> tools = new ArrayList<>();
             tools.add(new RootCauseOutputTool());
-            var callList = OpenAI.DoubaoThinking.funcCall(prompt, tools);
+            var callList = OpenAI.K2.funcCall(prompt, tools);
             if (callList.isEmpty()) {
                 LoggerUtil.logExec(Level.WARNING, "No function call found in the response");
                 this.result.setKind(TestResultKind.MAYBE_TEST_FAIL);
