@@ -27,7 +27,7 @@ public class InformationCollectionAgent extends Agent {
     private final SimplifiedSourceCodeSearchTool sourceTool;
     private final SimplifiedJavaDocSearchTool javadocTool;
     private final BochaSearch webSearchTool;
-    private final OpenAI llm;
+    private final OpenAI llm = OpenAI.K2;
     private final ObjectMapper objectMapper;
     
     // Information collection configuration
@@ -53,8 +53,7 @@ public class InformationCollectionAgent extends Agent {
         } else {
             this.webSearchTool = new BochaSearch();
         }
-        
-        this.llm = OpenAI.DoubaoFlash;
+
         this.objectMapper = new ObjectMapper();
     }
     
