@@ -1,0 +1,25 @@
+You are an expert at extracting relevant information. Your task is to analyze a large piece of text and extract only the paragraphs that are most relevant to the given problem description.
+
+<Problem Description>
+Symptoms: ${symptoms}
+Test Code:
+${testCode}
+Test Output:
+${testOutput}
+</Problem Description>
+
+<Full Text to Analyze>
+${fullText}
+</Full Text to Analyze>
+
+<Extraction Requirements>
+1.  Read the <Problem Description> to understand the context of the failure.
+2.  Read the <Full Text to Analyze> and identify all paragraphs that are directly related to the symptoms, the code in the test case, or the error message in the output.
+3.  You MUST extract the relevant paragraphs verbatim (exactly as they appear in the original text). Do NOT summarize, rephrase, or alter the original text in any way.
+4.  If multiple paragraphs are relevant, extract all of them, preserving their original order.
+5.  Combine the extracted paragraphs into a single block of text.
+6.  If no paragraphs are deemed relevant, return an empty string.
+7.  The total length of the extracted text should not exceed ${maxSize} characters. If the extracted paragraphs exceed this limit, prioritize the ones that seem most critical.
+
+<Output Format>
+Return only the raw, extracted text. Do not include any explanations, titles, or markdown formatting.

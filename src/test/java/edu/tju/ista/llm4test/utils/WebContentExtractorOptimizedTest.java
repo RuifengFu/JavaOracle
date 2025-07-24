@@ -46,6 +46,15 @@ public class WebContentExtractorOptimizedTest {
     }
 
     @Test
+    void testCSDN() {
+        String url = "https://blog.csdn.net/weixin_46880696/article/details/134209440";
+        System.out.println("=== 测试CSDN网站 ===");
+        String content = extractor.extractContent(url);
+        System.out.println("Content: \n" + content);
+        assertNotNull(content);
+    }
+
+    @Test
     @DisplayName("2. 测试静态优先策略 - Baeldung网站")
     void testStaticFirstBaeldung() {
         System.out.println("=== 测试静态优先策略 - Baeldung网站 ===");

@@ -369,11 +369,21 @@ public class WebSearch {
         }
 
         try {
+            // Filter out null or empty documents and enforce the 50-document limit.
+            List<SearchResult> validResults = results.stream()
+                    .filter(r -> r.getContent() != null && !r.getContent().trim().isEmpty())
+                    .limit(50)
+                    .collect(ArrayList::new, ArrayList::add, ArrayList::addAll);
+
+            if (validResults.isEmpty()) {
+                return new ArrayList<>(); // Return empty if no valid documents to rank.
+            }
+
             RerankRequest rerankRequest = new RerankRequest();
             rerankRequest.model = "gte-rerank";
             rerankRequest.query = query;
-            rerankRequest.documents = results.stream().map(SearchResult::getSnippet).collect(ArrayList::new, ArrayList::add, ArrayList::addAll);
-            rerankRequest.topN = topN;
+            rerankRequest.documents = validResults.stream().map(SearchResult::getContent).collect(ArrayList::new, ArrayList::add, ArrayList::addAll);
+            rerankRequest.topN = topN == null ? rerankRequest.documents.size(): topN;
             rerankRequest.returnDocuments = false;
 
             String requestBody = objectMapper.writeValueAsString(rerankRequest);
@@ -387,6 +397,8 @@ public class WebSearch {
                     .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                     .build();
 
+
+            System.out.println(requestBody);
             HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() == 200) {
@@ -394,8 +406,8 @@ public class WebSearch {
                 if (rerankApiResponse.code == 200 && rerankApiResponse.data != null && rerankApiResponse.data.results != null) {
                     List<SearchResult> rerankedResults = new ArrayList<>();
                     for (RerankResult rerankResult : rerankApiResponse.data.results) {
-                        if (rerankResult.index >= 0 && rerankResult.index < results.size()) {
-                            SearchResult originalResult = results.get(rerankResult.index);
+                        if (rerankResult.index >= 0 && rerankResult.index < validResults.size()) {
+                            SearchResult originalResult = validResults.get(rerankResult.index);
                             SearchResult newResult = originalResult;
                             newResult.setRelevanceScore(rerankResult.relevanceScore);
                             rerankedResults.add(newResult);

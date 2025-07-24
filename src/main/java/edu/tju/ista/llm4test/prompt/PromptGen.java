@@ -59,6 +59,8 @@ public class PromptGen {
             TEMPLATE_MAP.put("InstantiateTestCase", loadResourceAsString("/prompt/InstantiateTestCase.txt"));
             TEMPLATE_MAP.put("BugVerifyObservePrompt", loadResourceAsString("/prompt/BugVerifyObservePrompt.txt"));
             TEMPLATE_MAP.put("BugVerifyRefineAnalysis", loadResourceAsString("/prompt/BugVerifyRefineAnalysis.txt"));
+            TEMPLATE_MAP.put("SummarizeAndExtract", loadResourceAsString("/prompt/SummarizeAndExtract.txt"));
+            TEMPLATE_MAP.put("SummarizeWebSearchResult", loadResourceAsString("/prompt/SummarizeWebSearchResult.txt"));
             
             // TestCaseMinimization 相关模板
             TEMPLATE_MAP.put("TestCaseMinimizationPlan", loadResourceAsString("/prompt/TestCaseMinimizationPlan.txt"));
@@ -185,6 +187,26 @@ public class PromptGen {
         dataModel.put("queries", queries);
         dataModel.put("currentCollectedInfos", currentCollectedInfos);
         return generatePrompt("BugVerifyRefineAnalysis", dataModel);
+    }
+
+    public static String generateSummarizeAndExtractPrompt(String symptoms, String testCode, String testOutput, String fullText, int maxSize) throws TemplateException, IOException {
+        Map<String, Object> dataModel = new HashMap<>();
+        dataModel.put("symptoms", symptoms);
+        dataModel.put("testCode", testCode);
+        dataModel.put("testOutput", testOutput);
+        dataModel.put("fullText", fullText);
+        dataModel.put("maxSize", maxSize);
+        return generatePrompt("SummarizeAndExtract", dataModel);
+    }
+
+    public static String generateSummarizeWebSearchResultPrompt(String symptoms, String testCode, String testOutput, String webContent, int maxSize) throws TemplateException, IOException {
+        Map<String, Object> dataModel = new HashMap<>();
+        dataModel.put("symptoms", symptoms);
+        dataModel.put("testCode", testCode);
+        dataModel.put("testOutput", testOutput);
+        dataModel.put("webContent", webContent);
+        dataModel.put("maxSize", maxSize);
+        return generatePrompt("SummarizeWebSearchResult", dataModel);
     }
 
     public static String generateTestCaseMinimizationPlanPrompt(String sourceCode, String testFailureOutput, String workingDirectory, String originalTestCasePath) throws TemplateException, IOException {

@@ -1048,9 +1048,7 @@ public class BugVerify extends Agent {
     }
     
     public void close(){
-        if (infoCollectionAgent != null) {
-            infoCollectionAgent.close();
-        }
+
     }
 
     /**

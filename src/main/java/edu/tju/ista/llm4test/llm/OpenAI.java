@@ -107,6 +107,10 @@ public class OpenAI {
         this.MAX_TOKENS = config.getMaxTokens();
         this.STREAM = config.isStream();
         this.JSON_OUTPUT = config.isJsonOutput();
+        System.out.println("BASE_URL: " + BASE_URL);
+        System.out.println("API_KEY: " + API_KEY);
+        System.out.println("MODEL: " + MODEL);
+
     }
 
     public static OpenAI R1;

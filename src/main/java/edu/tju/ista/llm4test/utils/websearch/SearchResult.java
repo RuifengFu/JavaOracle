@@ -6,16 +6,16 @@ import edu.tju.ista.llm4test.utils.websearch.api.WebPageValue;
  * 封装网页搜索结果的数据模型。
  */
 public class SearchResult {
-    private final String id;
-    private final String name;
-    private final String url;
-    private final String displayUrl;
-    private final String snippet;
-    private final String summary;
-    private final String siteName;
-    private final String siteIcon;
-    private final String datePublished;
-    private final String dateLastCrawled;
+    private String id;
+    private String name;
+    private String url;
+    private String displayUrl;
+    private String snippet;
+    private String summary;
+    private String siteName;
+    private String siteIcon;
+    private String datePublished;
+    private String dateLastCrawled;
     private String content = "";
     private int rank;
     
@@ -32,7 +32,6 @@ public class SearchResult {
     private double relevanceScore = -1.0;
 
     public SearchResult(String content) {
-        this(null, 0);
         this.content = content;
     }
 

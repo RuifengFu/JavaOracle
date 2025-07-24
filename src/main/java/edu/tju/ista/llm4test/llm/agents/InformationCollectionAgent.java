@@ -16,13 +16,13 @@ import java.util.logging.Level;
 import java.util.concurrent.*;
 
 /**
- * 简化的信息收集Agent - 使用observe循环优化信息收集
+ * Simplified Information Collection Agent - Optimized information collection using observe loop
  */
 public class InformationCollectionAgent extends Agent {
     
-    // 决策工具 - 确定性选择
-    private static final Tool<Void> INFO_SUFFICIENT = new BasicTool("info_sufficient", "当前收集的信息足够分析测试失败原因");
-    private static final Tool<Void> INFO_INSUFFICIENT = new BasicTool("info_insufficient", "当前收集的信息不足，需要更多信息");
+    // Decision tool - deterministic selection
+    private static final Tool<Void> INFO_SUFFICIENT = new BasicTool("info_sufficient", "The currently collected information is sufficient to analyze the cause of the test failure");
+    private static final Tool<Void> INFO_INSUFFICIENT = new BasicTool("info_insufficient", "The currently collected information is insufficient, more information is needed");
     
     private final SimplifiedSourceCodeSearchTool sourceTool;
     private final SimplifiedJavaDocSearchTool javadocTool;
@@ -30,22 +30,22 @@ public class InformationCollectionAgent extends Agent {
     private final OpenAI llm;
     private final ObjectMapper objectMapper;
     
-    // 信息收集配置
+    // Information collection configuration
     private static final int MAX_TOTAL_SIZE = 32000;
     private static final int MAX_ITERATIONS = 3;
     
-    // 当前收集状态
+    // Current collection status
     private final List<CollectedInfo> collectedInfos = new ArrayList<>();
     private int currentSize = 0;
     
     public InformationCollectionAgent(String sourcePath, String javadocPath) {
-        super("你是一个信息收集专家，负责收集与Bug分析相关的最重要信息。");
+        super("You are an information collection expert responsible for gathering the most important information related to Bug analysis.");
         
-        // 初始化工具
+        // Initialize tools
         this.sourceTool = sourcePath != null ? new SimplifiedSourceCodeSearchTool(sourcePath) : null;
         this.javadocTool = javadocPath != null ? new SimplifiedJavaDocSearchTool(javadocPath) : null;
         
-        // 初始化Web搜索工具
+        // Initialize Web search tool
         String apiKey = System.getenv("BOCHA_API_KEY");
         if (apiKey != null && !apiKey.isEmpty()) {
             SearchConfig config = new SearchConfig().setApiKey(apiKey).setSummary(true).setEnableLogging(false);
@@ -54,144 +54,144 @@ public class InformationCollectionAgent extends Agent {
             this.webSearchTool = new BochaSearch();
         }
         
-        this.llm = OpenAI.DoubaoThinking;
+        this.llm = OpenAI.DoubaoFlash;
         this.objectMapper = new ObjectMapper();
     }
     
     /**
-     * 收集相关信息 - 主入口方法
+     * Collect relevant information - main entry method
      */
     public List<CollectedInfo> collectInformation(String initialInsight, String testCode, 
                                                  String testOutput, String apiInfoWithSource) {
-        LoggerUtil.logExec(Level.INFO, "开始信息收集流程");
+        LoggerUtil.logExec(Level.INFO, "Starting information collection process");
         
-        // 重置状态
+        // Reset status
         collectedInfos.clear();
         currentSize = 0;
         
-        // 解析初始洞察
+        // Parse initial insight
         AnalysisResult analysis = parseInitialInsight(initialInsight);
         
-        // 观察循环 - 最多迭代3次
+        // Observation loop - max 3 iterations
         for (int iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
-            LoggerUtil.logExec(Level.INFO, "信息收集迭代 " + iteration + "/" + MAX_ITERATIONS);
+            LoggerUtil.logExec(Level.INFO, "Information collection iteration " + iteration + "/" + MAX_ITERATIONS);
             
-            // 收集信息
+            // Collect information
             collectAllInformation(analysis, testCode, testOutput, apiInfoWithSource);
             
-            // 观察和评估
+            // Observe and evaluate
             if (isInformationSufficient(analysis, testCode, testOutput, iteration)) {
-                LoggerUtil.logExec(Level.INFO, "信息收集完成，在第 " + iteration + " 次迭代后满足要求");
+                LoggerUtil.logExec(Level.INFO, "Information collection complete, requirements met after iteration " + iteration);
                 break;
             }
             
-            // 如果不是最后一次迭代，重新分析
+            // If not the last iteration, re-analyze
             if (iteration < MAX_ITERATIONS) {
-                LoggerUtil.logExec(Level.INFO, "信息不足，准备第 " + (iteration + 1) + " 次迭代");
+                LoggerUtil.logExec(Level.INFO, "Information insufficient, preparing for iteration " + (iteration + 1));
                 analysis = refineAnalysis(analysis, testCode, testOutput);
-                // 清空已收集信息，准备重新收集
+                // Clear collected information, prepare for re-collection
                 collectedInfos.clear();
                 currentSize = 0;
             }
         }
         
-        LoggerUtil.logExec(Level.INFO, String.format("信息收集完成，共收集 %d 条信息，总大小: %d 字符", 
+        LoggerUtil.logExec(Level.INFO, String.format("Information collection complete, collected %d pieces of information, total size: %d characters", 
             collectedInfos.size(), currentSize));
         
-        // 输出完整的信息源内容
+        // Output the full content of the information source
         outputDetailedReport();
         
-        return new ArrayList<>(collectedInfos);
+        return rankAndSummarize(analysis, testCode, testOutput);
     }
     
     /**
-     * 输出完整的信息源报告
+     * Output a complete information source report
      */
     private void outputDetailedReport() {
-        LoggerUtil.logExec(Level.INFO, "================== 完整信息源报告 ==================");
+        LoggerUtil.logExec(Level.INFO, "================== Complete Information Source Report ==================");
         
         if (collectedInfos.isEmpty()) {
-            LoggerUtil.logExec(Level.INFO, "未收集到任何信息");
+            LoggerUtil.logExec(Level.INFO, "No information collected");
             return;
         }
         
-        // 按类型分组统计
+        // Group statistics by type
         Map<InfoType, List<CollectedInfo>> groupedByType = new HashMap<>();
         for (CollectedInfo info : collectedInfos) {
             groupedByType.computeIfAbsent(info.type, k -> new ArrayList<>()).add(info);
         }
         
-        // 输出统计信息
-        LoggerUtil.logExec(Level.INFO, String.format("总计收集 %d 条信息，总大小 %d 字符", 
+        // Output statistical information
+        LoggerUtil.logExec(Level.INFO, String.format("Total collected %d pieces of information, total size %d characters", 
             collectedInfos.size(), currentSize));
         
         for (InfoType type : InfoType.values()) {
             List<CollectedInfo> infos = groupedByType.getOrDefault(type, new ArrayList<>());
             if (!infos.isEmpty()) {
                 int totalSize = infos.stream().mapToInt(info -> info.content.length()).sum();
-                LoggerUtil.logExec(Level.INFO, String.format("- %s: %d 条，共 %d 字符", 
+                LoggerUtil.logExec(Level.INFO, String.format("- %s: %d items, %d characters in total", 
                     type, infos.size(), totalSize));
             }
         }
         
-        LoggerUtil.logExec(Level.INFO, "==================== 详细内容 ====================");
+        LoggerUtil.logExec(Level.INFO, "==================== Detailed Content ====================");
         
-        // 输出每条信息的完整内容
+        // Output the full content of each piece of information
         for (int i = 0; i < collectedInfos.size(); i++) {
             CollectedInfo info = collectedInfos.get(i);
-            LoggerUtil.logExec(Level.INFO, String.format("\n--- 信息源 %d ---", i + 1));
+            LoggerUtil.logExec(Level.INFO, String.format("\n--- Information Source %d ---", i + 1));
             LoggerUtil.logExec(Level.INFO, "ID: " + info.id);
-            LoggerUtil.logExec(Level.INFO, "类型: " + info.type);
-            LoggerUtil.logExec(Level.INFO, "来源: " + info.source);
-            LoggerUtil.logExec(Level.INFO, "相关性得分: " + String.format("%.3f", info.relevanceScore));
-            LoggerUtil.logExec(Level.INFO, "内容大小: " + info.content.length() + " 字符");
-            LoggerUtil.logExec(Level.INFO, "完整内容:\n" + info.content);
-            LoggerUtil.logExec(Level.INFO, "--- 信息源 " + (i + 1) + " 结束 ---\n");
+            LoggerUtil.logExec(Level.INFO, "Type: " + info.type);
+            LoggerUtil.logExec(Level.INFO, "Source: " + info.source);
+            LoggerUtil.logExec(Level.INFO, "Relevance Score: " + String.format("%.3f", info.relevanceScore));
+            LoggerUtil.logExec(Level.INFO, "Content Size: " + info.content.length() + " characters");
+            LoggerUtil.logExec(Level.INFO, "Full Content:\n" + info.content);
+            LoggerUtil.logExec(Level.INFO, "--- Information Source " + (i + 1) + " End ---\n");
         }
         
-        LoggerUtil.logExec(Level.INFO, "================= 信息源报告结束 =================");
+        LoggerUtil.logExec(Level.INFO, "================= Information Source Report End ================");
     }
     
     /**
-     * 获取格式化的详细报告字符串
+     * Get the formatted detailed report string
      */
     public String getDetailedReport() {
         if (collectedInfos.isEmpty()) {
-            return "# 信息收集报告\n\n未收集到任何信息。\n";
+            return "# Information Collection Report\n\nNo information collected.\n";
         }
         
         StringBuilder report = new StringBuilder();
-        report.append("# 信息收集详细报告\n\n");
+        report.append("# Detailed Information Collection Report\n\n");
         
-        // 统计信息
+        // Statistical information
         Map<InfoType, List<CollectedInfo>> groupedByType = new HashMap<>();
         for (CollectedInfo info : collectedInfos) {
             groupedByType.computeIfAbsent(info.type, k -> new ArrayList<>()).add(info);
         }
         
-        report.append("## 统计信息\n\n");
-        report.append(String.format("- **总计**: %d 条信息，%d 字符\n", collectedInfos.size(), currentSize));
+        report.append("## Statistics\n\n");
+        report.append(String.format("- **Total**: %d pieces of information, %d characters\n", collectedInfos.size(), currentSize));
         
         for (InfoType type : InfoType.values()) {
             List<CollectedInfo> infos = groupedByType.getOrDefault(type, new ArrayList<>());
             if (!infos.isEmpty()) {
                 int totalSize = infos.stream().mapToInt(info -> info.content.length()).sum();
-                report.append(String.format("- **%s**: %d 条，%d 字符\n", type, infos.size(), totalSize));
+                report.append(String.format("- **%s**: %d items, %d characters\n", type, infos.size(), totalSize));
             }
         }
         
-        report.append("\n## 详细内容\n\n");
+        report.append("\n## Detailed Content\n\n");
         
-        // 详细内容
+        // Detailed content
         for (int i = 0; i < collectedInfos.size(); i++) {
             CollectedInfo info = collectedInfos.get(i);
-            report.append(String.format("### 信息源 %d\n\n", i + 1));
+            report.append(String.format("### Information Source %d\n\n", i + 1));
             report.append(String.format("- **ID**: %s\n", info.id));
-            report.append(String.format("- **类型**: %s\n", info.type));
-            report.append(String.format("- **来源**: %s\n", info.source));
-            report.append(String.format("- **相关性得分**: %.3f\n", info.relevanceScore));
-            report.append(String.format("- **内容大小**: %d 字符\n\n", info.content.length()));
-            report.append("**完整内容**:\n\n");
+            report.append(String.format("- **Type**: %s\n", info.type));
+            report.append(String.format("- **Source**: %s\n", info.source));
+            report.append(String.format("- **Relevance Score**: %.3f\n", info.relevanceScore));
+            report.append(String.format("- **Content Size**: %d characters\n\n", info.content.length()));
+            report.append("**Full Content**:\n\n");
             report.append("```\n");
             report.append(info.content);
             report.append("\n```\n\n");
@@ -202,7 +202,7 @@ public class InformationCollectionAgent extends Agent {
     }
     
     /**
-     * 解析初始洞察
+     * Parse initial insight
      */
     private AnalysisResult parseInitialInsight(String initialInsight) {
         AnalysisResult result = new AnalysisResult();
@@ -236,40 +236,40 @@ public class InformationCollectionAgent extends Agent {
             }
             
         } catch (Exception e) {
-            LoggerUtil.logExec(Level.WARNING, "解析初始洞察失败: " + e.getMessage());
+            LoggerUtil.logExec(Level.WARNING, "Failed to parse initial insight: " + e.getMessage());
         }
         
         return result;
     }
     
     /**
-     * 收集所有信息
+     * Collect all information
      */
     private void collectAllInformation(AnalysisResult analysis, String testCode, 
                                      String testOutput, String apiInfoWithSource) {
-        // 1. 收集源码信息
+        // 1. Collect source code information
         if (sourceTool != null) {
             collectWithTool(sourceTool, buildSourceCodePrompt(analysis, testCode), "SOURCE");
         }
         
-        // 2. 收集JavaDoc信息
+        // 2. Collect JavaDoc information
         if (javadocTool != null) {
             collectWithTool(javadocTool, buildJavaDocPrompt(analysis, testCode), "JAVADOC");
         }
         
-        // 3. 添加API信息
+        // 3. Add API information
         if (apiInfoWithSource != null && !apiInfoWithSource.isEmpty()) {
             addApiInfo(apiInfoWithSource);
         }
         
-        // 4. 简单的Web搜索（如果有空间的话）
-        if (currentSize < MAX_TOTAL_SIZE * 0.8) { // 预留20%空间
-            collectWebInfo(analysis, testOutput);
+        // 4. Simple Web search (if there is space)
+        if (currentSize < MAX_TOTAL_SIZE * 0.8) { // Reserve 20% space
+            collectWebInfo(analysis, testCode, testOutput);
         }
     }
     
     /**
-     * 使用工具收集信息
+     * Collect information using a tool
      */
     private void collectWithTool(Tool<String> tool, String prompt, String prefix) {
         try {
@@ -286,52 +286,67 @@ public class InformationCollectionAgent extends Agent {
                 }
             }
         } catch (Exception e) {
-            LoggerUtil.logExec(Level.WARNING, "工具调用失败 (" + prefix + "): " + e.getMessage());
+            LoggerUtil.logExec(Level.WARNING, "Tool call failed (" + prefix + "): " + e.getMessage());
         }
     }
     
     /**
-     * 添加收集到的信息
+     * Add collected information
      */
     private void addCollectedInfo(String content, String prefix, ToolCall toolCall) {
         if (content == null || content.isEmpty()) return;
-        
-        // 截断过长内容
-        if (content.length() > 5000) {
-            content = content.substring(0, 5000) + "...(内容已截断)";
-        }
-        
-        if (currentSize + content.length() <= MAX_TOTAL_SIZE) {
-            String searchType = (String) toolCall.arguments.get("search_type");
-            String id = prefix + "_" + searchType + "_" + System.currentTimeMillis();
-            String title = generateTitle(searchType, toolCall.arguments);
-            
-            CollectedInfo info = new CollectedInfo(id, title, content, 
-                prefix.equals("SOURCE") ? InfoType.SOURCE_CODE : InfoType.JAVADOC, 0.8);
-            
-            collectedInfos.add(info);
-            currentSize += content.length();
-        }
-        }
+
+        String searchType = (String) toolCall.arguments.get("search_type");
+        String id = prefix + "_" + searchType + "_" + System.currentTimeMillis();
+        String title = generateTitle(searchType, toolCall.arguments);
+
+        CollectedInfo info = new CollectedInfo(id, title, content,
+            prefix.equals("SOURCE") ? InfoType.SOURCE_CODE : InfoType.JAVADOC, 0.8);
+
+        collectedInfos.add(info);
+        currentSize += content.length();
+    }
         
     /**
-     * 添加API信息
+     * Add API information with extraction similar to web content
      */
     private void addApiInfo(String apiInfoWithSource) {
-        String content = apiInfoWithSource.length() > 8000 ? 
-            apiInfoWithSource.substring(0, 8000) + "...(API信息已截断)" : apiInfoWithSource;
+        if (apiInfoWithSource == null || apiInfoWithSource.isEmpty()) return;
         
-        if (currentSize + content.length() <= MAX_TOTAL_SIZE) {
-            CollectedInfo info = new CollectedInfo("API_INFO", "API信息和源码", content, InfoType.SOURCE_CODE, 0.9);
+        try {
+            String processedContent;
+            
+            if (apiInfoWithSource.length() > 4096) {
+                LoggerUtil.logExec(Level.INFO, "API info content too long, extracting relevant parts");
+                // Use the same extraction method as web content
+                int maxSize = 8000;
+                processedContent = extractRelevantText(null, "", "", apiInfoWithSource, maxSize);
+                if (processedContent == null || processedContent.trim().isEmpty()) {
+                    LoggerUtil.logExec(Level.WARNING, "API info extraction failed, using original");
+                    processedContent = apiInfoWithSource.substring(0, Math.min(apiInfoWithSource.length(), MAX_TOTAL_SIZE - currentSize));
+                }
+            } else {
+                processedContent = apiInfoWithSource;
+            }
+            
+            CollectedInfo info = new CollectedInfo("API_INFO", "API information and source code", processedContent, InfoType.SOURCE_CODE, 0.9);
+            collectedInfos.add(info);
+            currentSize += processedContent.length();
+            
+        } catch (Exception e) {
+            LoggerUtil.logExec(Level.WARNING, "API info extraction failed: " + e.getMessage() + ", using original content");
+            // Fallback to original content if extraction fails
+            String content = apiInfoWithSource.substring(0, Math.min(apiInfoWithSource.length(), MAX_TOTAL_SIZE - currentSize));
+            CollectedInfo info = new CollectedInfo("API_INFO", "API information and source code", content, InfoType.SOURCE_CODE, 0.9);
             collectedInfos.add(info);
             currentSize += content.length();
         }
     }
     
     /**
-     * 收集Web信息（异步版）- 并行获取完整网页内容
+     * Collect Web information (asynchronous version) - fetch full web page content in parallel
      */
-    private void collectWebInfo(AnalysisResult analysis, String testOutput) {
+    private void collectWebInfo(AnalysisResult analysis, String testCode, String testOutput) {
         if (analysis.symptoms == null || analysis.symptoms.isEmpty()) return;
         
         try {
@@ -344,21 +359,21 @@ public class InformationCollectionAgent extends Agent {
             if (response.isSuccess()) {
                 List<SearchResult> results = response.getResult();
                 
-                // 创建线程池执行异步任务
+                // Create a thread pool to execute asynchronous tasks
                 ExecutorService executor = Executors.newFixedThreadPool(Math.min(results.size(), 3));
                 List<CompletableFuture<CollectedInfo>> futures = new ArrayList<>();
                 
                 try {
-                    // 为每个搜索结果创建异步任务
+                    // Create an asynchronous task for each search result
                     for (SearchResult result : results) {
                         CompletableFuture<CollectedInfo> future = CompletableFuture.supplyAsync(() -> {
-                            return extractSingleWebContent(result);
+                            return extractSingleWebContent(result, analysis, testCode, testOutput);
                         }, executor);
                         
                         futures.add(future);
                     }
                     
-                    // 等待所有任务完成，设置30秒超时
+                    // Wait for all tasks to complete, set a 30-second timeout
                     CompletableFuture<Void> allTasks = CompletableFuture.allOf(
                         futures.toArray(new CompletableFuture[0])
                     );
@@ -366,31 +381,31 @@ public class InformationCollectionAgent extends Agent {
                     try {
                         allTasks.get(30, TimeUnit.SECONDS);
                     } catch (TimeoutException e) {
-                        LoggerUtil.logExec(Level.WARNING, "网页内容提取超时，使用已完成的结果");
-                        // 不取消任务，让已完成的继续
+                        LoggerUtil.logExec(Level.WARNING, "Web page content extraction timed out, using completed results");
+                        // Do not cancel tasks, let completed ones continue
                     }
                     
-                    // 收集已完成的结果
+                    // Collect completed results
                     for (CompletableFuture<CollectedInfo> future : futures) {
                         if (currentSize >= MAX_TOTAL_SIZE) break;
                         
                         try {
                             if (future.isDone() && !future.isCompletedExceptionally()) {
-                                CollectedInfo info = future.get(1, TimeUnit.SECONDS); // 很短的超时，因为已经完成
+                                CollectedInfo info = future.get(1, TimeUnit.SECONDS); // Very short timeout, as it's already done
                                 if (info != null && currentSize + info.content.length() <= MAX_TOTAL_SIZE) {
                                     collectedInfos.add(info);
                                     currentSize += info.content.length();
-                                    LoggerUtil.logExec(Level.INFO, "异步添加网页内容: " + info.source + 
-                                        " (长度: " + info.content.length() + ")");
+                                    LoggerUtil.logExec(Level.INFO, "Asynchronously added web page content: " + info.source + 
+                                        " (length: " + info.content.length() + ")");
                                 }
                             }
                         } catch (Exception e) {
-                            LoggerUtil.logExec(Level.WARNING, "获取异步结果失败: " + e.getMessage());
+                            LoggerUtil.logExec(Level.WARNING, "Failed to get asynchronous result: " + e.getMessage());
                         }
                     }
                     
                 } finally {
-                    // 关闭线程池
+                    // Shut down the thread pool
                     executor.shutdown();
                     try {
                         if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
@@ -403,83 +418,88 @@ public class InformationCollectionAgent extends Agent {
                 }
             }
         } catch (Exception e) {
-            LoggerUtil.logExec(Level.WARNING, "异步Web搜索失败: " + e.getMessage());
+            LoggerUtil.logExec(Level.WARNING, "Asynchronous web search failed: " + e.getMessage());
         }
     }
     
     /**
-     * 提取单个网页内容（用于异步调用）
+     * Extract single web page content (for asynchronous calls)
      */
-    private CollectedInfo extractSingleWebContent(SearchResult result) {
+    private CollectedInfo extractSingleWebContent(SearchResult result, AnalysisResult analysis, String testCode, String testOutput) {
         WebContentExtractor contentExtractor = null;
         try {
-            LoggerUtil.logExec(Level.INFO, "异步提取网页内容: " + result.getUrl());
+            LoggerUtil.logExec(Level.INFO, "Asynchronously extracting web page content: " + result.getUrl());
             
             contentExtractor = new WebContentExtractor(true);
             ToolResponse<String> contentResponse = contentExtractor.execute(result.getUrl());
             
+            String fullContent = "";
+            if (contentResponse.isSuccess() && contentResponse.getResult() != null) {
+                fullContent = contentResponse.getResult();
+            }
+
+            // Apply new logic: omit if too short, summarize if too long
+            if (fullContent.length() < 50) {
+                LoggerUtil.logExec(Level.INFO, "Web page content too short, omitting: " + result.getUrl());
+                return null; // Omit very short content
+            }
+
+            String processedContent;
+            if (fullContent.length() > 4096) {
+                LoggerUtil.logExec(Level.INFO, "Web page content too long, summarizing: " + result.getUrl());
+                // Use DoubaoFlash to summarize/extract
+                String prompt = PromptGen.generateSummarizeWebSearchResultPrompt(
+                    analysis.symptoms, testCode, testOutput, fullContent, 4096 // Max size for summary
+                );
+                processedContent = OpenAI.DoubaoFlash.messageCompletion(prompt, 0.5, false);
+                if (processedContent == null || processedContent.trim().isEmpty()) {
+                    LoggerUtil.logExec(Level.WARNING, "Summarization returned empty content for: " + result.getUrl());
+                    return null; // If summarization fails or returns empty, omit.
+                }
+            } else {
+                processedContent = fullContent; // Use as is
+            }
+
             StringBuilder webContent = new StringBuilder();
             webContent.append("## ").append(result.getName()).append("\n\n");
-            webContent.append("**来源**: ").append(result.getUrl()).append("\n\n");
+            webContent.append("**Source**: ").append(result.getUrl()).append("\n\n");
+            webContent.append(processedContent);
             
-            if (contentResponse.isSuccess()) {
-                String fullContent = contentResponse.getResult();
-                
-                if (fullContent != null && !fullContent.trim().isEmpty()) {
-                    // 限制单个网页的内容长度
-                    if (fullContent.length() > 8000) {
-                        fullContent = fullContent.substring(0, 8000) + "...(网页内容已截断)";
-                    }
-                    webContent.append(fullContent);
-                    
-                    String infoId = "WEB_" + result.getUrl().hashCode();
-                    return new CollectedInfo(infoId, "网页: " + result.getName(), 
-                        webContent.toString(), InfoType.WEB_SEARCH, 0.7);
-                }
-            }
-            
-            // 内容提取失败，使用摘要作为备选
-            LoggerUtil.logExec(Level.INFO, "网页内容提取失败，使用摘要: " + result.getUrl());
-            StringBuilder fallbackContent = new StringBuilder();
-            fallbackContent.append("**标题**: ").append(result.getName()).append("\n");
-            fallbackContent.append("**来源**: ").append(result.getUrl()).append("\n");
-            fallbackContent.append("**摘要**: ").append(result.getSnippet()).append("\n");
-            
-            String infoId = "WEB_FALLBACK_" + result.getUrl().hashCode();
-            return new CollectedInfo(infoId, "网页摘要: " + result.getName(), 
-                fallbackContent.toString(), InfoType.WEB_SEARCH, 0.5);
+            String infoId = "WEB_" + result.getUrl().hashCode();
+            return new CollectedInfo(infoId, "Web Page: " + result.getName(), 
+                webContent.toString(), InfoType.WEB_SEARCH, 0.7);
                 
         } catch (Exception e) {
-            LoggerUtil.logExec(Level.WARNING, "单个网页内容提取异常: " + result.getUrl() + " - " + e.getMessage());
+            LoggerUtil.logExec(Level.WARNING, "Exception in extracting single web page content: " + result.getUrl() + " - " + e.getMessage());
             
-            // 发生异常时，返回基本摘要信息
+            // When an exception occurs, return basic summary information
             StringBuilder errorContent = new StringBuilder();
-            errorContent.append("**标题**: ").append(result.getName()).append("\n");
-            errorContent.append("**来源**: ").append(result.getUrl()).append("\n");
-            errorContent.append("**摘要**: ").append(result.getSnippet()).append("\n");
-            errorContent.append("**注意**: 完整内容提取失败\n");
+            errorContent.append("**Title**: ").append(result.getName()).append("\n");
+            errorContent.append("**Source**: ").append(result.getUrl()).append("\n");
+            errorContent.append("**Summary**: ").append(result.getSnippet()).append("\n");
+            errorContent.append("**Note**: Full content extraction failed\n");
             
             String infoId = "WEB_ERROR_" + result.getUrl().hashCode();
-            return new CollectedInfo(infoId, "网页摘要: " + result.getName(), 
+            return new CollectedInfo(infoId, "Web Page Summary: " + result.getName(), 
                 errorContent.toString(), InfoType.WEB_SEARCH, 0.3);
                 
         } finally {
-            // 确保WebContentExtractor被正确关闭
+            // Ensure WebContentExtractor is properly closed
             if (contentExtractor != null) {
                 try {
                     contentExtractor.close();
                 } catch (Exception e) {
-                    LoggerUtil.logExec(Level.WARNING, "关闭WebContentExtractor失败: " + e.getMessage());
+                    LoggerUtil.logExec(Level.WARNING, "Failed to close WebContentExtractor: " + e.getMessage());
                 }
             }
         }
     }
     
     /**
-     * 判断信息是否足够 - 使用确定性工具选择
+     * Determine if the information is sufficient - use deterministic tool selection
      */
     private boolean isInformationSufficient(AnalysisResult analysis, String testCode, String testOutput, int iteration) {
-        // 第一次迭代总是不够，给机会优化
+        // The first iteration is always not enough, giving a chance to optimize
         if (iteration == 1 && collectedInfos.size() < 3) {
             return false;
         }
@@ -491,32 +511,32 @@ public class InformationCollectionAgent extends Agent {
             
             if (toolCalls != null && !toolCalls.isEmpty()) {
                 String decision = toolCalls.get(0).toolName;
-                LoggerUtil.logExec(Level.INFO, "信息充分性判断: " + decision);
+                LoggerUtil.logExec(Level.INFO, "Information sufficiency judgment: " + decision);
                 return INFO_SUFFICIENT.getName().equals(decision);
             } else {
-                LoggerUtil.logExec(Level.WARNING, "LLM未返回决策，默认为信息不足");
+                LoggerUtil.logExec(Level.WARNING, "LLM did not return a decision, defaulting to insufficient information");
                 return false;
             }
                    
         } catch (Exception e) {
-            LoggerUtil.logExec(Level.WARNING, "信息充分性判断失败: " + e.getMessage());
-            // 如果判断失败，根据迭代次数决定
+            LoggerUtil.logExec(Level.WARNING, "Information sufficiency judgment failed: " + e.getMessage());
+            // If the judgment fails, decide based on the number of iterations
             return iteration >= 2;
         }
     }
     
     /**
-     * 重新分析和优化
+     * Re-analyze and optimize
      */
     private AnalysisResult refineAnalysis(AnalysisResult currentAnalysis, String testCode, String testOutput) {
         try {
             String refinePrompt = buildRefinePrompt(currentAnalysis, testCode, testOutput);
             String response = llm.messageCompletion(refinePrompt, 0.7, false);
             
-            // 解析优化后的分析结果
+            // Parse the optimized analysis results
             AnalysisResult refined = parseInitialInsight(response);
             
-            // 如果解析失败，保留原分析并添加一些补充查询
+            // If parsing fails, keep the original analysis and add some supplementary queries
             if (refined.relevantClasses.isEmpty() && refined.queries.isEmpty()) {
                 refined = currentAnalysis;
                 refined.queries.add("exception handling");
@@ -526,46 +546,46 @@ public class InformationCollectionAgent extends Agent {
             return refined;
             
         } catch (Exception e) {
-            LoggerUtil.logExec(Level.WARNING, "重新分析失败: " + e.getMessage());
+            LoggerUtil.logExec(Level.WARNING, "Re-analysis failed: " + e.getMessage());
             return currentAnalysis;
         }
     }
     
     /**
-     * 构建源码收集prompt
+     * Build the source code collection prompt
      */
     private String buildSourceCodePrompt(AnalysisResult analysis, String testCode) {
         StringBuilder prompt = new StringBuilder();
-        prompt.append("分析以下测试代码，决定需要搜索哪些源码：\n\n");
-        prompt.append("症状: ").append(analysis.symptoms).append("\n");
-        prompt.append("相关类: ").append(String.join(", ", analysis.relevantClasses)).append("\n\n");
-        prompt.append("测试代码:\n```java\n").append(testCode).append("\n```\n\n");
-        prompt.append("请选择最重要的源码搜索策略，优先搜索最相关的类和方法。");
+        prompt.append("Analyze the following test code to decide which source code to search for:\n\n");
+        prompt.append("Symptom: ").append(analysis.symptoms).append("\n");
+        prompt.append("Relevant classes: ").append(String.join(", ", analysis.relevantClasses)).append("\n\n");
+        prompt.append("Test code:\n```java\n").append(testCode).append("\n```\n\n");
+        prompt.append("Please select the most important source code search strategy, prioritizing the most relevant classes and methods.");
         return prompt.toString();
     }
     
     /**
-     * 构建JavaDoc收集prompt
+     * Build the JavaDoc collection prompt
      */
     private String buildJavaDocPrompt(AnalysisResult analysis, String testCode) {
         StringBuilder prompt = new StringBuilder();
-        prompt.append("分析以下测试代码，决定需要搜索哪些API文档：\n\n");
-        prompt.append("症状: ").append(analysis.symptoms).append("\n");
-        prompt.append("相关类: ").append(String.join(", ", analysis.relevantClasses)).append("\n\n");
-        prompt.append("测试代码:\n```java\n").append(testCode).append("\n```\n\n");
-        prompt.append("请选择最重要的API文档搜索策略。");
+        prompt.append("Analyze the following test code to decide which API documentation to search for:\n\n");
+        prompt.append("Symptom: ").append(analysis.symptoms).append("\n");
+        prompt.append("Relevant classes: ").append(String.join(", ", analysis.relevantClasses)).append("\n\n");
+        prompt.append("Test code:\n```java\n").append(testCode).append("\n```\n\n");
+        prompt.append("Please select the most important API documentation search strategy.");
         return prompt.toString();
     }
     
     /**
-     * 构建观察prompt
+     * Build the observation prompt
      */
     private String buildObservePrompt(AnalysisResult analysis, String testCode, String testOutput) {
         try {
-            // 构建收集信息摘要
+            // Build a summary of collected information
             StringBuilder collectedInfosStr = new StringBuilder();
             if (collectedInfos.isEmpty()) {
-                collectedInfosStr.append("尚未收集到信息\n");
+                collectedInfosStr.append("No information has been collected yet\n");
             } else {
                 for (int i = 0; i < Math.min(5, collectedInfos.size()); i++) {
                     CollectedInfo info = collectedInfos.get(i);
@@ -576,17 +596,17 @@ public class InformationCollectionAgent extends Agent {
             return PromptGen.generateBugVerifyObservePrompt(testCode, testOutput, 
                 collectedInfosStr.toString(), analysis.symptoms);
         } catch (TemplateException | IOException e) {
-            LoggerUtil.logExec(Level.WARNING, "生成observe prompt失败: " + e.getMessage());
-            return "根据收集的信息，判断是否足够分析测试失败原因。如果足够请回复'足够'，否则回复'不足够'。";
+            LoggerUtil.logExec(Level.WARNING, "Failed to generate observe prompt: " + e.getMessage());
+            return "Based on the collected information, determine if it is sufficient to analyze the cause of the test failure. If it is sufficient, please reply with 'Sufficient', otherwise reply with 'Insufficient'.";
         }
     }
     
     /**
-     * 构建重新分析prompt
+     * Build the re-analysis prompt
      */
     private String buildRefinePrompt(AnalysisResult analysis, String testCode, String testOutput) {
         try {
-            // 构建当前收集信息摘要
+            // Build a summary of the currently collected information
             StringBuilder currentInfosStr = new StringBuilder();
             for (CollectedInfo info : collectedInfos) {
                 currentInfosStr.append("- ").append(info.source).append("\n");
@@ -596,34 +616,134 @@ public class InformationCollectionAgent extends Agent {
                 analysis.symptoms, String.join(", ", analysis.relevantClasses),
                 String.join(", ", analysis.queries), currentInfosStr.toString());
         } catch (TemplateException | IOException e) {
-            LoggerUtil.logExec(Level.WARNING, "生成refine prompt失败: " + e.getMessage());
-            return "重新分析以下测试失败，提供更详细的症状描述和相关类：\n\n" + testCode;
+            LoggerUtil.logExec(Level.WARNING, "Failed to generate refine prompt: " + e.getMessage());
+            return "Re-analyze the following test failure, providing a more detailed description of the symptoms and relevant classes:\n\n" + testCode;
         }
     }
     
     /**
-     * 生成标题
+     * Generate title
      */
     private String generateTitle(String searchType, Map<String, Object> args) {
         switch (searchType) {
             case "by_class":
-                return "类: " + args.get("class_name");
+                return "Class: " + args.get("class_name");
             case "by_method":
-                return "方法: " + args.get("class_name") + "." + args.get("method_name");
+                return "Method: " + args.get("class_name") + "." + args.get("method_name");
             case "by_keyword":
-                return "关键词: " + args.get("keyword");
+                return "Keyword: " + args.get("keyword");
             case "by_package":
-                return "包: " + args.get("package_name");
+                return "Package: " + args.get("package_name");
             default:
-                return "搜索: " + searchType;
+                return "Search: " + searchType;
         }
     }
     
-    public void close() {
-        // 清理资源
+    /**
+     * Ranks and summarizes the collected information to fit within the size limit.
+     * This method skips reranking due to long text handling issues and uses original order.
+     * Then, it iterates through the list, adding documents to the final list until the size limit is approached.
+     * For individual documents that are too large, it splits them into chunks and uses an LLM to extract relevant parts from each chunk.
+     * @param analysis The analysis result containing bug symptoms.
+     * @param testCode The source code of the failing test.
+     * @param testOutput The output of the failing test.
+     * @return A list of collected information, ranked and summarized.
+     */
+    private List<CollectedInfo> rankAndSummarize(AnalysisResult analysis, String testCode, String testOutput) {
+        LoggerUtil.logExec(Level.INFO, "Starting ranking and summarization process (without reranking)");
+
+        // Skip reranking due to long text handling issues - use original order
+        LoggerUtil.logExec(Level.INFO, "Skipping reranking due to long text handling issues, using original order");
+        List<CollectedInfo> rankedInfos = new ArrayList<>(collectedInfos);
+
+        // Extract relevant parts and build the final context.
+        List<CollectedInfo> finalInfos = new ArrayList<>();
+        int finalSize = 0;
+        final int EXTRACTION_MODEL_CONTEXT_LIMIT = 40000; // Context limit for DoubaoFlash
+
+        for (CollectedInfo info : rankedInfos) {
+            // If the entire document fits within the remaining space, add it directly.
+            if (finalSize + info.content.length() <= MAX_TOTAL_SIZE) {
+                finalInfos.add(info);
+                finalSize += info.content.length();
+                continue;
+            }
+
+            // If there's no more space, stop processing.
+            if (finalSize >= MAX_TOTAL_SIZE) {
+                break;
+            }
+
+            // If the document is too large, extract relevant parts.
+            int remainingSpace = MAX_TOTAL_SIZE - finalSize;
+            StringBuilder extractedContent = new StringBuilder();
+
+            try {
+                // If the document itself is larger than the extraction model's context, process it in chunks.
+                if (info.content.length() > EXTRACTION_MODEL_CONTEXT_LIMIT) {
+                    LoggerUtil.logExec(Level.INFO, "Content for '" + info.source + "' is too large, processing in chunks.");
+                    for (int i = 0; i < info.content.length(); i += EXTRACTION_MODEL_CONTEXT_LIMIT) {
+                        int end = Math.min(i + EXTRACTION_MODEL_CONTEXT_LIMIT, info.content.length());
+                        String chunk = info.content.substring(i, end);
+                        String extractedPart = extractRelevantText(analysis, testCode, testOutput, chunk, remainingSpace - extractedContent.length());
+                        if (extractedPart != null && !extractedPart.isEmpty()) {
+                            extractedContent.append(extractedPart).append("\n");
+                        }
+                        if (extractedContent.length() >= remainingSpace) {
+                            break; // Stop if we have filled the remaining space.
+                        }
+                    }
+                } else {
+                    // Process the whole document at once.
+                    String extractedPart = extractRelevantText(analysis, testCode, testOutput, info.content, remainingSpace);
+                    if (extractedPart != null && !extractedPart.isEmpty()) {
+                        extractedContent.append(extractedPart);
+                    }
+                }
+
+                if (extractedContent.length() > 0) {
+                    String finalExtractedText = extractedContent.toString();
+                    // Truncate if the extracted content slightly exceeds the remaining space.
+                    if (finalExtractedText.length() > remainingSpace) {
+                        finalExtractedText = finalExtractedText.substring(0, remainingSpace);
+                    }
+                    CollectedInfo summarizedInfo = new CollectedInfo(
+                            info.id + "_extracted",
+                            info.source,
+                            finalExtractedText,
+                            info.type,
+                            info.relevanceScore
+                    );
+                    finalInfos.add(summarizedInfo);
+                    finalSize += finalExtractedText.length();
+                    LoggerUtil.logExec(Level.INFO, "Extracted relevant parts for: " + info.source);
+                }
+
+            } catch (Exception e) {
+                LoggerUtil.logExec(Level.WARNING, "Failed to extract relevant parts for: " + info.source + " - " + e.getMessage());
+            }
+        }
+
+        // Replace the original collectedInfos with the new, processed list.
+        collectedInfos.clear();
+        collectedInfos.addAll(finalInfos);
+        currentSize = finalSize;
+
+        LoggerUtil.logExec(Level.INFO, "Final processed information count: " + collectedInfos.size() + ", total size: " + currentSize);
+        outputDetailedReport();
+
+        return new ArrayList<>(collectedInfos);
     }
     
-    // 数据结构
+    private String extractRelevantText(AnalysisResult analysis, String testCode, String testOutput, String text, int maxSize) throws TemplateException, IOException {
+        OpenAI summarizerLlm = OpenAI.DoubaoFlash;
+        String prompt = PromptGen.generateSummarizeAndExtractPrompt(
+                analysis.symptoms, testCode, testOutput, text, maxSize
+        );
+        return summarizerLlm.messageCompletion(prompt, 0.5, false);
+    }
+
+    // Data structure
     private static class AnalysisResult {
         String symptoms = "";
         List<String> relevantClasses = new ArrayList<>();
@@ -647,14 +767,14 @@ public class InformationCollectionAgent extends Agent {
         
         @Override
         public String toString() {
-            return String.format("[%s] %s (相关性: %.2f)", type, source, relevanceScore);
+            return String.format("[%s] %s (Relevance: %.2f)", type, source, relevanceScore);
         }
     }
     
     public enum InfoType {
-        SOURCE_CODE("源码"),
-        JAVADOC("API文档"),
-        WEB_SEARCH("Web搜索");
+        SOURCE_CODE("Source Code"),
+        JAVADOC("API Documentation"),
+        WEB_SEARCH("Web Search");
         
         private final String displayName;
         

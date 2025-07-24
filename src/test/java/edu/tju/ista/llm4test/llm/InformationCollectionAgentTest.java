@@ -21,12 +21,12 @@ public class InformationCollectionAgentTest {
         agent = new InformationCollectionAgent(TEST_SOURCE_PATH, TEST_JAVADOC_PATH);
     }
     
-    @AfterEach
-    void tearDown() {
-        if (agent != null) {
-            agent.close();
-        }
-    }
+//    @AfterEach
+//    void tearDown() {
+//        if (agent != null) {
+//            agent.close();
+//        }
+//    }
     
     @Test
     public void testCollectInformation() {
