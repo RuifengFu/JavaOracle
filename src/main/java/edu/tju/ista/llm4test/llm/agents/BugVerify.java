@@ -621,6 +621,9 @@ public class BugVerify extends Agent {
                 actualTestCode, testOutput, hypothesesBuilder.toString(),
                 resultsBuilder.toString(), infoSourceBuilder.toString());
             
+            // 保存prompt到文件
+            savePromptToFile(prompt, config);
+            
             return llm.messageCompletion(prompt, 0.7, true);
         } catch (TemplateException | IOException e) {
             LoggerUtil.logExec(Level.SEVERE, "生成报告失败: " + e.getMessage());
@@ -749,7 +752,7 @@ public class BugVerify extends Agent {
     /**
      * 保存生成报告的完整prompt到文件
      */
-    private void savePromptToFile(String prompt, boolean hasTestCaseIssue, String testIssueHypothesisId) {
+    private void savePromptToFile(String prompt, AblationConfig config) {
         if (verifyContextFolder == null || testCaseName == null) return;
         
         try {
@@ -757,8 +760,16 @@ public class BugVerify extends Agent {
             Path promptsDir = verifyContextPath.resolve("prompts");
             Files.createDirectories(promptsDir);
             
-            // 直接保存prompt内容
-            String promptFileName = "generate_report_prompt.txt";
+            // 根据配置生成文件名
+            String promptFileName;
+            if (config.id == 0) {
+                // 非消融实验
+                promptFileName = "generate_report_prompt.txt";
+            } else {
+                // 消融实验配置
+                promptFileName = String.format("generate_report_prompt_config_%d.txt", config.id);
+            }
+            
             saveToFile(promptsDir.resolve(promptFileName).toString(), prompt);
             
             LoggerUtil.logExec(Level.INFO, "已保存生成报告的prompt: " + promptFileName);
