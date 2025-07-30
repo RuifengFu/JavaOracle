@@ -260,6 +260,226 @@ public class BugVerify extends Agent {
     }
     
     /**
+     * 增强验证流程 - 当初始验证返回bug时进行额外的验证步骤
+     * 
+     * 目标：通过多重验证和反方论证来确保bug判断的准确性
+     * 
+     * 流程：
+     * 1. 第一步：进行两次额外验证，确保每次都是bug
+     * 2. 第二步：生成测试用例问题解释，提供反方观点
+     * 3. 第三步：使用裁决模型判断哪一方正确
+     * 4. 如果裁决认为这是bug，继续进行分析；否则停止
+     * 
+     * @return 增强验证的结果JSON字符串
+     */
+    public String enhanceVerify() {
+        LoggerUtil.logExec(Level.INFO, "开始增强验证流程");
+        
+        // 前置条件检查：确保测试用例存在且被识别为bug
+        if (testCase == null || testCase.getResult() == null || !testCase.getResult().isBug()) {
+            LoggerUtil.logExec(Level.INFO, "测试用例不是bug或未设置，跳过增强验证");
+            return "{\"enhance_verify_result\": \"SKIPPED\", \"reason\": \"TestCase is not a bug\"}";
+        }
+        
+        Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
+        
+        // ===== 第一步：多重验证确保一致性 =====
+        // 目标：通过两次额外的验证来确保bug判断的稳定性
+        // 如果任何一次验证不认为是bug，则停止增强验证流程
+        List<String> verificationResults = new ArrayList<>();
+        List<String> nonBugResults = new ArrayList<>();
+        
+        for (int i = 1; i <= 2; i++) {
+            LoggerUtil.logExec(Level.INFO, "执行第 " + i + " 次额外验证");
+            
+            try {
+                // 重新执行验证，确保结果的一致性
+                testCase.verifyTestFail();
+
+
+                // 保存每次验证的详细结果到文件
+                saveToFile(verifyContextPath.resolve("enhance_verify_" + i + ".json").toString(),
+                        "{\"verification\": " + i + ", \"result\": \"" + (testCase.getResult().isBug() ? "BUG" : "NOT_BUG") +
+                        "\", \"message\": \"" + testCase.verifyMessage + "\"}");
+
+
+                if (testCase.getResult().isBug()) {
+                    verificationResults.add("验证 " + i + ": BUG - " + testCase.verifyMessage);
+                    LoggerUtil.logExec(Level.INFO, "第 " + i + " 次验证确认是bug");
+                } else {
+                    nonBugResults.add("验证 " + i + ": NOT_BUG - " + testCase.verifyMessage);
+                    LoggerUtil.logExec(Level.INFO, "第 " + i + " 次验证认为不是bug");
+                }
+
+            } catch (Exception e) {
+                LoggerUtil.logExec(Level.WARNING, "第 " + i + " 次验证失败: " + e.getMessage());
+                nonBugResults.add("验证 " + i + ": ERROR - " + e.getMessage());
+            }
+        }
+        
+        // 检查验证一致性：所有验证都必须认为是bug才能继续
+        boolean allBugResults = verificationResults.size() == 2;
+        
+        if (!allBugResults) {
+            LoggerUtil.logExec(Level.INFO, "增强验证失败：不是所有验证都认为是bug");
+            String result = "{\"enhance_verify_result\": \"FAILED\", \"reason\": \"Not all verifications confirmed bug\", " +
+                "\"verification_results\": " + verificationResults + ", " +
+                "\"non_bug_results\": " + nonBugResults + "}";
+            
+            saveToFile(verifyContextPath.resolve("enhance_verify_failed.json").toString(), result);
+            return result;
+        }
+        
+        LoggerUtil.logExec(Level.INFO, "所有验证都确认是bug，进入第二步：生成测试用例问题解释");
+        
+        // ===== 第二步：生成反方论证 =====
+        // 目标：专门寻找测试用例中的问题，提供反方观点
+        // 这有助于避免误判，确保bug判断的准确性
+        String testCaseIssueExplanation = generateTestCaseIssueExplanation();
+        
+        // ===== 第三步：裁决分析 =====
+        // 目标：使用K2模型作为公正的裁决者，比较双方论证
+        // 决定哪一方更有说服力：bug论证 vs 测试用例问题论证
+        String verdict = performVerdictAnalysis(testCaseIssueExplanation);
+        
+        // 保存完整的增强验证结果
+        String enhanceResult = "{\"enhance_verify_result\": \"COMPLETED\", " +
+            "\"verification_results\": " + verificationResults + ", " +
+            "\"testcase_issue_explanation\": \"" + testCaseIssueExplanation + "\", " +
+            "\"verdict\": " + verdict + "}";
+        
+        saveToFile(verifyContextPath.resolve("enhance_verify_result.json").toString(), enhanceResult);
+        
+        // ===== 第四步：基于裁决结果决定后续流程 =====
+        // 如果裁决确认是bug，继续完整的分析流程
+        // 如果裁决认为是测试用例问题，停止并返回增强验证结果
+        try {
+            ObjectMapper objectMapper = new ObjectMapper();
+            JsonNode verdictNode = objectMapper.readTree(verdict);
+            String verdictResult = verdictNode.path("verdict").asText();
+            
+            if ("BUG".equals(verdictResult)) {
+                LoggerUtil.logExec(Level.INFO, "裁决确认是bug，继续进行分析");
+                return analyze();
+            } else {
+                LoggerUtil.logExec(Level.INFO, "裁决认为不是bug，增强验证完成");
+                return enhanceResult;
+            }
+        } catch (Exception e) {
+            LoggerUtil.logExec(Level.WARNING, "解析裁决结果失败: " + e.getMessage());
+            return enhanceResult;
+        }
+    }
+    
+    /**
+     * 生成测试用例问题解释
+     * 
+     * 目标：专门分析测试用例中可能存在的问题，提供反方论证
+     * 
+     * 分析内容：
+     * - API使用是否正确
+     * - 测试逻辑是否有误
+     * - 测试设置是否合理
+     * - 假设是否成立
+     * - 期望是否合理
+     * 
+     * 作用：避免误判，确保bug判断的准确性
+     * 
+     * @return 测试用例问题解释的JSON字符串
+     */
+    private String generateTestCaseIssueExplanation() {
+        LoggerUtil.logExec(Level.INFO, "生成测试用例问题解释");
+        
+        try {
+            // 准备测试用例代码，添加行号以便LLM分析
+            String source = testCase.getSourceWithoutComment();
+            StringBuilder sb = new StringBuilder();
+            var lines = source.split("\n");
+            for (int i = 0; i < lines.length; i++) {
+                sb.append(i).append("\t:").append(lines[i]).append("\n");
+            }
+            var testcase = sb.toString();
+            
+            // 生成专门的测试用例问题分析prompt
+            String prompt = PromptGen.generateTestCaseIssueExplanationPrompt(testcase, testOutput, testCase.getApiDoc());
+            ArrayList<Tool<?>> tools = new ArrayList<>();
+            tools.add(new TestCaseIssueExplanationTool());
+            
+            // 调用LLM进行分析，确保至少返回一个工具调用
+            var callList = llm.funcCall(prompt, tools);
+            if (callList.isEmpty()) {
+                LoggerUtil.logExec(Level.WARNING, "No function call found in test case issue explanation");
+                return "{\"error\": \"No function call found\"}";
+            }
+            
+            // 提取分析结果
+            var explanationCall = callList.get(0);
+            return explanationCall.arguments.toString();
+            
+        } catch (Exception e) {
+            LoggerUtil.logExec(Level.WARNING, "生成测试用例问题解释失败: " + e.getMessage());
+            return "{\"error\": \"" + e.getMessage() + "\"}";
+        }
+    }
+    
+    /**
+     * 执行裁决分析
+     * 
+     * 目标：使用K2模型作为公正的裁决者，比较双方论证并做出最终判断
+     * 
+     * 裁决过程：
+     * 1. 收集bug论证（基于初始分析）
+     * 2. 收集测试用例问题论证（来自专门的分析）
+     * 3. 使用K2模型评估双方论证的强度
+     * 4. 基于证据质量和逻辑性做出公正判断
+     * 
+     * 裁决结果：
+     * - BUG：确认是JDK bug
+     * - TESTCASE_ISSUE：确认是测试用例问题
+     * - UNCLEAR：证据不足，无法确定
+     * 
+     * @param testCaseIssueExplanation 测试用例问题解释
+     * @return 裁决结果的JSON字符串
+     */
+    private String performVerdictAnalysis(String testCaseIssueExplanation) {
+        LoggerUtil.logExec(Level.INFO, "执行裁决分析");
+        
+        try {
+            // 准备测试用例代码，添加行号以便LLM分析
+            String source = testCase.getSourceWithoutComment();
+            StringBuilder sb = new StringBuilder();
+            var lines = source.split("\n");
+            for (int i = 0; i < lines.length; i++) {
+                sb.append(i).append("\t:").append(lines[i]).append("\n");
+            }
+            var testcase = sb.toString();
+            
+            // 构建bug论证：基于初始的bug分析结果
+            String bugArgument = initialAnalysis != null ? initialAnalysis : "{\"root_cause\": \"Initial analysis not available\"}";
+            
+            // 生成裁决分析prompt，包含双方论证
+            String prompt = PromptGen.generateVerdictAnalysisPrompt(testcase, testOutput, testCase.getApiDoc(), bugArgument, testCaseIssueExplanation);
+            ArrayList<Tool<?>> tools = new ArrayList<>();
+            tools.add(new VerdictTool());
+            
+            // 调用K2模型进行裁决分析，确保至少返回一个工具调用
+            var callList = llm.funcCall(prompt, tools);
+            if (callList.isEmpty()) {
+                LoggerUtil.logExec(Level.WARNING, "No function call found in verdict analysis");
+                return "{\"error\": \"No function call found\"}";
+            }
+            
+            // 提取裁决结果
+            var verdictCall = callList.get(0);
+            return verdictCall.arguments.toString();
+            
+        } catch (Exception e) {
+            LoggerUtil.logExec(Level.WARNING, "执行裁决分析失败: " + e.getMessage());
+            return "{\"error\": \"" + e.getMessage() + "\"}";
+        }
+    }
+    
+    /**
      * 过滤LLM响应中的思维链标签
      * @param response LLM响应内容
      * @return 过滤后的内容
@@ -969,7 +1189,8 @@ public class BugVerify extends Agent {
                             LoggerUtil.logResult(Level.SEVERE, testcase.getFile().getAbsolutePath() + ": 无法获取测试输出");
                         }
 
-                        testcase.verifyTestFail();
+
+                        agent.enhanceVerify();
                         if (testcase.getResult().isBug()) {
                             LoggerUtil.logResult(Level.INFO, "测试用例存在bug: " + testCaseName + "\n" + testcase.verifyMessage);
                         } else {

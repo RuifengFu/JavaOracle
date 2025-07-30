@@ -346,7 +346,9 @@ public class TestCase {
             String prompt = PromptGen.generatePrompt("RootCause", dataModel);
             ArrayList<Tool<?>> tools = new ArrayList<>();
             tools.add(new RootCauseOutputTool());
-            var callList = OpenAI.K2.funcCall(prompt, tools);
+            var result = OpenAI.K2.funcCallWithContent(prompt, tools);
+            var callList = result.toolCalls();
+            var content = result.content();
             if (callList.isEmpty()) {
                 LoggerUtil.logExec(Level.WARNING, "No function call found in the response");
                 this.result.setKind(TestResultKind.MAYBE_TEST_FAIL);
@@ -369,7 +371,7 @@ public class TestCase {
             } else {
                 this.result.setKind(TestResultKind.MAYBE_TEST_FAIL);
             }
-            verifyMessage = arguments.toString();
+            verifyMessage = content + "\n" + arguments.toString();
         } catch(Exception e) {
             LoggerUtil.logExec(Level.WARNING, "Verifying test case failed: " + file + "\n" + e.getMessage());
             this.result.setKind(TestResultKind.MAYBE_TEST_FAIL);

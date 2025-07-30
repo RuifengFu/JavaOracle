@@ -68,6 +68,10 @@ public class PromptGen {
             TEMPLATE_MAP.put("TestCaseObserveAndDecide", loadResourceAsString("/prompt/TestCaseObserveAndDecide.txt"));
             TEMPLATE_MAP.put("WorkspacePreparation", loadResourceAsString("/prompt/WorkspacePreparation.txt"));
             TEMPLATE_MAP.put("FixVerificationTestCase", loadResourceAsString("/prompt/FixVerificationTestCase.txt"));
+            
+            // EnhanceVerify 相关模板
+            TEMPLATE_MAP.put("TestCaseIssueExplanation", loadResourceAsString("/prompt/TestCaseIssueExplanation.txt"));
+            TEMPLATE_MAP.put("VerdictAnalysis", loadResourceAsString("/prompt/VerdictAnalysis.txt"));
         } catch (IOException e) {
             throw new RuntimeException("Failed to load prompt templates from resources", e);
         }
@@ -256,5 +260,24 @@ public class PromptGen {
         dataModel.put("hypothesis", hypothesis);
         dataModel.put("errorMessage", errorMessage);
         return generatePrompt("FixVerificationTestCase", dataModel);
+    }
+
+    // EnhanceVerify 相关便捷方法
+    public static String generateTestCaseIssueExplanationPrompt(String testCase, String testOutput, String apiDocs) throws TemplateException, IOException {
+        Map<String, Object> dataModel = new HashMap<>();
+        dataModel.put("testcase", testCase);
+        dataModel.put("testOutput", testOutput);
+        dataModel.put("apiDocs", apiDocs != null ? apiDocs : "");
+        return generatePrompt("TestCaseIssueExplanation", dataModel);
+    }
+
+    public static String generateVerdictAnalysisPrompt(String testCase, String testOutput, String apiDocs, String bugArgument, String testcaseArgument) throws TemplateException, IOException {
+        Map<String, Object> dataModel = new HashMap<>();
+        dataModel.put("testcase", testCase);
+        dataModel.put("testOutput", testOutput);
+        dataModel.put("apiDocs", apiDocs != null ? apiDocs : "");
+        dataModel.put("bugArgument", bugArgument != null ? bugArgument : "");
+        dataModel.put("testcaseArgument", testcaseArgument != null ? testcaseArgument : "");
+        return generatePrompt("VerdictAnalysis", dataModel);
     }
 }
