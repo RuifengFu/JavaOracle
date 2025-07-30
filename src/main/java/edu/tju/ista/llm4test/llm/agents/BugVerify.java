@@ -438,18 +438,9 @@ public class BugVerify extends Agent {
                 return null;
             }
             
-            // 返回完整的推理过程和工具调用结果
-            StringBuilder fullResult = new StringBuilder();
-            fullResult.append("=== 推理过程 ===\n");
-            fullResult.append(content).append("\n\n");
-            fullResult.append("=== 工具调用结果 ===\n");
-            for (int i = 0; i < callList.size(); i++) {
-                var call = callList.get(i);
-                fullResult.append("工具调用 ").append(i + 1).append(":\n");
-                fullResult.append("函数名: ").append(call.toolName).append("\n");
-                fullResult.append("参数: ").append(call.arguments).append("\n\n");
-            }
-            return fullResult.toString();
+            // 提取分析结果
+            var explanationCall = callList.get(0);
+            return content + "\n" + explanationCall.arguments.toString();
             
         } catch (Exception e) {
             LoggerUtil.logExec(Level.WARNING, "生成测试用例问题解释失败: " + e.getMessage());
