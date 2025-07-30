@@ -270,15 +270,15 @@ public class BugVerify extends Agent {
      * 3. 第三步：使用裁决模型判断哪一方正确
      * 4. 如果裁决认为这是bug，继续进行分析；否则停止
      * 
-     * @return 增强验证的结果JSON字符串
+     * @return 增强验证的结果：true表示确认是bug，false表示不是bug或验证失败
      */
-    public String enhanceVerify() {
+    public boolean enhanceVerify() {
         LoggerUtil.logExec(Level.INFO, "开始增强验证流程");
         
         // 前置条件检查：确保测试用例存在且被识别为bug
         if (testCase == null || testCase.getResult() == null || !testCase.getResult().isBug()) {
             LoggerUtil.logExec(Level.INFO, "测试用例不是bug或未设置，跳过增强验证");
-            return "{\"enhance_verify_result\": \"SKIPPED\", \"reason\": \"TestCase is not a bug\"}";
+            return false;
         }
         
         Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
@@ -296,12 +296,10 @@ public class BugVerify extends Agent {
                 // 重新执行验证，确保结果的一致性
                 testCase.verifyTestFail();
 
-
                 // 保存每次验证的详细结果到文件
-                saveToFile(verifyContextPath.resolve("enhance_verify_" + i + ".json").toString(),
-                        "{\"verification\": " + i + ", \"result\": \"" + (testCase.getResult().isBug() ? "BUG" : "NOT_BUG") +
-                        "\", \"message\": \"" + testCase.verifyMessage + "\"}");
-
+                String verificationResult = "{\"verification\": " + i + ", \"result\": \"" + (testCase.getResult().isBug() ? "BUG" : "NOT_BUG") +
+                        "\", \"message\": \"" + testCase.verifyMessage + "\"}";
+                saveToFile(verifyContextPath.resolve("enhance_verify_" + i + ".json").toString(), verificationResult);
 
                 if (testCase.getResult().isBug()) {
                     verificationResults.add("验证 " + i + ": BUG - " + testCase.verifyMessage);
@@ -314,6 +312,10 @@ public class BugVerify extends Agent {
             } catch (Exception e) {
                 LoggerUtil.logExec(Level.WARNING, "第 " + i + " 次验证失败: " + e.getMessage());
                 nonBugResults.add("验证 " + i + ": ERROR - " + e.getMessage());
+                
+                // 保存错误信息到文件
+                String errorResult = "{\"verification\": " + i + ", \"result\": \"ERROR\", \"message\": \"" + e.getMessage() + "\"}";
+                saveToFile(verifyContextPath.resolve("enhance_verify_" + i + "_error.json").toString(), errorResult);
             }
         }
         
@@ -322,12 +324,21 @@ public class BugVerify extends Agent {
         
         if (!allBugResults) {
             LoggerUtil.logExec(Level.INFO, "增强验证失败：不是所有验证都认为是bug");
-            String result = "{\"enhance_verify_result\": \"FAILED\", \"reason\": \"Not all verifications confirmed bug\", " +
-                "\"verification_results\": " + verificationResults + ", " +
-                "\"non_bug_results\": " + nonBugResults + "}";
             
-            saveToFile(verifyContextPath.resolve("enhance_verify_failed.json").toString(), result);
-            return result;
+            // 保存验证失败结果
+            StringBuilder failureSummary = new StringBuilder();
+            failureSummary.append("# 增强验证失败\n\n");
+            failureSummary.append("## 验证结果\n");
+            for (String result : verificationResults) {
+                failureSummary.append("- ").append(result).append("\n");
+            }
+            failureSummary.append("\n## 非Bug结果\n");
+            for (String result : nonBugResults) {
+                failureSummary.append("- ").append(result).append("\n");
+            }
+            saveToFile(verifyContextPath.resolve("enhance_verify_failed.md").toString(), failureSummary.toString());
+            
+            return false;
         }
         
         LoggerUtil.logExec(Level.INFO, "所有验证都确认是bug，进入第二步：生成测试用例问题解释");
@@ -337,37 +348,50 @@ public class BugVerify extends Agent {
         // 这有助于避免误判，确保bug判断的准确性
         String testCaseIssueExplanation = generateTestCaseIssueExplanation();
         
+        // 保存测试用例问题解释结果
+        if (testCaseIssueExplanation != null && !testCaseIssueExplanation.isEmpty()) {
+            saveToFile(verifyContextPath.resolve("testcase_issue_explanation.txt").toString(), testCaseIssueExplanation);
+        } else {
+            LoggerUtil.logExec(Level.WARNING, "测试用例问题解释生成失败");
+            saveToFile(verifyContextPath.resolve("testcase_issue_explanation_failed.txt").toString(), "生成失败");
+        }
+        
         // ===== 第三步：裁决分析 =====
         // 目标：使用K2模型作为公正的裁决者，比较双方论证
         // 决定哪一方更有说服力：bug论证 vs 测试用例问题论证
         String verdict = performVerdictAnalysis(testCaseIssueExplanation);
         
-        // 保存完整的增强验证结果
-        String enhanceResult = "{\"enhance_verify_result\": \"COMPLETED\", " +
-            "\"verification_results\": " + verificationResults + ", " +
-            "\"testcase_issue_explanation\": \"" + testCaseIssueExplanation + "\", " +
-            "\"verdict\": " + verdict + "}";
-        
-        saveToFile(verifyContextPath.resolve("enhance_verify_result.json").toString(), enhanceResult);
+        // 保存裁决分析结果
+        if (verdict != null && !verdict.isEmpty()) {
+            saveToFile(verifyContextPath.resolve("verdict_analysis.txt").toString(), verdict);
+        } else {
+            LoggerUtil.logExec(Level.WARNING, "裁决分析生成失败");
+            saveToFile(verifyContextPath.resolve("verdict_analysis_failed.txt").toString(), "生成失败");
+        }
         
         // ===== 第四步：基于裁决结果决定后续流程 =====
         // 如果裁决确认是bug，继续完整的分析流程
         // 如果裁决认为是测试用例问题，停止并返回增强验证结果
         try {
-            ObjectMapper objectMapper = new ObjectMapper();
-            JsonNode verdictNode = objectMapper.readTree(verdict);
-            String verdictResult = verdictNode.path("verdict").asText();
-            
-            if ("BUG".equals(verdictResult)) {
-                LoggerUtil.logExec(Level.INFO, "裁决确认是bug，继续进行分析");
-                return analyze();
+            if (verdict != null && !verdict.isEmpty()) {
+                ObjectMapper objectMapper = new ObjectMapper();
+                JsonNode verdictNode = objectMapper.readTree(verdict);
+                String verdictResult = verdictNode.path("verdict").asText();
+                
+                if ("BUG".equals(verdictResult)) {
+                    LoggerUtil.logExec(Level.INFO, "裁决确认是bug，继续进行分析");
+                    return true;
+                } else {
+                    LoggerUtil.logExec(Level.INFO, "裁决认为不是bug，增强验证完成");
+                    return false;
+                }
             } else {
-                LoggerUtil.logExec(Level.INFO, "裁决认为不是bug，增强验证完成");
-                return enhanceResult;
+                LoggerUtil.logExec(Level.WARNING, "裁决结果为空，无法判断");
+                return false;
             }
         } catch (Exception e) {
             LoggerUtil.logExec(Level.WARNING, "解析裁决结果失败: " + e.getMessage());
-            return enhanceResult;
+            return false;
         }
     }
     
@@ -385,7 +409,7 @@ public class BugVerify extends Agent {
      * 
      * 作用：避免误判，确保bug判断的准确性
      * 
-     * @return 测试用例问题解释的JSON字符串
+     * @return 测试用例问题解释的JSON字符串，失败时返回null
      */
     private String generateTestCaseIssueExplanation() {
         LoggerUtil.logExec(Level.INFO, "生成测试用例问题解释");
@@ -406,19 +430,30 @@ public class BugVerify extends Agent {
             tools.add(new TestCaseIssueExplanationTool());
             
             // 调用LLM进行分析，确保至少返回一个工具调用
-            var callList = llm.funcCall(prompt, tools);
+            var result = llm.funcCallWithContent(prompt, tools);
+            var callList = result.toolCalls();
+            var content = result.content();
             if (callList.isEmpty()) {
                 LoggerUtil.logExec(Level.WARNING, "No function call found in test case issue explanation");
-                return "{\"error\": \"No function call found\"}";
+                return null;
             }
             
-            // 提取分析结果
-            var explanationCall = callList.get(0);
-            return explanationCall.arguments.toString();
+            // 返回完整的推理过程和工具调用结果
+            StringBuilder fullResult = new StringBuilder();
+            fullResult.append("=== 推理过程 ===\n");
+            fullResult.append(content).append("\n\n");
+            fullResult.append("=== 工具调用结果 ===\n");
+            for (int i = 0; i < callList.size(); i++) {
+                var call = callList.get(i);
+                fullResult.append("工具调用 ").append(i + 1).append(":\n");
+                fullResult.append("函数名: ").append(call.toolName).append("\n");
+                fullResult.append("参数: ").append(call.arguments).append("\n\n");
+            }
+            return fullResult.toString();
             
         } catch (Exception e) {
             LoggerUtil.logExec(Level.WARNING, "生成测试用例问题解释失败: " + e.getMessage());
-            return "{\"error\": \"" + e.getMessage() + "\"}";
+            return null;
         }
     }
     
@@ -439,7 +474,7 @@ public class BugVerify extends Agent {
      * - UNCLEAR：证据不足，无法确定
      * 
      * @param testCaseIssueExplanation 测试用例问题解释
-     * @return 裁决结果的JSON字符串
+     * @return 裁决结果的JSON字符串，失败时返回null
      */
     private String performVerdictAnalysis(String testCaseIssueExplanation) {
         LoggerUtil.logExec(Level.INFO, "执行裁决分析");
@@ -463,19 +498,21 @@ public class BugVerify extends Agent {
             tools.add(new VerdictTool());
             
             // 调用K2模型进行裁决分析，确保至少返回一个工具调用
-            var callList = llm.funcCall(prompt, tools);
+            var result = llm.funcCallWithContent(prompt, tools);
+            var callList = result.toolCalls();
+            var content = result.content();
             if (callList.isEmpty()) {
                 LoggerUtil.logExec(Level.WARNING, "No function call found in verdict analysis");
-                return "{\"error\": \"No function call found\"}";
+                return null;
             }
             
             // 提取裁决结果
             var verdictCall = callList.get(0);
-            return verdictCall.arguments.toString();
+            return content + "\n" + verdictCall.arguments.toString();
             
         } catch (Exception e) {
             LoggerUtil.logExec(Level.WARNING, "执行裁决分析失败: " + e.getMessage());
-            return "{\"error\": \"" + e.getMessage() + "\"}";
+            return null;
         }
     }
     
@@ -1190,10 +1227,11 @@ public class BugVerify extends Agent {
                         }
 
 
-                        agent.enhanceVerify();
-                        if (testcase.getResult().isBug()) {
+                        boolean isBug = agent.enhanceVerify();
+                        if (isBug) {
                             LoggerUtil.logResult(Level.INFO, "测试用例存在bug: " + testCaseName + "\n" + testcase.verifyMessage);
                         } else {
+                            LoggerUtil.logResult(Level.INFO, "测试用例不是bug: " + testCaseName);
                             return null;
                         }
 
