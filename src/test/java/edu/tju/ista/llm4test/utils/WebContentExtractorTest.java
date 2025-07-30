@@ -321,6 +321,13 @@ public class WebContentExtractorTest {
         }
     }
 
+    @Test
+    @DisplayName("test w3c")
+    void testW3c() {
+        var content = extractor.extractContent("https://www.w3.org/TR/xpath-10");
+        System.out.println(content);
+    }
+
     static boolean hasApiKey() {
         return apiKey != null && !apiKey.trim().isEmpty();
     }
