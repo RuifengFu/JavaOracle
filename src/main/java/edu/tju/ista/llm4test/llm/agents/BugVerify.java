@@ -190,19 +190,22 @@ public class BugVerify extends Agent {
         
         // 保存收集到的信息
         saveCollectedInfo();
-        
-        // 3. 设置HypothesisAgent工作环境
-        hypothesisAgent.setWorkingEnvironment(verifyContextPath.toString(), testCaseName);
-        
-        // 4. 形成假设
-        List<String> hypotheses = hypothesisAgent.formHypotheses(testCode, testOutput, 
-            buildCollectedInformationString());
-        LoggerUtil.logExec(Level.INFO, "形成 " + hypotheses.size() + " 个假设");
-        
-        // 5. 验证假设
-        Map<String, TestResult> verificationResults = hypothesisAgent.verifyHypotheses(testCode);
-        LoggerUtil.logExec(Level.INFO, "验证完成，结果数: " + verificationResults.size());
-        
+        List<String> hypotheses = new ArrayList<>();
+        Map<String, TestResult> verificationResults = new HashMap<>();
+        if (edu.tju.ista.llm4test.config.GlobalConfig.isIncludeHypothesis()) {
+            // 3. 设置HypothesisAgent工作环境
+            hypothesisAgent.setWorkingEnvironment(verifyContextPath.toString(), testCaseName);
+
+            // 4. 形成假设
+            hypotheses = hypothesisAgent.formHypotheses(testCode, testOutput,
+                    buildCollectedInformationString());
+            LoggerUtil.logExec(Level.INFO, "形成 " + hypotheses.size() + " 个假设");
+
+            // 5. 验证假设
+            verificationResults = hypothesisAgent.verifyHypotheses(testCode);
+            LoggerUtil.logExec(Level.INFO, "验证完成，结果数: " + verificationResults.size());
+        }
+
         // 6. 形成结论和报告
         String reportJson = generateReport(hypotheses, verificationResults);
         LoggerUtil.logExec(Level.INFO, "Bug验证报告已生成");
