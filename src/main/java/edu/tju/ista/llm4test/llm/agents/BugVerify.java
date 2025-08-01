@@ -67,7 +67,7 @@ public class BugVerify extends Agent {
     private String testOutput;
     private String initialAnalysis;
     private Map<String, Object> collectedInfo = new HashMap<>();
-    private String conclusion;
+
     private String enhanceVerifyFailureReason = "Unknown";
     
     
@@ -138,29 +138,46 @@ public class BugVerify extends Agent {
      */
     private void createVerifyContextFolder() {
         try {
-            // 提取测试类名作为文件夹名称
-            testCaseName = extractClassNameFromCode(testCode);
-            if (testCaseName == null) {
-                testCaseName = "UnknownTest";
+            // 提取类名和包名
+            String className = extractClassNameFromCode(testCode);
+            if (className == null || className.isEmpty()) {
+                className = "UnknownTest";
+            }
+            String packageName = extractPackageNameFromCode(testCode);
+
+            // 初始测试用例名称
+            this.testCaseName = className;
+
+            // 检查重名，如果重名则使用包名.类名
+            Path bugDir = Paths.get(bugReportPath, "bug");
+            Path testcaseDir = Paths.get(bugReportPath, "testcase");
+            
+            Path potentialBugPath = bugDir.resolve(this.testCaseName);
+            Path potentialTestcasePath = testcaseDir.resolve(this.testCaseName);
+
+            if (Files.exists(potentialBugPath) || Files.exists(potentialTestcasePath)) {
+                if (packageName != null && !packageName.isEmpty()) {
+                    this.testCaseName = packageName + "." + className;
+                }
             }
             
             // 创建以时间戳为后缀的验证上下文文件夹
             String timestamp = String.valueOf(System.currentTimeMillis());
             verifyContextFolder = "VerifyContext_" + timestamp;
             
-                    // 创建完整路径
-        Path testCasePath = Paths.get(bugReportPath, testCaseName);
-        Path verifyContextPath = testCasePath.resolve(verifyContextFolder);
-        Files.createDirectories(verifyContextPath);
+            // 创建完整路径 (始终在testcase下)
+            Path testCasePath = Paths.get(bugReportPath, "testcase", this.testCaseName);
+            Path verifyContextPath = testCasePath.resolve(verifyContextFolder);
+            Files.createDirectories(verifyContextPath);
         
-        // 保存测试用例和输出
-        saveToFile(testCasePath.resolve(testCaseName + ".java").toString(), testCode);
-        saveToFile(verifyContextPath.resolve("output.txt").toString(), testOutput);
-        if (initialAnalysis != null) {
-            saveToFile(verifyContextPath.resolve("initial_analysis.txt").toString(), initialAnalysis);
-        }
-        
-        logWithTestCase("创建验证上下文文件夹: " + verifyContextPath);
+            // 保存测试用例和输出
+            saveToFile(testCasePath.resolve(this.testCaseName + ".java").toString(), testCode);
+            saveToFile(verifyContextPath.resolve("output.txt").toString(), testOutput);
+            if (initialAnalysis != null) {
+                saveToFile(verifyContextPath.resolve("initial_analysis.txt").toString(), initialAnalysis);
+            }
+            
+            logWithTestCase("创建验证上下文文件夹: " + verifyContextPath);
         } catch (IOException e) {
             logWithTestCase(Level.WARNING, "创建验证上下文文件夹失败: " + e.getMessage());
         }
@@ -271,24 +288,44 @@ public class BugVerify extends Agent {
                 String bugType = rootNode.path("bug_type").asText("UNKNOWN");
                 reportContent = rootNode.path("report").asText();
 
+                Path sourceTestCaseDir = Paths.get(bugReportPath, "testcase", testCaseName);
+                Path targetBugDir = Paths.get(bugReportPath, "bug", testCaseName);
+
                 Path reportDir;
+
                 switch (bugType) {
                     case "JDK_BUG":
                     case "BOTH":
                         fileName = "BugReport.md";
-                        reportDir = verifyContextPath.getParent().resolve("bug");
+                        if (Files.exists(sourceTestCaseDir)) {
+                            try {
+                                Files.move(sourceTestCaseDir, targetBugDir);
+                                logWithTestCase("已将确认的bug文件夹移动到: " + targetBugDir);
+                            } catch (IOException e) {
+                                logWithTestCase(Level.SEVERE, "移动bug文件夹失败: " + e.getMessage());
+                            }
+                        }
+                        reportDir = targetBugDir.resolve(verifyContextFolder);
                         break;
                     case "TESTCASE_ERROR":
                         fileName = "TestCaseErrorAnalysis.md";
-                        reportDir = verifyContextPath.getParent().resolve("testcase");
+                        reportDir = sourceTestCaseDir.resolve(verifyContextFolder);
                         break;
                     default:
                         fileName = "WrongFormatReport.md";
-                        reportDir = verifyContextPath.getParent().resolve("testcase");
+                        reportDir = sourceTestCaseDir.resolve(verifyContextFolder);
                         if (reportContent != null && !reportContent.isEmpty()) {
                             if (reportContent.contains("BugReport")) {
                                 fileName = "BugReport.md";
-                                reportDir = verifyContextPath.getParent().resolve("bug");
+                                if (Files.exists(sourceTestCaseDir)) {
+                                    try {
+                                        Files.move(sourceTestCaseDir, targetBugDir);
+                                        logWithTestCase("已将确认的bug文件夹移动到 (WrongFormat): " + targetBugDir);
+                                    } catch (IOException e) {
+                                        logWithTestCase(Level.SEVERE, "移动bug文件夹失败 (WrongFormat): " + e.getMessage());
+                                    }
+                                }
+                                reportDir = targetBugDir.resolve(verifyContextFolder);
                             } else if (reportContent.contains("Test Case Issue Analysis") || reportContent.contains("Test Case Error Analysis")) {
                                 fileName = "TestCaseErrorAnalysis.md";
                             }
@@ -303,7 +340,7 @@ public class BugVerify extends Agent {
                 fileName = "WrongFormatReport.md";
                 reportContent = reportJson;
                 try {
-                    Path reportDir = verifyContextPath.getParent().resolve("testcase");
+                    Path reportDir = Paths.get(bugReportPath, "testcase", testCaseName, verifyContextFolder);
                     Files.createDirectories(reportDir);
                     saveToFile(reportDir.resolve(fileName).toString(), reportContent);
                 } catch (IOException ex) {
@@ -826,9 +863,9 @@ public class BugVerify extends Agent {
             
             // 定义3个消融实验配置
             List<AblationConfig> configs = Arrays.asList(
-                new AblationConfig(true, true, true, true, true, 1),   // 完整配置
-                new AblationConfig(true, false, true, true, false, 2), // 无信息源
-                new AblationConfig(false, true, true, true, false, 3)  // 无假设
+                new AblationConfig(true, true, true, true, 1),   // 完整配置
+                new AblationConfig(true, false, true, true, 2), // 无信息源
+                new AblationConfig(false, true, true, true, 3)  // 无假设
             );
             
             // 并行执行3个配置
@@ -870,7 +907,7 @@ public class BugVerify extends Agent {
             boolean includeApiDocs = edu.tju.ista.llm4test.config.GlobalConfig.isIncludeApiDocs();
             
             AblationConfig config = new AblationConfig(includeHypothesis, includeInfoSource, 
-                useMinimizedTestcase, includeApiDocs, true, 0);
+                useMinimizedTestcase, includeApiDocs, 0);
             
             return generateReportWithConfig(hypotheses, verificationResults, config);
         }
@@ -951,17 +988,15 @@ public class BugVerify extends Agent {
         final boolean includeInfoSource;
         final boolean useMinimizedTestcase;
         final boolean includeApiDocs;
-        final boolean isDefaultConfig;
+
         final int id;
         
         AblationConfig(boolean includeHypothesis, boolean includeInfoSource, 
-                      boolean useMinimizedTestcase, boolean includeApiDocs, 
-                      boolean isDefaultConfig, int id) {
+                      boolean useMinimizedTestcase, boolean includeApiDocs, int id) {
             this.includeHypothesis = includeHypothesis;
             this.includeInfoSource = includeInfoSource;
             this.useMinimizedTestcase = useMinimizedTestcase;
             this.includeApiDocs = includeApiDocs;
-            this.isDefaultConfig = isDefaultConfig;
             this.id = id;
         }
     }
@@ -1091,61 +1126,20 @@ public class BugVerify extends Agent {
         }
     }
     
-    /**
-     * 从JSON字符串中提取字段值
-     */
-    private String extractJsonFieldValue(String json, String fieldName) {
-        // 先过滤掉思维链标签
-        json = filterThinkingChain(json);
-        if (json == null || json.trim().isEmpty()) {
-            return null;
-        }
 
-        try {
-            ObjectMapper objectMapper = new ObjectMapper();
-            JsonNode rootNode = objectMapper.readTree(json);
-            JsonNode fieldNode = rootNode.path(fieldName);
-
-            if (!fieldNode.isMissingNode()) {
-                // 如果是文本节点，直接返回文本值；否则返回节点的字符串表示
-                return fieldNode.isValueNode() ? fieldNode.asText() : fieldNode.toString();
-            }
-        } catch (IOException e) {
-            LoggerUtil.logExec(Level.WARNING, "JSON字段提取失败 (" + fieldName + "): " + e.getMessage() + "\nJSON: " + json);
-        }
-        return null;
-    }
     
-    /**
-     * 从JSON中提取字符串数组
-     */
-    private List<String> extractJsonArrayFromField(String json, String fieldName) {
-        // 先过滤掉思维链标签
-        json = filterThinkingChain(json);
-        if (json == null || json.trim().isEmpty()) {
-            return Collections.emptyList();
+    private String extractPackageNameFromCode(String code) {
+        if (code == null) {
+            return "";
         }
-
-        List<String> result = new ArrayList<>();
-        try {
-            ObjectMapper objectMapper = new ObjectMapper();
-            JsonNode rootNode = objectMapper.readTree(json);
-            JsonNode arrayNode = rootNode.path(fieldName);
-
-            if (arrayNode.isArray()) {
-                for (JsonNode elementNode : arrayNode) {
-                    // 提取数组中每个元素的值作为字符串
-                    result.add(elementNode.asText());
-                }
-            } else {
-                LoggerUtil.logExec(Level.WARNING, "JSON字段 '" + fieldName + "' 不是一个数组或未找到。\nJSON: " + json);
-            }
-        } catch (IOException e) {
-            LoggerUtil.logExec(Level.WARNING, "JSON数组提取失败 (" + fieldName + "): " + e.getMessage() + "\nJSON: " + json);
+        Pattern pattern = Pattern.compile("^\\s*package\\s+([\\w\\.]+);", Pattern.MULTILINE);
+        Matcher matcher = pattern.matcher(code);
+        if (matcher.find()) {
+            return matcher.group(1);
         }
-        return result;
+        return "";
     }
-    
+
     /**
      * 从代码中提取类名
      */
@@ -1265,19 +1259,13 @@ public class BugVerify extends Agent {
                         String testCaseName = testFile.getName().replace(".java", "");
                         LoggerUtil.logExec(Level.INFO, "正在分析bug: " + testCaseName);
 
-                        // 读取测试用例内容
-                        String sourceCode = Files.readString(testFile.toPath());
-
-                        // 运行测试获取输出 - 现在安全了，因为JtregExecuteTool使用同步调用
+                        // 运行测试获取输出
                         JtregExecuteTool jtregTool = new JtregExecuteTool();
                         ToolResponse<TestResult> response = jtregTool.execute(testcase.getFile().toPath(), testCaseName);
 
-                        String testOutput;
                         if (response.isSuccess()) {
-                            testOutput = response.getResult().getOutput();
                             testcase.setResult(response.getResult());
                         } else {
-                            testOutput = "无法获取测试输出";
                             LoggerUtil.logResult(Level.SEVERE, testcase.getFile().getAbsolutePath() + ": 无法获取测试输出");
                         }
 
@@ -1347,12 +1335,9 @@ public class BugVerify extends Agent {
         LoggerUtil.logExec(Level.INFO, "正在分析bug: " + testCaseName);
         try {
             ToolResponse<TestResult> response = jtregTool.execute(testcase.getFile().toPath(), testCaseName);
-            String testOutput;
             if (response.isSuccess()) {
-                testOutput = response.getResult().getOutput();
                 testcase.setResult(response.getResult());
             } else {
-                testOutput = "无法获取测试输出";
                 LoggerUtil.logResult(Level.SEVERE, testcase.getFile().getAbsolutePath() + ": 无法获取测试输出");
             }
             if (verifyMessage != null && !verifyMessage.isEmpty()) {
@@ -1513,8 +1498,8 @@ public class BugVerify extends Agent {
         }
 
         try {
-            // 确保 /testcase 子目录存在
-            Path testcaseReportDir = Paths.get(bugReportPath, testCaseName, "testcase");
+            // 报告应保存在 testcase 目录下的特定测试文件夹中
+            Path testcaseReportDir = Paths.get(bugReportPath, "testcase", testCaseName);
             Files.createDirectories(testcaseReportDir);
 
             // 创建报告内容
