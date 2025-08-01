@@ -11,6 +11,8 @@ import edu.tju.ista.llm4test.utils.ApiInfoProcessor;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
 import edu.tju.ista.llm4test.prompt.PromptGen;
 import freemarker.template.TemplateException;
+import org.apache.commons.io.FileUtils;
+import edu.tju.ista.llm4test.config.GlobalConfig;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -66,6 +68,8 @@ public class BugVerify extends Agent {
     private String initialAnalysis;
     private Map<String, Object> collectedInfo = new HashMap<>();
     private String conclusion;
+    private String enhanceVerifyFailureReason = "Unknown";
+    
     
     // 报告输出路径
     private String bugReportPath = "BugReport";
@@ -143,32 +147,50 @@ public class BugVerify extends Agent {
 
         Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
 
-        // 0. TestCase Reproduce & reduce
+        // 0. TestCase Reproduce & reduce - 在完整环境中进行约简
         if (this.testCase != null && this.testCase.getResult() != null && this.testCase.getResult().isFail()) {
-            LoggerUtil.logExec(Level.INFO, "Verified failure detected. Starting test case minimization for: " + testCase.name);
-            try {
-                TestCase minimizedCase = minimizationAgent.run(this.testCase, verifyContextPath);
-                String minimizedCode = minimizedCase.getSourceCode();
-                if (minimizedCode != null && !minimizedCode.equals(this.testCase.getSourceCode())) {
-                    // Save the minimized code to a new file
-                    String originalFileName = this.testCase.getFile().getName();
-                    String minimizedFileName = originalFileName.replace(".java", "_minimized.java");
-                    Path minimizedFilePath = verifyContextPath.resolve(minimizedFileName);
+            LoggerUtil.logExec(Level.INFO, "Verified failure detected. Setting up verify environment for minimization: " + testCase.name);
+            
+            // 创建verify环境并复制完整测试目录
+            Path verifyDir = setupVerifyEnvironment();
+            if (verifyDir == null) {
+                LoggerUtil.logExec(Level.WARNING, "Failed to setup verify environment, skipping minimization");
+            } else {
+                // 更新测试用例路径到verify目录
+                TestCase verifyTestCase = updateTestCaseToVerifyDir(this.testCase, verifyDir);
+                
+                if (verifyTestCase != null) {
+                    LoggerUtil.logExec(Level.INFO, "Starting test case minimization in verify environment for: " + verifyTestCase.name);
+                    try {
+                        // 在verify环境中进行约简
+                        TestCase minimizedCase = minimizationAgent.run(verifyTestCase, verifyDir);
+                        String minimizedCode = minimizedCase.getSourceCode();
+                        
+                        if (minimizedCode != null && !minimizedCode.equals(this.testCase.getSourceCode())) {
+                            // Save the minimized code to the original context path for record keeping
+                            String originalFileName = this.testCase.getFile().getName();
+                            String minimizedFileName = originalFileName.replace(".java", "_minimized.java");
+                            Path minimizedFilePath = verifyContextPath.resolve(minimizedFileName);
 
-                    Files.writeString(minimizedFilePath, minimizedCode);
-                    File minimizedFile = minimizedFilePath.toFile();
+                            Files.writeString(minimizedFilePath, minimizedCode);
+                            File minimizedFile = minimizedFilePath.toFile();
 
-                    LoggerUtil.logExec(Level.INFO, "Minimization successful. New test case at: " + minimizedFile.getAbsolutePath());
-                    // Update the agent's state to use the minimized test case for subsequent steps.
-                    this.testCase.setFile(minimizedFile);
-                    this.testCode = minimizedCode;
-                    this.testOutput = minimizedCase.getResult().getOutput();
-                    LoggerUtil.logExec(Level.INFO, "BugVerifyAgent will now proceed with the minimized test case.");
+                            LoggerUtil.logExec(Level.INFO, "Minimization successful in verify environment. Minimized code saved at: " + minimizedFile.getAbsolutePath());
+                            
+                            // Update the agent's state to use the minimized test case for subsequent steps
+                            this.testCase.setFile(minimizedFile);
+                            this.testCode = minimizedCode;
+                            this.testOutput = minimizedCase.getResult().getOutput();
+                            LoggerUtil.logExec(Level.INFO, "BugVerifyAgent will now proceed with the minimized test case from verify environment.");
+                        } else {
+                            LoggerUtil.logExec(Level.WARNING, "Minimization process in verify environment did not reduce the test case. Continuing with the original test case.");
+                        }
+                    } catch (Exception e) {
+                        LoggerUtil.logExec(Level.SEVERE, "An exception occurred during test case minimization in verify environment. Continuing with the original test case. " + e);
+                    }
                 } else {
-                    LoggerUtil.logExec(Level.WARNING, "Minimization process did not reduce the test case. Continuing with the original test case.");
+                    LoggerUtil.logExec(Level.WARNING, "Failed to update test case to verify directory, skipping minimization");
                 }
-            } catch (Exception e) {
-                LoggerUtil.logExec(Level.SEVERE, "An exception occurred during test case minimization. Continuing with the original test case. " + e);
             }
         }
 
@@ -221,21 +243,24 @@ public class BugVerify extends Agent {
                 String bugType = rootNode.path("bug_type").asText("UNKNOWN");
                 reportContent = rootNode.path("report").asText();
 
+                Path reportDir;
                 switch (bugType) {
                     case "JDK_BUG":
+                    case "BOTH":
                         fileName = "BugReport.md";
+                        reportDir = verifyContextPath.getParent().resolve("bug");
                         break;
                     case "TESTCASE_ERROR":
                         fileName = "TestCaseErrorAnalysis.md";
-                        break;
-                    case "BOTH":
-                        fileName = "BugReportWithError.md";
+                        reportDir = verifyContextPath.getParent().resolve("testcase");
                         break;
                     default:
                         fileName = "WrongFormatReport.md";
+                        reportDir = verifyContextPath.getParent().resolve("testcase");
                         if (reportContent != null && !reportContent.isEmpty()) {
                             if (reportContent.contains("BugReport")) {
                                 fileName = "BugReport.md";
+                                reportDir = verifyContextPath.getParent().resolve("bug");
                             } else if (reportContent.contains("Test Case Issue Analysis") || reportContent.contains("Test Case Error Analysis")) {
                                 fileName = "TestCaseErrorAnalysis.md";
                             }
@@ -243,13 +268,19 @@ public class BugVerify extends Agent {
                         LoggerUtil.logExec(Level.WARNING, "Unknown bug_type in report JSON: " + bugType);
                         break;
                 }
-
-                saveToFile(verifyContextPath.getParent().resolve(fileName).toString(), reportContent);
+                Files.createDirectories(reportDir);
+                saveToFile(reportDir.resolve(fileName).toString(), reportContent);
             } catch (IOException e) {
-                LoggerUtil.logExec(Level.WARNING, "Failed to parse report JSON. Saving raw output. Error: " + e.getMessage());
+                LoggerUtil.logExec(Level.WARNING, "Failed to parse report JSON or create report directory. Saving raw output. Error: " + e.getMessage());
                 fileName = "WrongFormatReport.md";
                 reportContent = reportJson;
-                saveToFile(verifyContextPath.getParent().resolve(fileName).toString(), reportContent);
+                try {
+                    Path reportDir = verifyContextPath.getParent().resolve("testcase");
+                    Files.createDirectories(reportDir);
+                    saveToFile(reportDir.resolve(fileName).toString(), reportContent);
+                } catch (IOException ex) {
+                    LoggerUtil.logExec(Level.SEVERE, "Failed to save even raw report. Error: " + ex.getMessage());
+                }
             }
 
             
@@ -281,6 +312,7 @@ public class BugVerify extends Agent {
         // 前置条件检查：确保测试用例存在且被识别为bug
         if (testCase == null || testCase.getResult() == null) {
             LoggerUtil.logExec(Level.INFO, "测试用例未设置，跳过增强验证");
+            this.enhanceVerifyFailureReason = "Test case not set.";
             return false;
         }
         
@@ -328,6 +360,7 @@ public class BugVerify extends Agent {
         
         if (!allBugResults) {
             LoggerUtil.logExec(Level.INFO, "增强验证失败：不是所有验证都认为是bug");
+            this.enhanceVerifyFailureReason = "Inconsistent verification results. Not all validations identified a bug.";
             
             // 保存验证失败结果
             StringBuilder failureSummary = new StringBuilder();
@@ -374,13 +407,16 @@ public class BugVerify extends Agent {
                 return true;
             } else if ("TESTCASE_ISSUE".equals(verdict)) {
                 LoggerUtil.logExec(Level.INFO, "裁决认为是测试用例问题，增强验证完成");
+                this.enhanceVerifyFailureReason = "Verdict: TESTCASE_ISSUE. The adjudicator determined the issue lies with the test case.";
                 return false;
             } else {
                 LoggerUtil.logExec(Level.INFO, "裁决结果不明确: " + verdict + "，增强验证完成");
+                this.enhanceVerifyFailureReason = "Verdict: " + verdict + ". The adjudicator could not make a clear determination.";
                 return false;
             }
         } else {
             LoggerUtil.logExec(Level.WARNING, "裁决结果为空，无法判断");
+            this.enhanceVerifyFailureReason = "Verdict is null or empty. Adjudication process failed.";
             return false;
         }
     }
@@ -1222,17 +1258,14 @@ public class BugVerify extends Agent {
 
                         boolean isBug = agent.enhanceVerify();
                         if (isBug) {
-                            LoggerUtil.logResult(Level.INFO, "测试用例存在bug: " + testCaseName + "\n" + testcase.verifyMessage);
+                            LoggerUtil.logResult(Level.INFO, "Test case is a confirmed bug, proceeding to analysis: " + testCaseName);
+                            agent.analyze();
                         } else {
-                            LoggerUtil.logResult(Level.INFO, "测试用例不是bug: " + testCaseName);
-                            return null;
+                            LoggerUtil.logResult(Level.INFO, "Test case is not a bug: " + testCaseName);
+                            agent.generateNonBugReport(); // Generate report for non-bugs
                         }
 
-                        // 设置测试数据并分析
-
-                        agent.analyze();
-
-                        LoggerUtil.logExec(Level.INFO, "Bug报告已生成: " + testCaseName);
+                        LoggerUtil.logExec(Level.INFO, "Bug verification process finished for: " + testCaseName);
                         
                     } catch (Exception e) {
                         LoggerUtil.logExec(Level.WARNING, "为测试用例生成报告失败: " + filePath + " - " + e.getMessage());
@@ -1379,5 +1412,114 @@ public class BugVerify extends Agent {
         }
     }
 
+    /**
+     * 设置验证环境：拷贝整个test目录到verify目录
+     * @return verify目录路径，失败时返回null
+     */
+    private Path setupVerifyEnvironment() {
+        try {
+            // 创建verify根目录
+            Path verifyRootDir = Paths.get("verify");
+            Files.createDirectories(verifyRootDir);
+            
+            // 源test目录
+            Path sourceTestDir = Paths.get(GlobalConfig.getTestDir());
+            if (!Files.exists(sourceTestDir)) {
+                LoggerUtil.logExec(Level.WARNING, "Source test directory not found: " + sourceTestDir);
+                return null;
+            }
+            
+            // 目标verify目录（包含时间戳以避免冲突）
+            String timestamp = String.valueOf(System.currentTimeMillis());
+            Path targetVerifyDir = verifyRootDir.resolve("test_" + timestamp);
+            
+            // 复制整个test目录
+            LoggerUtil.logExec(Level.INFO, "Copying test environment: " + sourceTestDir + " -> " + targetVerifyDir);
+            FileUtils.copyDirectory(sourceTestDir.toFile(), targetVerifyDir.toFile());
+            
+            LoggerUtil.logExec(Level.INFO, "Verify environment setup complete: " + targetVerifyDir);
+            return targetVerifyDir;
+            
+        } catch (IOException e) {
+            LoggerUtil.logExec(Level.SEVERE, "Failed to setup verify environment: " + e.getMessage());
+            return null;
+        }
+    }
 
+    /**
+     * 更新测试用例路径到verify目录
+     * @param originalTestCase 原始测试用例
+     * @param verifyDir verify目录路径
+     * @return 更新后的测试用例，失败时返回null
+     */
+    private TestCase updateTestCaseToVerifyDir(TestCase originalTestCase, Path verifyDir) {
+        try {
+            // 计算相对路径：从test目录到具体测试文件
+            Path testDir = Paths.get(GlobalConfig.getTestDir());
+            Path originalPath = originalTestCase.getFile().toPath();
+            Path relativePath = testDir.relativize(originalPath);
+            
+            // 在verify目录中的新路径
+            Path newTestPath = verifyDir.resolve(relativePath);
+            
+            if (!Files.exists(newTestPath)) {
+                LoggerUtil.logExec(Level.WARNING, "Test file not found in verify dir: " + newTestPath);
+                return null;
+            }
+            
+            // 创建新的TestCase对象
+            TestCase verifyTestCase = new TestCase(newTestPath.toFile());
+            verifyTestCase.setOriginFile(originalTestCase.getFile()); // 保持原始文件引用
+            verifyTestCase.setResult(originalTestCase.getResult());    // 保持测试结果
+            verifyTestCase.verifyMessage = originalTestCase.verifyMessage; // 保持验证信息
+            
+            // 设置API文档处理器（使用配置创建新的处理器以保证一致性）
+            verifyTestCase.setApiDocProcessor(ApiInfoProcessor.fromConfig());
+            
+            LoggerUtil.logExec(Level.INFO, "Test case updated to verify environment: " + newTestPath);
+            return verifyTestCase;
+            
+        } catch (Exception e) {
+            LoggerUtil.logExec(Level.SEVERE, "Failed to update test case to verify dir: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 生成非Bug情况的报告
+     * 当 enhanceVerify 确定不是一个bug时调用此方法
+     */
+    private void generateNonBugReport() {
+        if (testCaseName == null) {
+            LoggerUtil.logExec(Level.WARNING, "Cannot generate non-bug report: testCaseName is null.");
+            return;
+        }
+
+        try {
+            // 确保 /testcase 子目录存在
+            Path testcaseReportDir = Paths.get(bugReportPath, testCaseName, "testcase");
+            Files.createDirectories(testcaseReportDir);
+
+            // 创建报告内容
+            String reportContent = String.format(
+                "# Test Case Analysis Report\n\n" +
+                "**Test Case**: `%s`\n\n" +
+                "This test case was determined **not to be a bug** during the enhanced verification process.\n\n" +
+                "## Reason for Failure\n\n" +
+                "**Step Failed**: Enhanced Verification\n" +
+                "**Reason**: %s\n",
+                testCaseName,
+                enhanceVerifyFailureReason
+            );
+
+            // 保存报告文件
+            String reportFileName = "NotABugAnalysis.md";
+            saveToFile(testcaseReportDir.resolve(reportFileName).toString(), reportContent);
+            
+            LoggerUtil.logExec(Level.INFO, "Non-bug report generated for " + testCaseName + " at " + testcaseReportDir.resolve(reportFileName));
+
+        } catch (IOException e) {
+            LoggerUtil.logExec(Level.SEVERE, "Failed to generate non-bug report for " + testCaseName + ": " + e.getMessage());
+        }
+    }
 }

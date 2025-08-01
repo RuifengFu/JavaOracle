@@ -172,22 +172,24 @@ public class TestCaseAgent extends Agent {
      */
     private Path setupWorkspace(TestCase testCase, Path workspaceRoot) {
         try {
-            Path testCaseWorkspace = workspaceRoot.resolve(testCase.name + "_minimization_ws_" + System.currentTimeMillis()).toAbsolutePath();
-            Files.createDirectories(testCaseWorkspace);
-            workspace_root = testCaseWorkspace;
-            Path testFilePath = testCaseWorkspace.resolve(testCase.getFile().getName());
-            workspace_testcase_path = testFilePath.toString();
-            Files.writeString(testFilePath, testCase.getSourceCode());
+            // Directly use the provided workspaceRoot, which is the complete verify environment.
+            this.workspace_root = workspaceRoot.toAbsolutePath();
+
+            // The test file path is already correct as it's inside the verify environment.
+            Path testFilePath = testCase.getFile().toPath();
+            this.workspace_testcase_path = testFilePath.toString();
+
+            // Set the current working directory to the workspace root for consistency.
+            System.setProperty("user.dir", workspaceRoot.toAbsolutePath().toString());
             
-            // Change to the workspace directory for relative file operations
-            System.setProperty("user.dir", testCaseWorkspace.toString());
-            
-            // Perform workspace preparation with function calling
-            prepareWorkspaceWithFunctionCalling(testCase, testCaseWorkspace);
-            
+            // The workspace is already prepared.
+            prepareWorkspaceWithFunctionCalling(testCase, workspaceRoot);
+
+            LoggerUtil.logExec(Level.INFO, "TestCaseAgent working directly in environment: " + workspaceRoot);
+
             return testFilePath;
-        } catch (IOException e) {
-            LoggerUtil.logExec(Level.SEVERE, "Failed to set up workspace: " + e.getMessage());
+        } catch (Exception e) {
+            LoggerUtil.logExec(Level.SEVERE, "Failed to set up workspace in TestCaseAgent: " + e.getMessage());
             return null;
         }
     }
@@ -196,90 +198,9 @@ public class TestCaseAgent extends Agent {
      * Prepares the workspace by analyzing the test case and copying required files using function calling.
      */
     private void prepareWorkspaceWithFunctionCalling(TestCase testCase, Path workspaceRoot) {
-        try {
-            // Get the original test directory path (relative)
-            String originalTestPath = testCase.getFile().getParent().toString();
-            
-            // List the contents of the original test directory
-            String directoryListing = getDirectoryListing(testCase.getFile().getParentFile());
-            
-            // Generate the workspace preparation prompt
-            String prompt;
-            try {
-                prompt = PromptGen.generateWorkspacePreparationPrompt(
-                    testCase.getSourceCode(),
-                    testCase.getResult().getOutput(),
-                    originalTestPath,
-                    directoryListing
-                );
-            } catch (Exception e) {
-                addToHistory(Level.SEVERE, "SETUP: Failed to generate prompt - " + e.getMessage());
-                return;
-            }
-            
-            addToHistory("SETUP: Analyzing test dependencies...");
-            
-            // Prepare function tools for the LLM
-            List<Tool<?>> tools = new ArrayList<>();
-            tools.add(toolRegistry.get("copy_file"));
-            tools.add(toolRegistry.get("list_directory"));
-            
-            // Call LLM with function calling capability
-            List<ToolCall> toolCalls = this.LLM.funcCall(prompt, tools);
-            
-            if (toolCalls != null && !toolCalls.isEmpty()) {
-
-                addToHistory("SETUP: Found " + toolCalls.size() + " files to copy");
-                
-                // Execute each function call
-                for (ToolCall toolCall : toolCalls) {
-                    String toolName = toolCall.toolName;
-                    Map<String, Object> args = toolCall.arguments;
-                    
-                    try {
-                        // Enhance paths for copy_file tool to ensure they are absolute
-                        if ("copy_file".equals(toolName)) {
-                            // Source path should be relative to the original test's directory
-                            String sourcePath = (String) args.get("sourcePath");
-                            if (sourcePath != null) {
-                                Path originalTestDir = testCase.getFile().getParentFile().toPath();
-                                Path absoluteSourcePath = originalTestDir.resolve(sourcePath);
-                                if (Files.exists(absoluteSourcePath)) {
-                                    args.put("sourcePath", absoluteSourcePath.toString());
-                                }
-                            }
-
-                            // Destination path should be relative to the new workspace root
-                            String destinationPath = (String) args.get("destinationPath");
-                            if (destinationPath != null) {
-                                Path destPathObj = workspace_root.resolve(destinationPath);
-                                if (!Path.of(destinationPath).isAbsolute()) {
-                                    // Ensure destination is within the workspace
-                                    args.put("destinationPath", destPathObj.toString());
-                                }
-                            }
-                        }
-                        
-                        // Execute the tool
-                        Tool<?> tool = toolRegistry.get(toolName);
-                        ToolResponse<?> response = tool.execute(args);
-                        
-                        if (!response.isSuccess()) {
-                            addToHistory(Level.SEVERE, "SETUP: Failed to execute " + toolName + " - " + response.getFailMessage());
-                        }
-                        
-                    } catch (Exception e) {
-                        addToHistory(Level.WARNING,"SETUP: Error with " + toolName + " - " + e.getMessage());
-                    }
-                }
-            } else {
-                addToHistory("SETUP: No additional files needed");
-            }
-            
-        } catch (Exception e) {
-            addToHistory("SETUP: Error - " + e.getMessage());
-            LoggerUtil.logExec(Level.WARNING, "Workspace preparation failed: " + e.getMessage());
-        }
+        // Since the entire test environment is now copied, this step is no longer needed.
+        // The LLM-based dependency analysis is removed to favor the complete environment.
+        addToHistory("SETUP: Working in a complete test environment, no additional file preparation needed.");
     }
     
     /**

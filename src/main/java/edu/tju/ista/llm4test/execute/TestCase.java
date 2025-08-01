@@ -43,7 +43,7 @@ public class TestCase {
     private final ConcurrentHashMap<String, String> tempDirectories; // JDK名称 -> 临时目录路径
     
     // API文档处理器 - 用于重新计算API文档
-    private ApiInfoProcessor apiInfoProcessor;
+    public ApiInfoProcessor apiInfoProcessor;
 
     public TestCase(File file){
         this.file = file;
