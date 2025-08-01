@@ -72,6 +72,7 @@ public class PromptGen {
             // EnhanceVerify 相关模板
             TEMPLATE_MAP.put("TestCaseIssueExplanation", loadResourceAsString("/prompt/TestCaseIssueExplanation.txt"));
             TEMPLATE_MAP.put("VerdictAnalysis", loadResourceAsString("/prompt/VerdictAnalysis.txt"));
+            TEMPLATE_MAP.put("ExtractJsonFromText", loadResourceAsString("/prompt/ExtractJsonFromText.txt"));
         } catch (IOException e) {
             throw new RuntimeException("Failed to load prompt templates from resources", e);
         }
@@ -279,5 +280,12 @@ public class PromptGen {
         dataModel.put("bugArgument", bugArgument != null ? bugArgument : "");
         dataModel.put("testcaseArgument", testcaseArgument != null ? testcaseArgument : "");
         return generatePrompt("VerdictAnalysis", dataModel);
+    }
+
+    public static String generateExtractJsonPrompt(String textToParse, String jsonFormat) throws TemplateException, IOException {
+        Map<String, Object> dataModel = new HashMap<>();
+        dataModel.put("text_to_parse", textToParse);
+        dataModel.put("json_format", jsonFormat);
+        return generatePrompt("ExtractJsonFromText", dataModel);
     }
 }

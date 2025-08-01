@@ -1,0 +1,15 @@
+Your task is to extract a valid JSON object from the given text. The text may contain other content, such as reasoning or explanations, before or after the JSON object. You must find and return only the raw JSON object itself, without any surrounding text or markdown formatting.
+
+The JSON object should conform to the following format:
+```json
+${json_format}
+```
+
+Please analyze the following text and extract the JSON object.
+
+Text to analyze:
+```
+${text_to_parse}
+```
+
+Extracted JSON object:

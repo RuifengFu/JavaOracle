@@ -973,10 +973,49 @@ public class BugVerify extends Agent {
             // 保存prompt到文件
             savePromptToFile(prompt, config);
             
-            return llm.messageCompletion(prompt, 0.7, true);
+            String reportJson = llm.messageCompletion(prompt, 0.7, true);
+
+            // 检查并修复JSON
+            int maxRetries = 3;
+            for (int i = 0; i < maxRetries; i++) {
+                if (isValidJson(reportJson)) {
+                    return reportJson;
+                }
+                logWithTestCase(Level.WARNING, "报告JSON格式不合法，尝试修复 (第 " + (i + 1) + " 次)");
+                reportJson = fixJsonWithLLM(reportJson);
+                // 移除 ```json 标记 增强鲁棒性
+                reportJson = reportJson.trim().replaceAll("^```(json)?\\s*|\\s*```$", "");
+             }
+ 
+             logWithTestCase(Level.SEVERE, "报告JSON修复失败 " + maxRetries + " 次，返回错误报告");
+             return "{\"bug_type\": \"JSON_FIX_FAILED\", \"report\": \"报告生成和修复失败\"}";
+
         } catch (TemplateException | IOException e) {
             LoggerUtil.logExec(Level.SEVERE, "生成报告失败: " + e.getMessage());
             return "{\"bug_type\": \"GENERATION_ERROR\", \"report\": \"生成报告失败\"}";
+        }
+    }
+
+    private boolean isValidJson(String json) {
+        if (json == null || json.trim().isEmpty()) {
+            return false;
+        }
+        try {
+            new ObjectMapper().readTree(json);
+        } catch (IOException e) {
+            return false;
+        }
+        return true;
+    }
+
+    private String fixJsonWithLLM(String brokenJson) {
+        try {
+            String jsonFormat = "{\"bug_type\": \"<bug_type>\", \"report\": \"<markdown_report>\"}";
+            String prompt = PromptGen.generateExtractJsonPrompt(brokenJson, jsonFormat);
+            return OpenAI.DoubaoFlash.messageCompletion(prompt, 0.5, false);
+        } catch (Exception e) {
+            logWithTestCase(Level.SEVERE, "使用LLM修复JSON失败: " + e.getMessage());
+            return brokenJson; // 返回原始的错误JSON
         }
     }
     
