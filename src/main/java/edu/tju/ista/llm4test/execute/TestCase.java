@@ -80,6 +80,11 @@ public class TestCase {
         return this.sourceCode;
     }
 
+    public void setSourceCode(String sourceCode) {
+        this.sourceCode = sourceCode;
+        writeTestCaseToFile(sourceCode);
+    }
+
     /**
      * 获取去除非行级注释的源代码
      * 为了保证行号的正确性我们把这里的注释替换成空行
