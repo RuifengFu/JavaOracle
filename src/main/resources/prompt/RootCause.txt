@@ -59,7 +59,7 @@ Follow this rigorous analysis process:
     -   **When in doubt, it's a test issue, not a JDK bug**
 
 # Output Requirements
-1.  Your **must** call `root_cause_analysis` in toolc call.
+1.  Your **must** call `root_cause_analysis` in tool call.
 2.  **Critical `report_bug` Rules**:
     -   **Default: `report_bug: false`** - This is your starting point
     -   **Test-first analysis**: Always classify failures as test issues unless proven otherwise

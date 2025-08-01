@@ -32,4 +32,4 @@ ${webContent}
    - Prioritize the most relevant technical content when space is limited
 
 <Output Format>
-Return only the extracted text segments, preserving their original wording and context. Do not include explanations, titles, or markdown formatting.
+Return only the extracted text segments, preserving their original wording and context. Do not include explanations, titles, or Markdown formatting.

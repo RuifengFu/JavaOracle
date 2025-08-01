@@ -46,7 +46,7 @@ Please output your summarization results in JSON format:
     }
   ],
   "totalSize": "Estimated character count after summarization",
-  "rationale": "Brief explanation of why these information were selected"
+  "rationale": "Brief explanation of why this information was selected"
 }
 </Output Format>
 

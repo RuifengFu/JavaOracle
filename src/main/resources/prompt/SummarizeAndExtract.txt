@@ -22,4 +22,4 @@ ${fullText}
 7.  The total length of the extracted text should not exceed ${maxSize} characters. If the extracted paragraphs exceed this limit, prioritize the ones that seem most critical.
 
 <Output Format>
-Return only the raw, extracted text. Do not include any explanations, titles, or markdown formatting.
+Return only the raw, extracted text. Do not include any explanations, titles, or Markdown formatting.

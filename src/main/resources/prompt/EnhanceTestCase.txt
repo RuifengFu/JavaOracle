@@ -102,7 +102,7 @@
 
 <Note>
 You are encouraged to:
-1. First thoroughly understand the API's purpose and behavior
+1. First thoroughly understand the APIs purpose and behavior
 2. Think about how this API interacts with Java's standard features
 3. Consider common programming patterns and potential misuse
 4. Suggest tests for API interaction scenarios you think are valuable

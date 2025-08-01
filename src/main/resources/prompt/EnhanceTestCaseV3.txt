@@ -19,7 +19,7 @@ The goal of this phase is to build a deep understanding of the API and the exist
 **Phase 2: Test Scenario Design**
 Based on the gaps identified, design a comprehensive suite of new test scenarios.
 2.1. **Develop Creative Scenarios**: Go beyond standard use cases. Think about potential misuse, complex interactions, and vulnerabilities.
-2.2. **Probe Interactions**: Design tests that specifically verify the API's interaction with standard Java components (e.g., Collections, Serialization, `equals()`/`hashCode()` contracts, and more other common interactions).
+2.2. **Probe Interactions**: Design tests that specifically verify the APIs interaction with standard Java components (e.g., Collections, Serialization, `equals()`/`hashCode()` contracts, and more other common interactions).
 2.3. **Systematically Cover Edge Cases**: Create tests for boundary values, null inputs, special characters, and other non-standard conditions explicitly mentioned or implied in the API documentation.
 2.4. **Explore Advanced Vectors**: Investigate sophisticated failure modes:
     - **Performance & Scalability**: Test with large datasets or under high load to find performance bottlenecks or algorithmic complexity issues.
@@ -30,7 +30,7 @@ Based on the gaps identified, design a comprehensive suite of new test scenarios
 **Phase 3: Implementation & Documentation**
 Implement the new test scenarios with clarity and precision.
 3.1. **Add Precise Assertions**: Write clear, deterministic assertions that crisply validate the intended behavior.
-3.2. **Mark Your Contributions**: Prepend every new test block or assertion with the comment: `// Enhanced Test Oracle may not trustble`.
+3.2. **Mark Your Contributions**: Prepend every new test block or assertion with the comment: `// Enhanced Test Oracle may be not trustable`.
 3.3. **Provide Clear Rationale**: Immediately follow the marker comment with another comment explaining:
     - *What* specific scenario this test covers.
     - *Why* this assertion is valuable and what risk it mitigates.
@@ -41,7 +41,7 @@ Implement the new test scenarios with clarity and precision.
 <Requirements>
 1.  **Strict Adherence to Documentation**: Base all assertions *strictly* on the official API documentation (JavaDoc). Do not assert on implementation-specific details or undocumented behavior. For ambiguous cases, test for reasonable outcomes and add enough comments explaining your rationale.
 2.  **Code Integrity**: Preserve the existing test framework structure. All new code must be syntactically correct, free of compilation errors, and deterministic.
-3.  **Output Format**: Your final output must be a single, complete, and runnable Java code block. Do not include any other text, thoughts, or explanations outside of the code block itself.
+3.  **Output Format**: Your final output must be a single, complete, and runnable Java code block. Do not include any other text, thoughts, or explanations outside the code block itself.
 </Requirements>
 
 <Output Format>

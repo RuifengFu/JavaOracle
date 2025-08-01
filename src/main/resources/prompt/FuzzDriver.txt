@@ -1,7 +1,7 @@
-Please write a JQF test driver for a application class in Java.
+Please write a JQF test driver for an application class in Java.
 And try to cover all lines in application code.
 1. You should write a test driver based application class
-2. You may need write a Input Generator for test driver
+2. You may need write an Input Generator for test driver
 3. Annotate test driver
 
 Tutorial:

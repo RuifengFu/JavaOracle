@@ -12,7 +12,7 @@ ${testOutput}
 ${collectedInformation}
 </Collected Information>
 
-Please form 3-5 possible hypotheses explaining the cause of this issue. Be sure to consider all of the following possibilities:
+Please form 3-5 possible hypotheses explaining the cause of this issue. Be sure to consider all the following possibilities:
 1. A real bug in the JDK implementation
 2. The test case violates the API specification or usage documentation
 3. Logical errors in the test case
