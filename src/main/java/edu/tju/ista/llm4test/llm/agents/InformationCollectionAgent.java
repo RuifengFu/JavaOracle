@@ -258,7 +258,7 @@ public class InformationCollectionAgent extends Agent {
         
         // 3. Add API information
         if (apiInfoWithSource != null && !apiInfoWithSource.isEmpty()) {
-            addApiInfo(apiInfoWithSource);
+            addApiInfo(apiInfoWithSource, analysis);
         }
         
         // 4. Simple Web search (if there is space)
@@ -309,7 +309,7 @@ public class InformationCollectionAgent extends Agent {
     /**
      * Add API information with extraction similar to web content
      */
-    private void addApiInfo(String apiInfoWithSource) {
+    private void addApiInfo(String apiInfoWithSource, AnalysisResult analysis) {
         if (apiInfoWithSource == null || apiInfoWithSource.isEmpty()) return;
         
         try {
@@ -319,26 +319,45 @@ public class InformationCollectionAgent extends Agent {
                 LoggerUtil.logExec(Level.INFO, "API info content too long, extracting relevant parts");
                 // Use the same extraction method as web content
                 int maxSize = 8000;
-                processedContent = extractRelevantText(null, "", "", apiInfoWithSource, maxSize);
+                processedContent = extractRelevantText(analysis, "", "", apiInfoWithSource, maxSize);
                 if (processedContent == null || processedContent.trim().isEmpty()) {
-                    LoggerUtil.logExec(Level.WARNING, "API info extraction failed, using original");
-                    processedContent = apiInfoWithSource.substring(0, Math.min(apiInfoWithSource.length(), MAX_TOTAL_SIZE - currentSize));
+                    LoggerUtil.logExec(Level.WARNING, "API info extraction failed, using original with slicing");
+                    if (currentSize < MAX_TOTAL_SIZE) {
+                        int maxLength = 30000;
+                        if (apiInfoWithSource.length() > maxLength) {
+                            int middleKeep = 200;
+                            int sideLength = (maxLength - middleKeep) / 2;
+                            String head = apiInfoWithSource.substring(0, sideLength);
+                            String tail = apiInfoWithSource.substring(apiInfoWithSource.length() - sideLength);
+                            int midPoint = apiInfoWithSource.length() / 2;
+                            String middle = apiInfoWithSource.substring(midPoint - (middleKeep / 2), midPoint + (middleKeep / 2));
+                            processedContent = head + "\n\n... (content truncated, middle part follows) ...\n\n" + middle + "\n\n... (content truncated, showing tail) ...\n\n" + tail;
+                        } else {
+                            processedContent = apiInfoWithSource.substring(0, Math.min(apiInfoWithSource.length(), MAX_TOTAL_SIZE - currentSize));
+                        }
+                    } else {
+                        processedContent = "";
+                    }
                 }
             } else {
                 processedContent = apiInfoWithSource;
             }
             
-            CollectedInfo info = new CollectedInfo("API_INFO", "API information and source code", processedContent, InfoType.SOURCE_CODE, 0.9);
-            collectedInfos.add(info);
-            currentSize += processedContent.length();
+            if (!processedContent.isEmpty()) {
+                CollectedInfo info = new CollectedInfo("API_INFO", "API information and source code", processedContent, InfoType.SOURCE_CODE, 0.9);
+                collectedInfos.add(info);
+                currentSize += processedContent.length();
+            }
             
         } catch (Exception e) {
             LoggerUtil.logExec(Level.WARNING, "API info extraction failed: " + e.getMessage() + ", using original content");
             // Fallback to original content if extraction fails
-            String content = apiInfoWithSource.substring(0, Math.min(apiInfoWithSource.length(), MAX_TOTAL_SIZE - currentSize));
-            CollectedInfo info = new CollectedInfo("API_INFO", "API information and source code", content, InfoType.SOURCE_CODE, 0.9);
-            collectedInfos.add(info);
-            currentSize += content.length();
+            if (currentSize < MAX_TOTAL_SIZE) {
+                String content = apiInfoWithSource.substring(0, Math.min(apiInfoWithSource.length(), MAX_TOTAL_SIZE - currentSize));
+                CollectedInfo info = new CollectedInfo("API_INFO", "API information and source code", content, InfoType.SOURCE_CODE, 0.9);
+                collectedInfos.add(info);
+                currentSize += content.length();
+            }
         }
     }
     
