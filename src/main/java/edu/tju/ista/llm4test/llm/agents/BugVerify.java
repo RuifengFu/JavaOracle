@@ -1399,18 +1399,7 @@ public class BugVerify extends Agent {
             return InformationCollectionAgent.InfoType.SOURCE_CODE; // 默认
         }
     }
-    
-    /**
-     * 获取信息类型的权重（用于排序）
-     */
-    private int getTypeWeight(InformationCollectionAgent.InfoType type) {
-        switch (type) {
-            case SOURCE_CODE: return 3;
-            case JAVADOC: return 2;
-            case WEB_SEARCH: return 1;
-            default: return 0;
-        }
-    }
+
 
     /**
      * 设置验证环境：拷贝整个test目录到verify目录
