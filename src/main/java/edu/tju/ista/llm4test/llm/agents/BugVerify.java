@@ -81,6 +81,34 @@ public class BugVerify extends Agent {
     private Map<String, String> infoSourceMap = new HashMap<>();
     
     /**
+     * 获取测试用例标识符，用于日志记录
+     */
+    private String getTestCaseIdentifier() {
+        if (testCase != null && testCase.getFile() != null) {
+            return testCase.getFile().getName().replace(".java", "");
+        } else if (testCaseName != null) {
+            return testCaseName;
+        } else {
+            return "UnknownTestCase";
+        }
+    }
+    
+    /**
+     * 带测试用例标识的日志记录
+     */
+    private void logWithTestCase(Level level, String message) {
+        String identifier = getTestCaseIdentifier();
+        LoggerUtil.logExec(level, String.format("[BugVerify][%s] %s", identifier, message));
+    }
+    
+    /**
+     * 带测试用例标识的日志记录（INFO级别）
+     */
+    private void logWithTestCase(String message) {
+        logWithTestCase(Level.INFO, message);
+    }
+    
+    /**
      * 创建BugVerifyAgent
      * @param javadocPath JavaDoc路径
      * @param sourcePath 源码路径
@@ -120,21 +148,21 @@ public class BugVerify extends Agent {
             String timestamp = String.valueOf(System.currentTimeMillis());
             verifyContextFolder = "VerifyContext_" + timestamp;
             
-            // 创建完整路径
-            Path testCasePath = Paths.get(bugReportPath, testCaseName);
-            Path verifyContextPath = testCasePath.resolve(verifyContextFolder);
-            Files.createDirectories(verifyContextPath);
-            
-            // 保存测试用例和输出
-            saveToFile(testCasePath.resolve(testCaseName + ".java").toString(), testCode);
-            saveToFile(verifyContextPath.resolve("output.txt").toString(), testOutput);
-            if (initialAnalysis != null) {
-                saveToFile(verifyContextPath.resolve("initial_analysis.txt").toString(), initialAnalysis);
-            }
-            
-            LoggerUtil.logExec(Level.INFO, "创建验证上下文文件夹: " + verifyContextPath);
+                    // 创建完整路径
+        Path testCasePath = Paths.get(bugReportPath, testCaseName);
+        Path verifyContextPath = testCasePath.resolve(verifyContextFolder);
+        Files.createDirectories(verifyContextPath);
+        
+        // 保存测试用例和输出
+        saveToFile(testCasePath.resolve(testCaseName + ".java").toString(), testCode);
+        saveToFile(verifyContextPath.resolve("output.txt").toString(), testOutput);
+        if (initialAnalysis != null) {
+            saveToFile(verifyContextPath.resolve("initial_analysis.txt").toString(), initialAnalysis);
+        }
+        
+        logWithTestCase("创建验证上下文文件夹: " + verifyContextPath);
         } catch (IOException e) {
-            LoggerUtil.logExec(Level.WARNING, "创建验证上下文文件夹失败: " + e.getMessage());
+            logWithTestCase(Level.WARNING, "创建验证上下文文件夹失败: " + e.getMessage());
         }
     }
     
@@ -143,24 +171,24 @@ public class BugVerify extends Agent {
      * 执行完整的Bug验证流程
      */
     public String analyze() {
-        LoggerUtil.logExec(Level.INFO, "开始Bug验证流程");
+        logWithTestCase("开始Bug验证流程");
 
         Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
 
         // 0. TestCase Reproduce & reduce - 在完整环境中进行约简
         if (this.testCase != null && this.testCase.getResult() != null && this.testCase.getResult().isFail()) {
-            LoggerUtil.logExec(Level.INFO, "Verified failure detected. Setting up verify environment for minimization: " + testCase.name);
+            logWithTestCase("Verified failure detected. Setting up verify environment for minimization: " + testCase.name);
             
             // 创建verify环境并复制完整测试目录
             Path verifyDir = setupVerifyEnvironment();
             if (verifyDir == null) {
-                LoggerUtil.logExec(Level.WARNING, "Failed to setup verify environment, skipping minimization");
+                logWithTestCase(Level.WARNING, "Failed to setup verify environment, skipping minimization");
             } else {
                 // 更新测试用例路径到verify目录
                 TestCase verifyTestCase = updateTestCaseToVerifyDir(this.testCase, verifyDir);
                 
                 if (verifyTestCase != null) {
-                    LoggerUtil.logExec(Level.INFO, "Starting test case minimization in verify environment for: " + verifyTestCase.name);
+                    logWithTestCase("Starting test case minimization in verify environment for: " + verifyTestCase.name);
                     try {
                         // 在verify环境中进行约简
                         TestCase minimizedCase = minimizationAgent.run(verifyTestCase, verifyDir);
@@ -175,21 +203,21 @@ public class BugVerify extends Agent {
                             Files.writeString(minimizedFilePath, minimizedCode);
                             File minimizedFile = minimizedFilePath.toFile();
 
-                            LoggerUtil.logExec(Level.INFO, "Minimization successful in verify environment. Minimized code saved at: " + minimizedFile.getAbsolutePath());
+                            logWithTestCase("Minimization successful in verify environment. Minimized code saved at: " + minimizedFile.getAbsolutePath());
                             
                             // Update the agent's state to use the minimized test case for subsequent steps
                             this.testCase.setFile(minimizedFile);
                             this.testCode = minimizedCode;
                             this.testOutput = minimizedCase.getResult().getOutput();
-                            LoggerUtil.logExec(Level.INFO, "BugVerifyAgent will now proceed with the minimized test case from verify environment.");
+                            logWithTestCase("BugVerifyAgent will now proceed with the minimized test case from verify environment.");
                         } else {
-                            LoggerUtil.logExec(Level.WARNING, "Minimization process in verify environment did not reduce the test case. Continuing with the original test case.");
+                            logWithTestCase(Level.WARNING, "Minimization process in verify environment did not reduce the test case. Continuing with the original test case.");
                         }
                     } catch (Exception e) {
-                        LoggerUtil.logExec(Level.SEVERE, "An exception occurred during test case minimization in verify environment. Continuing with the original test case. " + e);
+                        logWithTestCase(Level.SEVERE, "An exception occurred during test case minimization in verify environment. Continuing with the original test case. " + e);
                     }
                 } else {
-                    LoggerUtil.logExec(Level.WARNING, "Failed to update test case to verify directory, skipping minimization");
+                    logWithTestCase(Level.WARNING, "Failed to update test case to verify directory, skipping minimization");
                 }
             }
         }
@@ -199,7 +227,7 @@ public class BugVerify extends Agent {
         String initialInsight = performInitialAnalysis();
         saveToFile(verifyContextPath.resolve("initial_insight.json").toString(), initialInsight);
 
-        LoggerUtil.logExec(Level.INFO, "初始分析完成：" + initialInsight);
+        logWithTestCase("初始分析完成：" + initialInsight);
         
         // 保存初始分析结果
 
@@ -208,7 +236,7 @@ public class BugVerify extends Agent {
         
         // 2. 收集信息
         collectRelevantInformation(initialInsight);
-        LoggerUtil.logExec(Level.INFO, "信息收集完成，共 " + collectedInfo.size() + " 项");
+        logWithTestCase("信息收集完成，共 " + collectedInfo.size() + " 项");
         
         // 保存收集到的信息
         saveCollectedInfo();
@@ -221,16 +249,16 @@ public class BugVerify extends Agent {
             // 4. 形成假设
             hypotheses = hypothesisAgent.formHypotheses(testCode, testOutput,
                     buildCollectedInformationString());
-            LoggerUtil.logExec(Level.INFO, "形成 " + hypotheses.size() + " 个假设");
+            logWithTestCase("形成 " + hypotheses.size() + " 个假设");
 
             // 5. 验证假设
             verificationResults = hypothesisAgent.verifyHypotheses(testCode);
-            LoggerUtil.logExec(Level.INFO, "验证完成，结果数: " + verificationResults.size());
+            logWithTestCase("验证完成，结果数: " + verificationResults.size());
         }
 
         // 6. 形成结论和报告
         String reportJson = generateReport(hypotheses, verificationResults);
-        LoggerUtil.logExec(Level.INFO, "Bug验证报告已生成");
+        logWithTestCase("Bug验证报告已生成");
         
         // 保存最终报告
         if (testCaseName != null) {
@@ -307,11 +335,11 @@ public class BugVerify extends Agent {
      * @return 增强验证的结果：true表示确认是bug，false表示不是bug或验证失败
      */
     public boolean enhanceVerify() {
-        LoggerUtil.logExec(Level.INFO, "开始增强验证流程");
+        logWithTestCase("开始增强验证流程");
         
         // 前置条件检查：确保测试用例存在且被识别为bug
         if (testCase == null || testCase.getResult() == null) {
-            LoggerUtil.logExec(Level.INFO, "测试用例未设置，跳过增强验证");
+            logWithTestCase("测试用例未设置，跳过增强验证");
             this.enhanceVerifyFailureReason = "Test case not set.";
             return false;
         }
@@ -325,7 +353,7 @@ public class BugVerify extends Agent {
         List<String> nonBugResults = new ArrayList<>();
         
         for (int i = 1; i <= 2; i++) {
-            LoggerUtil.logExec(Level.INFO, "执行第 " + i + " 次额外验证");
+            logWithTestCase("执行第 " + i + " 次额外验证");
             
             try {
                 // 重新执行验证，确保结果的一致性
@@ -338,15 +366,15 @@ public class BugVerify extends Agent {
 
                 if (testCase.getResult().isBug()) {
                     verificationResults.add("验证 " + i + ": BUG - " + testCase.verifyMessage);
-                    LoggerUtil.logExec(Level.INFO, "第 " + i + " 次验证确认是bug");
+                    logWithTestCase("第 " + i + " 次验证确认是bug");
                 } else {
                     nonBugResults.add("验证 " + i + ": NOT_BUG - " + testCase.verifyMessage);
-                    LoggerUtil.logExec(Level.INFO, "第 " + i + " 次验证认为不是bug");
+                    logWithTestCase("第 " + i + " 次验证认为不是bug");
                     break;
                 }
 
             } catch (Exception e) {
-                LoggerUtil.logExec(Level.WARNING, "第 " + i + " 次验证失败: " + e.getMessage());
+                logWithTestCase(Level.WARNING, "第 " + i + " 次验证失败: " + e.getMessage());
                 nonBugResults.add("验证 " + i + ": ERROR - " + e.getMessage());
                 
                 // 保存错误信息到文件
@@ -359,7 +387,7 @@ public class BugVerify extends Agent {
         boolean allBugResults = verificationResults.size() == 2;
         
         if (!allBugResults) {
-            LoggerUtil.logExec(Level.INFO, "增强验证失败：不是所有验证都认为是bug");
+            logWithTestCase("增强验证失败：不是所有验证都认为是bug");
             this.enhanceVerifyFailureReason = "Inconsistent verification results. Not all validations identified a bug.";
             
             // 保存验证失败结果
@@ -378,7 +406,7 @@ public class BugVerify extends Agent {
             return false;
         }
         
-        LoggerUtil.logExec(Level.INFO, "所有验证都确认是bug，进入第二步：生成测试用例问题解释");
+        logWithTestCase("所有验证都确认是bug，进入第二步：生成测试用例问题解释");
         
         // ===== 第二步：生成反方论证 =====
         // 目标：专门寻找测试用例中的问题，提供反方观点
@@ -389,7 +417,7 @@ public class BugVerify extends Agent {
         if (testCaseIssueExplanation != null && !testCaseIssueExplanation.isEmpty()) {
             saveToFile(verifyContextPath.resolve("testcase_issue_explanation.txt").toString(), testCaseIssueExplanation);
         } else {
-            LoggerUtil.logExec(Level.WARNING, "测试用例问题解释生成失败");
+            logWithTestCase(Level.WARNING, "测试用例问题解释生成失败");
             saveToFile(verifyContextPath.resolve("testcase_issue_explanation_failed.txt").toString(), "生成失败");
         }
         
@@ -403,19 +431,19 @@ public class BugVerify extends Agent {
         // 如果裁决认为是测试用例问题，停止并返回增强验证结果
         if (verdict != null && !verdict.isEmpty()) {
             if ("BUG".equals(verdict)) {
-                LoggerUtil.logExec(Level.INFO, "裁决确认是bug，继续进行分析");
+                logWithTestCase("裁决确认是bug，继续进行分析");
                 return true;
             } else if ("TESTCASE_ISSUE".equals(verdict)) {
-                LoggerUtil.logExec(Level.INFO, "裁决认为是测试用例问题，增强验证完成");
+                logWithTestCase("裁决认为是测试用例问题，增强验证完成");
                 this.enhanceVerifyFailureReason = "Verdict: TESTCASE_ISSUE. The adjudicator determined the issue lies with the test case.";
                 return false;
             } else {
-                LoggerUtil.logExec(Level.INFO, "裁决结果不明确: " + verdict + "，增强验证完成");
+                logWithTestCase("裁决结果不明确: " + verdict + "，增强验证完成");
                 this.enhanceVerifyFailureReason = "Verdict: " + verdict + ". The adjudicator could not make a clear determination.";
                 return false;
             }
         } else {
-            LoggerUtil.logExec(Level.WARNING, "裁决结果为空，无法判断");
+            logWithTestCase(Level.WARNING, "裁决结果为空，无法判断");
             this.enhanceVerifyFailureReason = "Verdict is null or empty. Adjudication process failed.";
             return false;
         }
