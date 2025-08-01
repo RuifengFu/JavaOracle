@@ -138,26 +138,26 @@ public class BugVerify extends Agent {
      */
     private void createVerifyContextFolder() {
         try {
-            // 提取类名和包名
-            String className = extractClassNameFromCode(testCode);
-            if (className == null || className.isEmpty()) {
-                className = "UnknownTest";
+            // 提取类名作为基础名称
+            String className = "UnknownTest";
+            if (this.testCase != null) {
+                className = this.testCase.getName();
             }
-            String packageName = extractPackageNameFromCode(testCode);
-
-            // 初始测试用例名称
+            
             this.testCaseName = className;
 
-            // 检查重名，如果重名则使用包名.类名
+            // 检查重名，如果重名，则使用父目录名进行区分
             Path bugDir = Paths.get(bugReportPath, "bug");
             Path testcaseDir = Paths.get(bugReportPath, "testcase");
-            
+
             Path potentialBugPath = bugDir.resolve(this.testCaseName);
             Path potentialTestcasePath = testcaseDir.resolve(this.testCaseName);
 
             if (Files.exists(potentialBugPath) || Files.exists(potentialTestcasePath)) {
-                if (packageName != null && !packageName.isEmpty()) {
-                    this.testCaseName = packageName + "." + className;
+                File testFile = this.testCase.getFile();
+                if (testFile != null && testFile.getParentFile() != null) {
+                    String parentDirName = testFile.getParentFile().getName();
+                    this.testCaseName = parentDirName + "." + className;
                 }
             }
             
@@ -190,7 +190,8 @@ public class BugVerify extends Agent {
     public String analyze() {
         logWithTestCase("开始Bug验证流程");
 
-        Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
+        Path sourceTestCaseDir = Paths.get(bugReportPath, "testcase", testCaseName);
+        Path verifyContextPath = sourceTestCaseDir.resolve(verifyContextFolder);
 
         // 0. TestCase Reproduce & reduce - 在完整环境中进行约简
         if (this.testCase != null && this.testCase.getResult() != null && this.testCase.getResult().isFail()) {
@@ -288,7 +289,6 @@ public class BugVerify extends Agent {
                 String bugType = rootNode.path("bug_type").asText("UNKNOWN");
                 reportContent = rootNode.path("report").asText();
 
-                Path sourceTestCaseDir = Paths.get(bugReportPath, "testcase", testCaseName);
                 Path targetBugDir = Paths.get(bugReportPath, "bug", testCaseName);
 
                 Path reportDir;
@@ -305,15 +305,15 @@ public class BugVerify extends Agent {
                                 logWithTestCase(Level.SEVERE, "移动bug文件夹失败: " + e.getMessage());
                             }
                         }
-                        reportDir = targetBugDir.resolve(verifyContextFolder);
+                        reportDir = targetBugDir;
                         break;
                     case "TESTCASE_ERROR":
                         fileName = "TestCaseErrorAnalysis.md";
-                        reportDir = sourceTestCaseDir.resolve(verifyContextFolder);
+                        reportDir = sourceTestCaseDir;
                         break;
                     default:
                         fileName = "WrongFormatReport.md";
-                        reportDir = sourceTestCaseDir.resolve(verifyContextFolder);
+                        reportDir = sourceTestCaseDir;
                         if (reportContent != null && !reportContent.isEmpty()) {
                             if (reportContent.contains("BugReport")) {
                                 fileName = "BugReport.md";
@@ -325,7 +325,7 @@ public class BugVerify extends Agent {
                                         logWithTestCase(Level.SEVERE, "移动bug文件夹失败 (WrongFormat): " + e.getMessage());
                                     }
                                 }
-                                reportDir = targetBugDir.resolve(verifyContextFolder);
+                                reportDir = targetBugDir;
                             } else if (reportContent.contains("Test Case Issue Analysis") || reportContent.contains("Test Case Error Analysis")) {
                                 fileName = "TestCaseErrorAnalysis.md";
                             }
@@ -340,7 +340,7 @@ public class BugVerify extends Agent {
                 fileName = "WrongFormatReport.md";
                 reportContent = reportJson;
                 try {
-                    Path reportDir = Paths.get(bugReportPath, "testcase", testCaseName, verifyContextFolder);
+                    Path reportDir = Paths.get(bugReportPath, "testcase", testCaseName);
                     Files.createDirectories(reportDir);
                     saveToFile(reportDir.resolve(fileName).toString(), reportContent);
                 } catch (IOException ex) {
@@ -381,7 +381,7 @@ public class BugVerify extends Agent {
             return false;
         }
         
-        Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
+        Path verifyContextPath = Paths.get(bugReportPath, "testcase", testCaseName, verifyContextFolder);
         
         // ===== 第一步：多重验证确保一致性 =====
         // 目标：通过两次额外的验证来确保bug判断的稳定性
@@ -1021,7 +1021,7 @@ public class BugVerify extends Agent {
         if (verifyContextFolder == null || testCaseName == null) return;
         
         try {
-            Path testcaseWorkSpace = Paths.get(bugReportPath, testCaseName);
+            Path testcaseWorkSpace = Paths.get(bugReportPath, "testcase", testCaseName);
             Path ablationDir = testcaseWorkSpace.resolve("ablation_results");
             Files.createDirectories(ablationDir);
             
@@ -1128,29 +1128,7 @@ public class BugVerify extends Agent {
     
 
     
-    private String extractPackageNameFromCode(String code) {
-        if (code == null) {
-            return "";
-        }
-        Pattern pattern = Pattern.compile("^\\s*package\\s+([\\w\\.]+);", Pattern.MULTILINE);
-        Matcher matcher = pattern.matcher(code);
-        if (matcher.find()) {
-            return matcher.group(1);
-        }
-        return "";
-    }
 
-    /**
-     * 从代码中提取类名
-     */
-    private String extractClassNameFromCode(String code) {
-        Pattern pattern = Pattern.compile("public\\s+class\\s+(\\w+)");
-        Matcher matcher = pattern.matcher(code);
-        if (matcher.find()) {
-            return matcher.group(1);
-        }
-        return null;
-    }
     
 
 
