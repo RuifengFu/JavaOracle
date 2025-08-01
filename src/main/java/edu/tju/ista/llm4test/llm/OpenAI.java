@@ -51,8 +51,8 @@ public class OpenAI {
     private static final long RETRY_DELAY_MS = 60000;
 
     public enum ToolCallRequirement {
-        REQUIRED, // Must contain tool call, or retry
-        AUTO      // Optional tool call
+        REQUIRED, // Must contain tool call, or retry (up to 3 times)
+        AUTO      // Optional tool call, no retry
     }
 
     public static class NoToolCallException extends RuntimeException {

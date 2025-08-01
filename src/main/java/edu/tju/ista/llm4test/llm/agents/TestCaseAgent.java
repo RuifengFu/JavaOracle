@@ -48,7 +48,7 @@ public class TestCaseAgent extends Agent {
 
     public TestCaseAgent() {
         super("You are an expert test case minimizer. Your goal is to reduce a given Java test case to its minimal form while preserving the original failure.");
-        this.LLM = OpenAI.K2;
+        this.LLM = OpenAI.DoubaoFlash;
         this.toolRegistry = new ToolRegistry();
         this.history = new ArrayList<>();
         this.feedbackHistory = new ArrayList<>();

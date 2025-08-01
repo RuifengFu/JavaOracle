@@ -45,7 +45,7 @@ public class BugVerify extends Agent {
     private final HypothesisAgent hypothesisAgent;
     
     // LLM实例
-    private final OpenAI llm = OpenAI.K2;
+    private final OpenAI llm = OpenAI.DoubaoFlash;
 
     public TestCase getTestCase() {
         return testCase;
