@@ -279,8 +279,8 @@ public class BugVerify extends Agent {
         LoggerUtil.logExec(Level.INFO, "开始增强验证流程");
         
         // 前置条件检查：确保测试用例存在且被识别为bug
-        if (testCase == null || testCase.getResult() == null || !testCase.getResult().isBug()) {
-            LoggerUtil.logExec(Level.INFO, "测试用例不是bug或未设置，跳过增强验证");
+        if (testCase == null || testCase.getResult() == null) {
+            LoggerUtil.logExec(Level.INFO, "测试用例未设置，跳过增强验证");
             return false;
         }
         
@@ -310,6 +310,7 @@ public class BugVerify extends Agent {
                 } else {
                     nonBugResults.add("验证 " + i + ": NOT_BUG - " + testCase.verifyMessage);
                     LoggerUtil.logExec(Level.INFO, "第 " + i + " 次验证认为不是bug");
+                    break;
                 }
 
             } catch (Exception e) {
@@ -364,36 +365,22 @@ public class BugVerify extends Agent {
         // 决定哪一方更有说服力：bug论证 vs 测试用例问题论证
         String verdict = performVerdictAnalysis(testCaseIssueExplanation);
         
-        // 保存裁决分析结果
-        if (verdict != null && !verdict.isEmpty()) {
-            saveToFile(verifyContextPath.resolve("verdict_analysis.txt").toString(), verdict);
-        } else {
-            LoggerUtil.logExec(Level.WARNING, "裁决分析生成失败");
-            saveToFile(verifyContextPath.resolve("verdict_analysis_failed.txt").toString(), "生成失败");
-        }
-        
         // ===== 第四步：基于裁决结果决定后续流程 =====
         // 如果裁决确认是bug，继续完整的分析流程
         // 如果裁决认为是测试用例问题，停止并返回增强验证结果
-        try {
-            if (verdict != null && !verdict.isEmpty()) {
-                ObjectMapper objectMapper = new ObjectMapper();
-                JsonNode verdictNode = objectMapper.readTree(verdict);
-                String verdictResult = verdictNode.path("verdict").asText();
-                
-                if ("BUG".equals(verdictResult)) {
-                    LoggerUtil.logExec(Level.INFO, "裁决确认是bug，继续进行分析");
-                    return true;
-                } else {
-                    LoggerUtil.logExec(Level.INFO, "裁决认为不是bug，增强验证完成");
-                    return false;
-                }
+        if (verdict != null && !verdict.isEmpty()) {
+            if ("BUG".equals(verdict)) {
+                LoggerUtil.logExec(Level.INFO, "裁决确认是bug，继续进行分析");
+                return true;
+            } else if ("TESTCASE_ISSUE".equals(verdict)) {
+                LoggerUtil.logExec(Level.INFO, "裁决认为是测试用例问题，增强验证完成");
+                return false;
             } else {
-                LoggerUtil.logExec(Level.WARNING, "裁决结果为空，无法判断");
+                LoggerUtil.logExec(Level.INFO, "裁决结果不明确: " + verdict + "，增强验证完成");
                 return false;
             }
-        } catch (Exception e) {
-            LoggerUtil.logExec(Level.WARNING, "解析裁决结果失败: " + e.getMessage());
+        } else {
+            LoggerUtil.logExec(Level.WARNING, "裁决结果为空，无法判断");
             return false;
         }
     }
@@ -468,7 +455,7 @@ public class BugVerify extends Agent {
      * - UNCLEAR：证据不足，无法确定
      * 
      * @param testCaseIssueExplanation 测试用例问题解释
-     * @return 裁决结果的JSON字符串，失败时返回null
+     * @return 裁决结果字符串（"BUG", "TESTCASE_ISSUE", "UNCLEAR"），失败时返回null
      */
     private String performVerdictAnalysis(String testCaseIssueExplanation) {
         LoggerUtil.logExec(Level.INFO, "执行裁决分析");
@@ -497,16 +484,26 @@ public class BugVerify extends Agent {
             var content = result.content();
             if (callList.isEmpty()) {
                 LoggerUtil.logExec(Level.WARNING, "No function call found in verdict analysis");
-                return null;
+                return "UNCLEAR";
             }
             
-            // 提取裁决结果
+            // 提取裁决结果 - 直接从tool call arguments中获取verdict
             var verdictCall = callList.get(0);
-            return content + "\n" + verdictCall.arguments.toString();
+            String verdict = (String) verdictCall.arguments.get("verdict");
+            
+            // 保存完整的裁决分析内容到文件（包含推理过程）
+            String fullAnalysis = content + "\n" + verdictCall.arguments.toString();
+            if (verifyContextFolder != null && testCaseName != null) {
+                Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
+                saveToFile(verifyContextPath.resolve("verdict_full_analysis.txt").toString(), fullAnalysis);
+            }
+            
+            LoggerUtil.logExec(Level.INFO, "裁决分析完成，结果: " + verdict);
+            return verdict;
             
         } catch (Exception e) {
             LoggerUtil.logExec(Level.WARNING, "执行裁决分析失败: " + e.getMessage());
-            return null;
+            return "UNCLEAR";
         }
     }
     
@@ -1220,6 +1217,8 @@ public class BugVerify extends Agent {
                             LoggerUtil.logResult(Level.SEVERE, testcase.getFile().getAbsolutePath() + ": 无法获取测试输出");
                         }
 
+                        agent.setTestCase(testcase);
+
 
                         boolean isBug = agent.enhanceVerify();
                         if (isBug) {
@@ -1230,7 +1229,7 @@ public class BugVerify extends Agent {
                         }
 
                         // 设置测试数据并分析
-                        agent.setTestCase(testcase);
+
                         agent.analyze();
 
                         LoggerUtil.logExec(Level.INFO, "Bug报告已生成: " + testCaseName);

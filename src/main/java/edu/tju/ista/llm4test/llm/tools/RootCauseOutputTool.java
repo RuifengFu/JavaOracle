@@ -16,7 +16,7 @@ public class RootCauseOutputTool implements Tool<Void> {
 
     @Override
     public List<String> getParameters() {
-        return List.of("root_cause", "bug_location", "bug_type", "fix_advice", "report_bug");
+        return List.of("root_cause", "bug_location", "bug_type", "fix_advice", "evidence", "report_bug");
     }
 
     @Override
@@ -26,6 +26,7 @@ public class RootCauseOutputTool implements Tool<Void> {
                 "bug_location", "The location of the bug",
                 "bug_type", "The type of the bug",
                 "fix_advice", "The advice to fix the bug",
+                "evidence", "Specific evidence from the test case, output, or API documentation that supports the issue claim",
                 "report_bug", "Whether to report the bug to Java Community"
         );
     }
@@ -37,6 +38,7 @@ public class RootCauseOutputTool implements Tool<Void> {
                 "bug_location", "string",
                 "bug_type", "string",
                 "fix_advice", "string",
+                "evidence", "string",
                 "report_bug", "boolean"
         );
     }

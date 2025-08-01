@@ -57,7 +57,6 @@ You must call the following function in tool call not in content:
 - `issue_description` (string): A detailed description of the test case issue, explaining what is wrong with the test case
 - `evidence` (string): Specific evidence from the test case, output, or API documentation that supports the issue claim
 - `suggested_fix` (string): A concrete suggestion for how to fix or improve the test case
-- `confidence` (string): Your confidence level in this analysis (0.0-1.0), where 1.0 is completely confident
 
 # Important Notes
 - Focus on finding problems in the test case itself

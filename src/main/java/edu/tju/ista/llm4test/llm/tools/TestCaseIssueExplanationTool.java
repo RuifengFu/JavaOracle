@@ -34,7 +34,7 @@ public class TestCaseIssueExplanationTool implements Tool<Void> {
 
     @Override
     public List<String> getParameters() {
-        return List.of("issue_type", "issue_description", "suggested_fix", "confidence");
+        return List.of("issue_type", "issue_description", "suggested_fix", "evidence");
     }
 
     @Override
@@ -43,7 +43,7 @@ public class TestCaseIssueExplanationTool implements Tool<Void> {
                 "issue_type", "The type of test case issue (e.g., 'API_MISUSE', 'LOGIC_ERROR', 'SETUP_ISSUE', 'ASSUMPTION_ERROR')",
                 "issue_description", "Detailed description of the test case issue",
                 "suggested_fix", "Suggested fix or improvement for the test case",
-                "confidence", "Confidence level in this analysis (0.0-1.0)"
+                "evidence", "Specific evidence from the test case, output, or API documentation that supports the issue claim"
         );
     }
 
@@ -53,7 +53,7 @@ public class TestCaseIssueExplanationTool implements Tool<Void> {
                 "issue_type", "string",
                 "issue_description", "string",
                 "suggested_fix", "string",
-                "confidence", "string"
+                "evidence", "string"
         );
     }
 

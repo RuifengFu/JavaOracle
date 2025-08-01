@@ -32,7 +32,7 @@ public class VerdictTool implements Tool<Void> {
 
     @Override
     public List<String> getParameters() {
-        return List.of("bug_argument", "testcase_argument", "verdict", "confidence", "reasoning");
+        return List.of("bug_argument", "testcase_argument", "verdict", "reasoning");
     }
 
     @Override
@@ -41,7 +41,6 @@ public class VerdictTool implements Tool<Void> {
                 "bug_argument", "The argument supporting that this is a JDK bug",
                 "testcase_argument", "The argument supporting that this is a test case issue",
                 "verdict", "The final verdict: 'BUG' or 'TESTCASE_ISSUE'",
-                "confidence", "Confidence level in the verdict (0.0-1.0)",
                 "reasoning", "Detailed reasoning for the verdict"
         );
     }
@@ -52,7 +51,6 @@ public class VerdictTool implements Tool<Void> {
                 "bug_argument", "string",
                 "testcase_argument", "string",
                 "verdict", "string",
-                "confidence", "string",
                 "reasoning", "string"
         );
     }
