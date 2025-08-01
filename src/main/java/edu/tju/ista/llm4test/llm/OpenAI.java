@@ -29,7 +29,6 @@ import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
 import edu.tju.ista.llm4test.config.ModelConfig;
-import static java.lang.Thread.sleep;
 
 /*
  *  OpenAI style LLM api calling.
@@ -38,7 +37,6 @@ public class OpenAI {
     private final String API_KEY; // Replace with your API key
 
     private String BASE_URL;
-//    private static final String BASE_URL = "https://api.siliconflow.cn/v1/chat/completions";
 
     private String MODEL;
 
@@ -51,6 +49,18 @@ public class OpenAI {
 
     private static final int MAX_RETRIES = 3;
     private static final long RETRY_DELAY_MS = 60000;
+
+    public enum ToolCallRequirement {
+        REQUIRED, // Must contain tool call, or retry
+        AUTO      // Optional tool call
+    }
+
+    public static class NoToolCallException extends RuntimeException {
+        public NoToolCallException(String message) {
+            super(message);
+        }
+    }
+
 
     public String messageCompletion(String prompt) {
         return messageCompletion(prompt, 0.7);
@@ -121,7 +131,7 @@ public class OpenAI {
 
     static {
         try {
-            java.util.Map<String, edu.tju.ista.llm4test.config.ModelConfig> models = 
+            java.util.Map<String, edu.tju.ista.llm4test.config.ModelConfig> models =
                 edu.tju.ista.llm4test.config.ModelConfig.getModelsMap();
             R1 = new OpenAI(models.get("deepseek-reasoner"));
             V3 = new OpenAI(models.get("deepseek-chat"));
@@ -135,7 +145,7 @@ public class OpenAI {
                 V3 = new OpenAI(models.get("doubao-flash"));
                 K2 = new OpenAI(models.get("doubao-flash"));
             }
-            
+
             V3.JSON_OUTPUT = true;
         } catch (Exception e) {
             LoggerUtil.logExec(Level.SEVERE, "Can not find LLM config!!!");
@@ -182,7 +192,7 @@ public class OpenAI {
         if (GlobalConfig.isProxyEnabled()) {
             String proxyHost = GlobalConfig.getProxyHost();
             int proxyPort = GlobalConfig.getProxyPort();
-            
+
             if (!proxyHost.isEmpty() && proxyPort > 0) {
                 return HttpClient.newBuilder()
                         .proxy(ProxySelector.of(new InetSocketAddress(proxyHost, proxyPort)))
@@ -212,6 +222,9 @@ public class OpenAI {
     }
 
     private boolean shouldRetry(Throwable t) {
+        if (t instanceof NoToolCallException) {
+            return true;
+        }
         String message = t.getMessage();
         if (message == null) {
             return false;
@@ -279,21 +292,7 @@ public class OpenAI {
         return ThreadLocalRandom.current().nextLong(RETRY_DELAY_MS) + RETRY_DELAY_MS;
     }
 
-    private void handleRetry(String operationName, int retryCount) throws InterruptedException {
-        if (retryCount >= MAX_RETRIES) {
-            throw new RuntimeException(
-                String.format("Maximum retry attempts (%d) reached for operation: %s", 
-                    MAX_RETRIES, operationName)
-            );
-        }
-
-        long randomDelay = getRandomRetryDelay();
-        LoggerUtil.logExec(Level.WARNING, 
-            String.format("Retry attempt %d/%d for %s after %dms", 
-                retryCount + 1, MAX_RETRIES, operationName, randomDelay));
-        
-        Thread.sleep(randomDelay);
-    }
+    
 
     private int extractStatusCode(String errorMessage) {
         try {
@@ -369,9 +368,11 @@ public class OpenAI {
             } else {
                 return executeWithRetryAsync("getResponseBody", () -> getResponseBodyAsync(requestBody), 0)
                         .thenApply(responseBody -> {
+                            @SuppressWarnings("unchecked")
                             List<Map<String, Object>> choices = (List<Map<String, Object>>) responseBody.get("choices");
                             if (choices != null && !choices.isEmpty()) {
-                                Map<String, Object> choice = choices.get(0);
+                                                                Map<String, Object> choice = choices.get(0);
+                                @SuppressWarnings("unchecked")
                                 Map<String, Object> message = (Map<String, Object>) choice.get("message");
                                 if (message != null) {
                                     String content = (String) message.get("content");
@@ -390,36 +391,33 @@ public class OpenAI {
     }
 
 
-    /**
-     * 执行函数调用 (同步阻塞版本)
-     */
-    public List<ToolCall> funcCall(String prompt, List<Tool<?>> tools) {
+    public List<ToolCall> toolCall(String prompt, List<Tool<?>> tools) {
+        return toolCall(prompt, tools, ToolCallRequirement.REQUIRED);
+    }
+
+    public List<ToolCall> toolCall(String prompt, List<Tool<?>> tools, ToolCallRequirement requirement) {
         try {
-            // 调用异步版本并阻塞等待结果
-            return funcCallAsync(prompt, tools).join();
+            return toolCallAsync(prompt, tools, requirement).join();
         } catch (Exception e) {
-            // 解包CompletionException
             Throwable cause = (e instanceof CompletionException) ? e.getCause() : e;
-            cause.printStackTrace(System.out);
             LoggerUtil.logExec(Level.SEVERE, "OpenAI function calling failed: " + cause.getMessage());
             return new ArrayList<>();
         }
     }
 
-    /**
-     * 执行函数调用并返回ToolCall、content和reasoning_content (同步阻塞版本)
-     */
-    public record FuncCallResult(List<ToolCall> toolCalls, String content, String reasoningContent) {}
-    
-    public FuncCallResult funcCallWithContent(String prompt, List<Tool<?>> tools) {
+    public record ToolCallResult(List<ToolCall> toolCalls, String content, String reasoningContent) {}
+
+    public ToolCallResult toolCallWithContent(String prompt, List<Tool<?>> tools) {
+        return toolCallWithContent(prompt, tools, ToolCallRequirement.REQUIRED);
+    }
+
+    public ToolCallResult toolCallWithContent(String prompt, List<Tool<?>> tools, ToolCallRequirement requirement) {
         try {
-            // 调用异步版本并阻塞等待结果
-            return funcCallWithContentAsync(prompt, tools).join();
+            return toolCallWithContentAsync(prompt, tools, requirement).join();
         } catch (Exception e) {
-            // 解包CompletionException
             Throwable cause = (e instanceof CompletionException) ? e.getCause() : e;
             LoggerUtil.logExec(Level.SEVERE, "OpenAI function calling failed: " + cause.getMessage());
-            return new FuncCallResult(new ArrayList<>(), "", "");
+            return new ToolCallResult(new ArrayList<>(), "", "");
         }
     }
 
@@ -444,76 +442,35 @@ public class OpenAI {
         return result;
     }
 
-    /**
-     * 异步执行函数调用并返回ToolCall、content和reasoning_content (非阻塞版本)
-     */
-    public CompletableFuture<FuncCallResult> funcCallWithContentAsync(String prompt, List<Tool<?>> tools) {
+
+    public CompletableFuture<ToolCallResult> toolCallWithContentAsync(String prompt, List<Tool<?>> tools, ToolCallRequirement requirement) {
         try {
             Map<String, Object> requestBody = getBaseRequestMap(prompt);
             requestBody.put("tools", ToolFactory.toToolsArray(tools));
             requestBody.put("stream", false);
             requestBody.put("max_tokens", 4096);
 
-            return executeWithRetryAsync("funcCallWithContent", () -> getResponseBodyAsync(requestBody), 0)
+            return executeWithRetryAsync("toolCallWithContent", () -> getResponseBodyAsync(requestBody), 0)
                     .thenApply(responseBody -> {
+                        @SuppressWarnings("unchecked")
                         List<Map<String, Object>> choices = (List<Map<String, Object>>) responseBody.get("choices");
                         if (choices != null && !choices.isEmpty()) {
+                            @SuppressWarnings("unchecked")
                             Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
                             String content = (String) message.get("content");
                             String reasoning = (String) message.get("reasoning_content");
                             List<ToolCall> calls = parseToolCalls(message.get("tool_calls"));
-                            
-                            return new FuncCallResult(calls, content != null ? content : "", reasoning != null ? reasoning : "");
-                        }
-                        return new FuncCallResult(new ArrayList<>(), "", "");
-                    });
-        } catch (Exception e) {
-            LoggerUtil.logExec(Level.SEVERE, "Failed to start OpenAI function calling async: " + e.getMessage());
-            return CompletableFuture.failedFuture(e);
-        }
-    }
 
-    /**
-     * 异步执行函数调用 (非阻塞版本)
-     */
-    public CompletableFuture<List<ToolCall>> funcCallAsync(String prompt, List<Tool<?>> tools) {
-        try {
-            Map<String, Object> requestBody = getBaseRequestMap(prompt);
-            requestBody.put("tools", ToolFactory.toToolsArray(tools));
-            requestBody.put("stream", false);
-            requestBody.put("max_tokens", 4096);
-            requestBody.put("model", MODEL);
-
-            return executeWithRetryAsync("funcCall", () -> getResponseBodyAsync(requestBody), 0)
-                    .thenApply(responseBody -> {
-                        LoggerUtil.logOpenAI(Level.INFO, "OpenAI async response Body : \n" + responseBody);
-                        List<Map<String, Object>> choices = (List<Map<String, Object>>) responseBody.get("choices");
-                        if (choices != null && !choices.isEmpty()) {
-                            Map<String, Object> choice = choices.get(0);
-                            Map<String, Object> message = (Map<String, Object>) choice.get("message");
-                            if (message != null) {
-                                String content = (String) message.get("content");
-                                if (message.get("reasoning_content") != null) {
-                                    String reasoningContent = (String) message.get("reasoning_content");
-                                    content = "<thinking>\n" + reasoningContent + "\n</thinking>\n\n" + content;
-                                }
-                                ArrayList<HashMap<String, Object>> toolCalls = (ArrayList<HashMap<String, Object>>) message.getOrDefault("tool_calls", new ArrayList<>());
-                                ArrayList<ToolCall> callList = toolCalls.stream().map(call -> (HashMap<String, Object>) call.get("function"))
-                                        .map(func -> {
-                                            try {
-                                                return new ToolCall((String) func.get("name"), (String) func.get("arguments"));
-                                            } catch (JsonProcessingException e) {
-                                                LoggerUtil.logExec(Level.WARNING, "Failed to parse function call arguments: " + e.getMessage());
-                                                return null;
-                                            }
-                                        }).filter(Objects::nonNull)
-                                        .collect(Collectors.toCollection(ArrayList::new));
-
-                                LoggerUtil.logOpenAI(Level.INFO, "OpenAI response: \n" + "content :\n" + content + "\nfunction calling: \n" + callList);
-                                return callList;
+                            if (requirement == ToolCallRequirement.REQUIRED && (calls == null || calls.isEmpty())) {
+                                throw new CompletionException(new NoToolCallException("Response did not contain required tool calls."));
                             }
+
+                            return new ToolCallResult(calls, content != null ? content : "", reasoning != null ? reasoning : "");
                         }
-                        return new ArrayList<ToolCall>();
+                        if(requirement == ToolCallRequirement.REQUIRED) {
+                            throw new CompletionException(new NoToolCallException("Response was empty and did not contain required tool calls."));
+                        }
+                        return new ToolCallResult(new ArrayList<>(), "", "");
                     });
         } catch (Exception e) {
             LoggerUtil.logExec(Level.SEVERE, "Failed to start OpenAI function calling async: " + e.getMessage());
@@ -521,9 +478,11 @@ public class OpenAI {
         }
     }
 
-    /**
-     * 异步、非阻塞地执行网络请求，并带有重试逻辑
-     */
+    public CompletableFuture<List<ToolCall>> toolCallAsync(String prompt, List<Tool<?>> tools, ToolCallRequirement requirement) {
+        return toolCallWithContentAsync(prompt, tools, requirement)
+                .thenApply(ToolCallResult::toolCalls);
+    }
+
     private <T> CompletableFuture<T> executeWithRetryAsync(
             String operationName, Supplier<CompletableFuture<T>> operation, int attempt) {
 
@@ -535,8 +494,8 @@ public class OpenAI {
                 if (attempt < MAX_RETRIES && shouldRetry(cause)) {
                     long randomDelay = getRandomRetryDelay();
                     LoggerUtil.logExec(Level.WARNING,
-                            String.format("Async retry attempt %d/%d for %s after %dms",
-                                    attempt + 1, MAX_RETRIES, operationName, randomDelay));
+                            String.format("Async retry attempt %d/%d for %s due to %s. Retrying after %dms.",
+                                    attempt + 1, MAX_RETRIES, operationName, cause.getClass().getSimpleName(), randomDelay));
 
                     // 使用延迟执行器进行非阻塞等待
                     return CompletableFuture.supplyAsync(() -> null, CompletableFuture.delayedExecutor(randomDelay, TimeUnit.MILLISECONDS))
@@ -554,6 +513,7 @@ public class OpenAI {
     /**
      * 异步获取完整的响应体 (非流式)
      */
+    @SuppressWarnings("unchecked")
     private CompletableFuture<Map<String, Object>> getResponseBodyAsync(Map<String, Object> requestBody) {
         try {
             ObjectMapper mapper = new ObjectMapper();
@@ -594,6 +554,7 @@ public class OpenAI {
     /**
      * 异步处理流式响应，并将结果聚合后返回
      */
+    @SuppressWarnings("unchecked")
     private CompletableFuture<StreamedResponse> streamResponseAsync(Map<String, Object> requestBody) {
         try {
             ObjectMapper mapper = new ObjectMapper();

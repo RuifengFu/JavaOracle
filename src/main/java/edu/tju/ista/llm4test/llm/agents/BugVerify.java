@@ -456,7 +456,7 @@ public class BugVerify extends Agent {
             tools.add(new TestCaseIssueExplanationTool());
             
             // 调用LLM进行分析，确保至少返回一个工具调用
-            var result = llm.funcCallWithContent(prompt, tools);
+            var result = llm.toolCallWithContent(prompt, tools);
             var callList = result.toolCalls();
             var content = result.content();
             if (callList.isEmpty()) {
@@ -515,7 +515,7 @@ public class BugVerify extends Agent {
             tools.add(new VerdictTool());
             
             // 调用K2模型进行裁决分析，确保至少返回一个工具调用
-            var result = llm.funcCallWithContent(prompt, tools);
+            var result = llm.toolCallWithContent(prompt, tools);
             var callList = result.toolCalls();
             var content = result.content();
             if (callList.isEmpty()) {

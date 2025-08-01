@@ -157,7 +157,7 @@ public class TestCaseAgent extends Agent {
             addToHistory("THINK: Analyzing current code and proposing reduction...");
 
             List<Tool<?>> tools = List.of(toolRegistry.get("write_to_file"), ACTION_FINISH);
-            OpenAI.FuncCallResult response = this.LLM.funcCallWithContent(prompt, tools);
+            OpenAI.ToolCallResult response = this.LLM.toolCallWithContent(prompt, tools);
             List<ToolCall> toolCalls = response.toolCalls();
 
             addToHistory("THINK: Proposed " + (toolCalls != null ? toolCalls.size() : 0) + " actions.");
@@ -264,7 +264,7 @@ public class TestCaseAgent extends Agent {
             addToHistory("DECIDE: Asking LLM for next step...");
 
             List<Tool<?>> decisionTools = List.of(ACTION_CONTINUE, ACTION_FINISH, ACTION_REDO);
-            OpenAI.FuncCallResult response = this.LLM.funcCallWithContent(prompt, decisionTools);
+            OpenAI.ToolCallResult response = this.LLM.toolCallWithContent(prompt, decisionTools);
             List<ToolCall> toolCalls = response.toolCalls();
 
             if (toolCalls != null && !toolCalls.isEmpty()) {

@@ -351,7 +351,7 @@ public class TestCase {
             String prompt = PromptGen.generatePrompt("RootCause", dataModel);
             ArrayList<Tool<?>> tools = new ArrayList<>();
             tools.add(new RootCauseOutputTool());
-            var result = OpenAI.K2.funcCallWithContent(prompt, tools);
+            var result = OpenAI.K2.toolCallWithContent(prompt, tools);
             var callList = result.toolCalls();
             var content = result.content();
             if (callList.isEmpty()) {

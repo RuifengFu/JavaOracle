@@ -272,7 +272,7 @@ public class InformationCollectionAgent extends Agent {
      */
     private void collectWithTool(Tool<String> tool, String prompt, String prefix) {
         try {
-            List<ToolCall> toolCalls = llm.funcCall(prompt, Arrays.asList(tool));
+            List<ToolCall> toolCalls = llm.toolCall(prompt, Arrays.asList(tool));
             
             if (toolCalls != null) {
                 for (ToolCall toolCall : toolCalls) {
@@ -506,7 +506,7 @@ public class InformationCollectionAgent extends Agent {
         try {
             String observePrompt = buildObservePrompt(analysis, testCode, testOutput);
             List<Tool<?>> decisionTools = Arrays.asList(INFO_SUFFICIENT, INFO_INSUFFICIENT);
-            List<ToolCall> toolCalls = llm.funcCall(observePrompt, decisionTools);
+            List<ToolCall> toolCalls = llm.toolCall(observePrompt, decisionTools);
             
             if (toolCalls != null && !toolCalls.isEmpty()) {
                 String decision = toolCalls.get(0).toolName;

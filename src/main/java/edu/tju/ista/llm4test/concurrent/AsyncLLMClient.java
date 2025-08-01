@@ -221,7 +221,7 @@ public class AsyncLLMClient {
         OpenAI client = pool.take(); // 阻塞获取连接
         
         try {
-            return client.funcCall(prompt, tools);
+            return client.toolCall(prompt, tools);
         } finally {
             pool.offer(client); // 归还连接
         }
