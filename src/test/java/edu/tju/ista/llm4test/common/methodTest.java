@@ -132,7 +132,7 @@ public class methodTest {
         dataModel.put("testOutput", result.toString());
 
         String prompt = PromptGen.generatePrompt("RootCause", dataModel);
-        var call = OpenAI.DoubaoFlash.funcCall(prompt, List.of(new RootCauseOutputTool())).get(0);
+        var call = OpenAI.DoubaoFlash.toolCall(prompt, List.of(new RootCauseOutputTool())).get(0);
         var map = call.arguments;
         System.out.println(map);
         System.out.println(map.get("report_bug"));
