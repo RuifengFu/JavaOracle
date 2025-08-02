@@ -62,14 +62,21 @@ public class TestCaseAgent extends Agent {
     }
 
     public TestCase run(TestCase testCase, Path workspaceRoot) {
+        String header = "Test Case Minimization Run: " + testCase.getName();
+        LoggerUtil.logVerify(Level.INFO, header, "Minimization agent started.");
+
         this.testCase = testCase;
         history.clear();
         feedbackHistory.clear();
         Path testFilePath = setupWorkspace(testCase, workspaceRoot);
-        if (testFilePath == null) return testCase;
+        if (testFilePath == null) {
+            LoggerUtil.logVerify(Level.WARNING, header, "Minimization agent failed: Could not set up workspace.");
+            return testCase;
+        }
 
         String originalFailureOutput = testCase.getResult().getOutput();
-        String currentCode = testCase.getSourceCode();
+        String originalCode = testCase.getSourceCode();
+        String currentCode = originalCode;
 
         addToHistory("=== TestCaseAgent Started ===");
         addToHistory("Target: " + testCase.name);
@@ -131,7 +138,7 @@ public class TestCaseAgent extends Agent {
         }
 
         addToHistory("=== Minimization Complete ===");
-        logFinalResult();
+        logFinalResult(originalCode);
         return minimizedTestCase;
     }
 
@@ -295,15 +302,14 @@ public class TestCaseAgent extends Agent {
         }
     }
 
-    private void logFinalResult() {
-        String originCode = testCase.getSourceCode();
+    private void logFinalResult(String originalCode) {
         String reducedCode = minimizedTestCase.getSourceCode();
-        boolean success = !originCode.equals(reducedCode);
-        int originSize = originCode.length();
+        boolean success = !originalCode.equals(reducedCode);
+        int originSize = originalCode.length();
         int reducedSize = reducedCode.length();
         double reductionPercentage = originSize > 0 ? (double) (originSize - reducedSize) / originSize * 100 : 0;
 
-        String header = "Test Case Minimization: " + minimizedTestCase.getName();
+        String header = "Test Case Minimization Result: " + minimizedTestCase.getName();
         String message = String.format(
             "  Success: %s\n" +
             "  Original Size: %d chars\n" +

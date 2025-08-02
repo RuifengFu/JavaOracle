@@ -241,7 +241,6 @@ public class BugVerify extends Agent {
             }
         }
 
-
         // 1. 初始分析
         String initialInsight = performInitialAnalysis();
         saveToFile(verifyContextPath.resolve("initial_insight.json").toString(), initialInsight);
@@ -251,11 +250,9 @@ public class BugVerify extends Agent {
         // 保存初始分析结果
 
 
-
         
         // 2. 收集信息
         collectRelevantInformation(initialInsight);
-        logWithTestCase("信息收集完成，共 " + collectedInfo.size() + " 项");
         
         // 保存收集到的信息
         saveCollectedInfo();
