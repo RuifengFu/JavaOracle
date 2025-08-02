@@ -298,10 +298,26 @@ public class TestCaseAgent extends Agent {
     private void logFinalResult() {
         String originCode = testCase.getSourceCode();
         String reducedCode = minimizedTestCase.getSourceCode();
-        if (originCode.equals(reducedCode)) {
+        boolean success = !originCode.equals(reducedCode);
+        int originSize = originCode.length();
+        int reducedSize = reducedCode.length();
+        double reductionPercentage = originSize > 0 ? (double) (originSize - reducedSize) / originSize * 100 : 0;
+
+        String header = "Test Case Minimization: " + minimizedTestCase.getName();
+        String message = String.format(
+            "  Success: %s\n" +
+            "  Original Size: %d chars\n" +
+            "  Reduced Size: %d chars\n" +
+            "  Reduction: %.2f%%",
+            success, originSize, reducedSize, reductionPercentage
+        );
+
+        LoggerUtil.logVerify(Level.INFO, header, message);
+
+        if (!success) {
             LoggerUtil.logExec(Level.WARNING, "Minimization did not change the test case: " + minimizedTestCase.getFile());
         } else {
-            LoggerUtil.logExec(Level.INFO, "Reduce successful: " + minimizedTestCase.getFile() + " | Reduction: " + (originCode.length() - reducedCode.length()) + " chars");
+            LoggerUtil.logExec(Level.INFO, "Reduce successful: " + minimizedTestCase.getFile() + " | Reduction: " + (originSize - reducedSize) + " chars");
         }
     }
     

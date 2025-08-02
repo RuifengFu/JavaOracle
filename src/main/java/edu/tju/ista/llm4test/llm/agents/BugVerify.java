@@ -45,7 +45,7 @@ public class BugVerify extends Agent {
     private final HypothesisAgent hypothesisAgent;
     
     // LLM实例
-    private final OpenAI llm = OpenAI.DoubaoFlash;
+    private final OpenAI llm = OpenAI.K2;
 
     public TestCase getTestCase() {
         return testCase;
@@ -75,6 +75,7 @@ public class BugVerify extends Agent {
     private String bugReportPath = "BugReport";
     private String verifyContextFolder = null;
     private String testCaseName = null;
+    private Path verifyContextPath = null;
     
     // 信息源标记
     private int infoCounter = 0;
@@ -167,7 +168,7 @@ public class BugVerify extends Agent {
             
             // 创建完整路径 (始终在testcase下)
             Path testCasePath = Paths.get(bugReportPath, "testcase", this.testCaseName);
-            Path verifyContextPath = testCasePath.resolve(verifyContextFolder);
+            this.verifyContextPath = testCasePath.resolve(verifyContextFolder);
             Files.createDirectories(verifyContextPath);
         
             // 保存测试用例和输出
@@ -372,16 +373,18 @@ public class BugVerify extends Agent {
      * @return 增强验证的结果：true表示确认是bug，false表示不是bug或验证失败
      */
     public boolean enhanceVerify() {
-        logWithTestCase("开始增强验证流程");
+        String header = "Enhance Verification: " + getTestCaseIdentifier();
+        LoggerUtil.logVerify(Level.INFO, header, "Verification process started.");
         
         // 前置条件检查：确保测试用例存在且被识别为bug
         if (testCase == null || testCase.getResult() == null) {
             logWithTestCase("测试用例未设置，跳过增强验证");
             this.enhanceVerifyFailureReason = "Test case not set.";
+            LoggerUtil.logVerify(Level.WARNING, header, "Verification failed: Test case not set.");
             return false;
         }
         
-        Path verifyContextPath = Paths.get(bugReportPath, "testcase", testCaseName, verifyContextFolder);
+        Path verifyContextPath = this.verifyContextPath;
         
         // ===== 第一步：多重验证确保一致性 =====
         // 目标：通过两次额外的验证来确保bug判断的稳定性
@@ -440,6 +443,7 @@ public class BugVerify extends Agent {
             }
             saveToFile(verifyContextPath.resolve("enhance_verify_failed.md").toString(), failureSummary.toString());
             
+            LoggerUtil.logVerify(Level.INFO, header, "Final Verdict: TESTCASE_ISSUE (Inconsistent results)");
             return false;
         }
         
@@ -467,21 +471,19 @@ public class BugVerify extends Agent {
         // 如果裁决确认是bug，继续完整的分析流程
         // 如果裁决认为是测试用例问题，停止并返回增强验证结果
         if (verdict != null && !verdict.isEmpty()) {
+            LoggerUtil.logVerify(Level.INFO, header, "Final Verdict: " + verdict);
             if ("BUG".equals(verdict)) {
                 logWithTestCase("裁决确认是bug，继续进行分析");
                 return true;
-            } else if ("TESTCASE_ISSUE".equals(verdict)) {
-                logWithTestCase("裁决认为是测试用例问题，增强验证完成");
-                this.enhanceVerifyFailureReason = "Verdict: TESTCASE_ISSUE. The adjudicator determined the issue lies with the test case.";
-                return false;
             } else {
-                logWithTestCase("裁决结果不明确: " + verdict + "，增强验证完成");
-                this.enhanceVerifyFailureReason = "Verdict: " + verdict + ". The adjudicator could not make a clear determination.";
+                logWithTestCase("裁决认为是测试用例问题或不明确，增强验证完成");
+                this.enhanceVerifyFailureReason = "Verdict: " + verdict + ". The adjudicator determined the issue does not qualify as a bug.";
                 return false;
             }
         } else {
             logWithTestCase(Level.WARNING, "裁决结果为空，无法判断");
             this.enhanceVerifyFailureReason = "Verdict is null or empty. Adjudication process failed.";
+            LoggerUtil.logVerify(Level.WARNING, header, "Final Verdict: UNKNOWN (Adjudication failed)");
             return false;
         }
     }
@@ -594,8 +596,7 @@ public class BugVerify extends Agent {
             
             // 保存完整的裁决分析内容到文件（包含推理过程）
             String fullAnalysis = content + "\n" + verdictCall.arguments.toString();
-            if (verifyContextFolder != null && testCaseName != null) {
-                Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
+            if (verifyContextPath != null) {
                 saveToFile(verifyContextPath.resolve("verdict_full_analysis.txt").toString(), fullAnalysis);
             }
             
@@ -745,16 +746,28 @@ public class BugVerify extends Agent {
             LoggerUtil.logExec(Level.WARNING, "信息收集过程中出现错误: " + e.getMessage());
             e.printStackTrace();
         }
+        
+        int iterations = infoCollectionAgent.getNumIterations();
+
+        String header = "Information Collection: " + getTestCaseIdentifier();
+        String message = String.format(
+            "  Items Collected: %d\n" +
+            "  Total Size: %d chars\n" +
+            "  Iterations: %d",
+            collectedInfo.size(),
+            collectedInfo.values().stream().mapToInt(v -> v.toString().length()).sum(),
+            iterations
+        );
+        LoggerUtil.logVerify(Level.INFO, header, message);
     }
     
     /**
      * 保存完整的信息收集详细报告
      */
     private void saveDetailedInfoReport(String detailedReport) {
-        if (verifyContextFolder == null || testCaseName == null) return;
+        if (verifyContextPath == null) return;
         
         try {
-            Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
             Path infoDir = verifyContextPath.resolve("collected_info");
             Files.createDirectories(infoDir);
             
@@ -772,11 +785,10 @@ public class BugVerify extends Agent {
      * 保存收集到的信息
      */
     private void saveCollectedInfo() {
-        if (verifyContextFolder == null || testCaseName == null) return;
+        if (verifyContextPath == null) return;
         
         try {
             // 创建info子目录
-            Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
             Path infoDir = verifyContextPath.resolve("collected_info");
             Files.createDirectories(infoDir);
             
@@ -1012,7 +1024,7 @@ public class BugVerify extends Agent {
         try {
             String jsonFormat = "{\"bug_type\": \"<bug_type>\", \"report\": \"<markdown_report>\"}";
             String prompt = PromptGen.generateExtractJsonPrompt(brokenJson, jsonFormat);
-            return OpenAI.DoubaoFlash.messageCompletion(prompt, 0.5, false);
+            return OpenAI.DoubaoFlash.messageCompletion(prompt, 0.3, true);
         } catch (Exception e) {
             logWithTestCase(Level.SEVERE, "使用LLM修复JSON失败: " + e.getMessage());
             return brokenJson; // 返回原始的错误JSON
@@ -1057,11 +1069,10 @@ public class BugVerify extends Agent {
      * 保存消融实验结果
      */
     private void saveAblationResults(List<AblationResult> results) {
-        if (verifyContextFolder == null || testCaseName == null) return;
+        if (verifyContextPath == null) return;
         
         try {
-            Path testcaseWorkSpace = Paths.get(bugReportPath, "testcase", testCaseName);
-            Path ablationDir = testcaseWorkSpace.resolve("ablation_results");
+            Path ablationDir = verifyContextPath.getParent().resolve("ablation_results");
             Files.createDirectories(ablationDir);
             
             // 保存每个配置的结果
@@ -1139,10 +1150,9 @@ public class BugVerify extends Agent {
      * 保存生成报告的完整prompt到文件
      */
     private void savePromptToFile(String prompt, AblationConfig config) {
-        if (verifyContextFolder == null || testCaseName == null) return;
+        if (verifyContextPath == null) return;
         
         try {
-            Path verifyContextPath = Paths.get(bugReportPath, testCaseName, verifyContextFolder);
             Path promptsDir = verifyContextPath.resolve("prompts");
             Files.createDirectories(promptsDir);
             

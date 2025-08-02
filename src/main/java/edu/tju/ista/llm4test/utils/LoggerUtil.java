@@ -11,6 +11,7 @@ public class LoggerUtil {
     private static final Logger openaiLogger = Logger.getLogger("openaiLogger");
     private static final Logger execLogger = Logger.getLogger("execLogger");
     private static final Logger resultLogger = Logger.getLogger("resultLogger");
+    private static final Logger verifyLogger = Logger.getLogger("verifyLogger");
 
     static {
         try {
@@ -31,6 +32,13 @@ public class LoggerUtil {
             resultFileHandler.setFormatter(new SimpleFormatter());
             resultLogger.addHandler(resultFileHandler);
             resultLogger.setLevel(Level.ALL);
+
+            // Setup verify.log
+            FileHandler verifyFileHandler = new FileHandler("verify.log", true);
+            verifyFileHandler.setFormatter(new SimpleFormatter());
+            verifyLogger.addHandler(verifyFileHandler);
+            verifyLogger.setLevel(Level.ALL);
+            
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -49,5 +57,10 @@ public class LoggerUtil {
     public static void logResult(Level level, String message) {
         resultLogger.log(level, message);
         execLogger.log(level, message); // exec.log contains result information
+    }
+
+    public static void logVerify(Level level, String header, String message) {
+        String formattedMessage = String.format("\n===== %s =====\n%s", header, message);
+        verifyLogger.log(level, formattedMessage);
     }
 }

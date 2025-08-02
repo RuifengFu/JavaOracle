@@ -37,7 +37,12 @@ public class InformationCollectionAgent extends Agent {
     // Current collection status
     private final List<CollectedInfo> collectedInfos = new ArrayList<>();
     private int currentSize = 0;
+    private int numIterations = 0;
     
+    public int getNumIterations() {
+        return numIterations;
+    }
+
     public InformationCollectionAgent(String sourcePath, String javadocPath) {
         super("You are an information collection expert responsible for gathering the most important information related to Bug analysis.");
         
@@ -73,6 +78,7 @@ public class InformationCollectionAgent extends Agent {
         
         // Observation loop - max 3 iterations
         for (int iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
+            this.numIterations = iteration;
             LoggerUtil.logExec(Level.INFO, "Information collection iteration " + iteration + "/" + MAX_ITERATIONS);
             
             // Collect information
