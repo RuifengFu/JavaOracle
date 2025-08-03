@@ -96,10 +96,8 @@ public class TestCaseAgent extends Agent {
             String previousFeedback = feedbackHistory.isEmpty() ? "" : String.join("\n", feedbackHistory);
             List<ToolCall> toolCalls = think(currentCode, originalFailureOutput, previousFeedback, testFilePath);
             if (toolCalls.isEmpty()) {
-                addToHistory(Level.WARNING, "LOOP: THINK failed to produce a tool call, skipping.");
-                feedbackHistory.add("Iteration " + (i + 1) + ": THINK step failed to produce any action. Retrying.");
-                if (feedbackHistory.size() > 3) feedbackHistory.remove(0);
-                continue;
+                addToHistory(Level.INFO, "LOOP: THINK proposed no tool calls. Proceeding to DECIDE whether to finish.");
+                // Let the loop proceed to observe and decide, which should lead to finishing.
             }
 
             // ACT
@@ -163,7 +161,7 @@ public class TestCaseAgent extends Agent {
             DebugUtils.getInstance().saveToFileWithTimestamp("TestCaseAgent", testCase.name + "_think_prompt", prompt);
             addToHistory("THINK: Analyzing current code and proposing reduction...");
 
-            List<Tool<?>> tools = List.of(toolRegistry.get("write_to_file"), ACTION_FINISH);
+            List<Tool<?>> tools = List.of(toolRegistry.get("write_to_file"));
             OpenAI.ToolCallResult response = this.LLM.toolCallWithContent(prompt, tools);
             List<ToolCall> toolCalls = response.toolCalls();
 

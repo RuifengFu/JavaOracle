@@ -12,7 +12,10 @@ ${test_failure_output}
 
 **Test File Path:** ${test_file_path}
 
-**Previous Feedback:** ${previous_feedback}
+<#if previous_feedback?has_content>
+**Previous Feedback from Last Iteration:**
+${previous_feedback}
+</#if>
 
 **Primary Directive: Analyze the failure, identify the critical code path, and aggressively remove everything else.**
 
@@ -42,9 +45,9 @@ ${test_failure_output}
   ```
 
 **Tool Protocol:**
-You have access to the following tools. You must call one of them in each turn.
+You have access to the following tool. 
 
-- `write_to_file(file_path: str, content: str)`: Use this to apply your change (either a reduction or adding debug logs). The system will automatically execute the test to verify your change. If the original failure is not reproduced, your change is automatically reverted.
-- `finish_minimization()`: Call this function with no parameters **only** when the code is absolutely minimal and no further simplification is possible.
+- `write_to_file(path: str, content: str)`: Use this to apply your change (either a reduction or adding debug logs). The system will automatically execute the test to verify your change. If the original failure is not reproduced, your change is automatically reverted.
 
-**Final Instruction:** Think like a delta-debugging pass, but supercharged with an understanding of the program's runtime failure. Be relentless. Be precise. Isolate the bug. **You must end your response with a call to either `write_to_file` or `finish_minimization`.** 
+**Final Instruction:** Think like a delta-debugging pass, but supercharged with an understanding of the program's runtime failure. Be relentless. Be precise. Isolate the bug.
+**If you believe the code is fully minimized and no further simplification is possible, do not call any tools.** Otherwise, you must end your response with a call to `write_to_file`.
