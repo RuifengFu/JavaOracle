@@ -472,8 +472,11 @@ public class BugVerify extends Agent {
             if ("BUG".equals(verdict)) {
                 logWithTestCase("裁决确认是bug，继续进行分析");
                 return true;
-            } else {
-                logWithTestCase("裁决认为是测试用例问题或不明确，增强验证完成");
+            } else if("UNCLEAR".equals(verdict)) {
+                logWithTestCase("裁决结果不明确，无法判断");
+                return true; // UNCLEAR需要继续判断。
+            }   else {
+                logWithTestCase("裁决认为是测试用例问题");
                 this.enhanceVerifyFailureReason = "Verdict: " + verdict + ". The adjudicator determined the issue does not qualify as a bug.";
                 return false;
             }
@@ -1481,15 +1484,17 @@ public class BugVerify extends Agent {
     private TestCase updateTestCaseToVerifyDir(TestCase originalTestCase, Path verifyDir) {
         try {
             // 计算相对路径：从test目录到具体测试文件
-            Path testDir = Paths.get(GlobalConfig.getTestDir());
+            Path testDir = Paths.get(GlobalConfig.getTestDir()).toAbsolutePath();
             Path originalPath = originalTestCase.getFile().toPath();
+            logWithTestCase(Level.INFO, "Updating test case paths: testDir=" + testDir + ", originalPath=" + originalPath);
             Path relativePath = testDir.relativize(originalPath);
+            logWithTestCase(Level.INFO, "Calculated relativePath: " + relativePath);
             
             // 在verify目录中的新路径
             Path newTestPath = verifyDir.resolve(relativePath);
             
             if (!Files.exists(newTestPath)) {
-                LoggerUtil.logExec(Level.WARNING, "Test file not found in verify dir: " + newTestPath);
+                logWithTestCase(Level.WARNING, "Test file not found in verify dir: " + newTestPath);
                 return null;
             }
             
@@ -1502,11 +1507,11 @@ public class BugVerify extends Agent {
             // 设置API文档处理器（使用配置创建新的处理器以保证一致性）
             verifyTestCase.setApiDocProcessor(ApiInfoProcessor.fromConfig());
             
-            LoggerUtil.logExec(Level.INFO, "Test case updated to verify environment: " + newTestPath);
+            logWithTestCase(Level.INFO, "Test case updated to verify environment: " + newTestPath);
             return verifyTestCase;
             
         } catch (Exception e) {
-            LoggerUtil.logExec(Level.SEVERE, "Failed to update test case to verify dir: " + e.getMessage());
+            logWithTestCase(Level.SEVERE, "Failed to update test case to verify dir: " + e.getMessage());
             return null;
         }
     }
