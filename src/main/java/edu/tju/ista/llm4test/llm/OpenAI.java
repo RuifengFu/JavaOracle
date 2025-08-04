@@ -56,8 +56,12 @@ public class OpenAI {
     }
 
     public static class NoToolCallException extends RuntimeException {
-        public NoToolCallException(String message) {
+        public final String content;
+        public final String reasoningContent;
+        public NoToolCallException(String message, String content, String reasoningContent) {
             super(message);
+            this.content = content;
+            this.reasoningContent = reasoningContent;
         }
     }
 
@@ -416,6 +420,11 @@ public class OpenAI {
             return toolCallWithContentAsync(prompt, tools, requirement).join();
         } catch (Exception e) {
             Throwable cause = (e instanceof CompletionException) ? e.getCause() : e;
+            if (cause instanceof NoToolCallException) {
+                LoggerUtil.logExec(Level.WARNING, "OpenAI function calling failed after retries: " + cause.getMessage());
+                NoToolCallException noToolEx = (NoToolCallException) cause;
+                return new ToolCallResult(new ArrayList<>(), noToolEx.content, noToolEx.reasoningContent);
+            }
             LoggerUtil.logExec(Level.SEVERE, "OpenAI function calling failed: " + cause.getMessage());
             return new ToolCallResult(new ArrayList<>(), "", "");
         }
@@ -462,13 +471,13 @@ public class OpenAI {
                             List<ToolCall> calls = parseToolCalls(message.get("tool_calls"));
 
                             if (requirement == ToolCallRequirement.REQUIRED && (calls == null || calls.isEmpty())) {
-                                throw new CompletionException(new NoToolCallException("Response did not contain required tool calls."));
+                                throw new CompletionException(new NoToolCallException("Response did not contain required tool calls.", content, reasoning));
                             }
 
                             return new ToolCallResult(calls, content != null ? content : "", reasoning != null ? reasoning : "");
                         }
                         if(requirement == ToolCallRequirement.REQUIRED) {
-                            throw new CompletionException(new NoToolCallException("Response was empty and did not contain required tool calls."));
+                            throw new CompletionException(new NoToolCallException("Response was empty and did not contain required tool calls.", "", ""));
                         }
                         return new ToolCallResult(new ArrayList<>(), "", "");
                     });

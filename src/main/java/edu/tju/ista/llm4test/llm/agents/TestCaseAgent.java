@@ -28,7 +28,7 @@ public class TestCaseAgent extends Agent {
 
     private static final Tool<Void> ACTION_CONTINUE = new BasicTool("continue_minimization", "Continue to the next minimization iteration.");
     private static final Tool<Void> ACTION_FINISH = new BasicTool("finish_minimization", "Finish the minimization process as it is complete.");
-    private static final Tool<Void> ACTION_REDO = new BasicTool("redo_simplification", "Abandon the current simplification and revert to the previous code.");
+    private static final Tool<Void> ACTION_REDO = new RedoTool("redo_simplification", "Abandon the current simplification and revert to the previous code, providing feedback.");
 
 
     private final ToolRegistry toolRegistry;
@@ -48,7 +48,7 @@ public class TestCaseAgent extends Agent {
 
     public TestCaseAgent() {
         super("You are an expert test case minimizer. Your goal is to reduce a given Java test case to its minimal form while preserving the original failure.");
-        this.LLM = OpenAI.DoubaoFlash;
+        this.LLM = OpenAI.K2;
         this.toolRegistry = new ToolRegistry();
         this.history = new ArrayList<>();
         this.feedbackHistory = new ArrayList<>();
@@ -91,7 +91,7 @@ public class TestCaseAgent extends Agent {
             if (toolCalls.isEmpty()) {
                 addToHistory(Level.WARNING, "LOOP: THINK failed to produce a tool call, skipping.");
                 feedbackHistory.add("Iteration " + (i + 1) + ": THINK step failed to produce any action. Retrying.");
-                if (feedbackHistory.size() > 3) feedbackHistory.remove(0);
+                if (feedbackHistory.size() > 5) feedbackHistory.remove(0);
                 continue;
             }
 
@@ -121,11 +121,12 @@ public class TestCaseAgent extends Agent {
                 currentCode = observeResult.newCode;
                 minimizedTestCase.setSourceCode(currentCode);
                 minimizedTestCase.setResult(observeResult.lastTestResult);
-                // Use the generic observation summary as feedback on success
-                feedbackHistory.add("Iteration " + (i + 1) + ":\n" + observeResult.feedback);
+                // Use the LLM's own explanation for 'continue' as the feedback. It's more insightful
+                // than the raw observation summary.
+                feedbackHistory.add("Iteration " + (i + 1) + ": " + decision.feedback);
             }
             
-            if (feedbackHistory.size() > 3) {
+            if (feedbackHistory.size() > 5) {
                 feedbackHistory.remove(0);
             }
         }
@@ -152,15 +153,23 @@ public class TestCaseAgent extends Agent {
     private List<ToolCall> think(String currentCode, String originalFailureOutput, String previousFeedback, Path testFilePath) {
         try {
             String relativeTestPath = testFilePath.getFileName().toString();
+            if (!previousFeedback.isEmpty()) {
+                addToHistory("THINK: Providing previous feedback to LLM:\n" + previousFeedback);
+            }
             String prompt = PromptGen.generateTestCaseMinimizationReducePrompt(originalFailureOutput, currentCode, relativeTestPath, previousFeedback);
             DebugUtils.getInstance().saveToFileWithTimestamp("TestCaseAgent", testCase.name + "_think_prompt", prompt);
             addToHistory("THINK: Analyzing current code and proposing reduction...");
 
-            List<Tool<?>> tools = List.of(toolRegistry.get("write_to_file"), ACTION_FINISH);
+            List<Tool<?>> tools = List.of(toolRegistry.get("write_to_file"));
             OpenAI.ToolCallResult response = this.LLM.toolCallWithContent(prompt, tools);
             List<ToolCall> toolCalls = response.toolCalls();
 
             addToHistory("THINK: Proposed " + (toolCalls != null ? toolCalls.size() : 0) + " actions.");
+            if (toolCalls != null && !toolCalls.isEmpty()) {
+                for (ToolCall toolCall : toolCalls) {
+                    addToHistory("THINK: Proposing action: " + toolCall.toolName + " with arguments: " + toolCall.arguments);
+                }
+            }
 
             if (toolCalls == null || toolCalls.isEmpty()) {
                 addToHistory(Level.INFO, "THINK: No tool_call in response, trying to extract code manually.");
@@ -187,6 +196,7 @@ public class TestCaseAgent extends Agent {
         // Auto-execute test after a file write
         if (toolCalls.stream().anyMatch(tc -> tc.toolName.equals("write_to_file"))) {
             toolCalls.add(new ToolCall("jtreg_execute", Map.of(
+                "content", testCase.getFile().getAbsolutePath().toString(),
                 "is_file_path", true,
                 "class_name", testCase.getName()
             )));
@@ -197,10 +207,10 @@ public class TestCaseAgent extends Agent {
             Map<String, Object> parameters = toolCall.arguments;
 
             if (toolName.equals("write_to_file")) {
-                String relativePath = (String) parameters.get("path");
-                Path absolutePath = workspace_root.resolve(relativePath).normalize();
-                parameters.put("path", absolutePath.toString());
-                addToHistory("ACT: Resolved path to " + absolutePath);
+                String fixedPath = testCase.getFile().getAbsolutePath();
+                addToHistory("ACT: Forcing write_to_file to target: " + fixedPath
+                        + ". Original path from LLM was: " + parameters.get("path"));
+                parameters.put("path", fixedPath);
             }
 
             addToHistory("ACT: Executing " + toolName);
@@ -246,6 +256,15 @@ public class TestCaseAgent extends Agent {
             feedback.append("--- NEW OUTPUT ---\n").append(output);
         } else {
             feedback.append("Test execution failed or did not run after modification.");
+            if (testIndex != -1) {
+                ToolResponse<?> response = toolResponses.get(testIndex);
+                if (!response.isSuccess()) {
+                    String failureReason = response.getResult() != null ? response.getResult().toString() : "Unknown failure reason";
+                    feedback.append(" Failure reason: ").append(failureReason);
+                }
+            } else {
+                feedback.append(" 'jtreg_execute' tool was not run.");
+            }
         }
 
         try {
@@ -259,6 +278,10 @@ public class TestCaseAgent extends Agent {
     }
     
     private Decision decideNextAction(String feedback, String originalFailure, TestResult currentResult) {
+        if (currentResult == null) {
+            currentResult = new TestResult(edu.tju.ista.llm4test.execute.TestResultKind.TEST_FAIL);
+            currentResult.setOutput("Test execution failed or did not produce a result.");
+        }
         try {
             String prompt = PromptGen.generateTestCaseObserveAndDecidePrompt(feedback, originalFailure, currentResult);
             addToHistory("DECIDE: Asking LLM for next step...");
@@ -268,13 +291,23 @@ public class TestCaseAgent extends Agent {
             List<ToolCall> toolCalls = response.toolCalls();
 
             if (toolCalls != null && !toolCalls.isEmpty()) {
-                String actionName = toolCalls.get(0).toolName;
-                String explanation = response.content(); // Capture the explanation
-                addToHistory("DECIDE: LLM chose action: " + actionName);
-                if (explanation != null && !explanation.isBlank()){
-                    addToHistory("DECIDE: LLM explanation: " + explanation);
+                ToolCall chosenCall = toolCalls.get(0);
+                String actionName = chosenCall.toolName;
+                String feedbackText;
+
+                if (actionName.equals(ACTION_REDO.getName())) {
+                    // For the RedoTool, the feedback is in a specific 'feedback' argument.
+                    feedbackText = (String) chosenCall.arguments.get("feedback");
+                } else {
+                    // For other tools, the explanation is in the general 'content'.
+                    feedbackText = response.content();
                 }
-                return new Decision(actionName, explanation);
+
+                addToHistory("DECIDE: LLM chose action: " + actionName);
+                if (feedbackText != null && !feedbackText.isBlank()){
+                    addToHistory("DECIDE: LLM explanation/feedback: " + feedbackText);
+                }
+                return new Decision(actionName, feedbackText);
             } else {
                 addToHistory(Level.WARNING,"DECIDE: LLM failed to choose an action, defaulting to continue.");
                 return new Decision(ACTION_CONTINUE.getName(), "LLM failed to provide a decision.");

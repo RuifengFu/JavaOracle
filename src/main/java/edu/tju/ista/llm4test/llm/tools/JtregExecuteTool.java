@@ -107,15 +107,17 @@ public class JtregExecuteTool implements Tool<TestResult> {
             
             // 创建测试执行器并执行测试 - 使用固定的工作空间结构
             TestExecutor executor = new TestExecutor();
-            LoggerUtil.logExec(Level.INFO, "开始执行差分测试: " + testFile.getPath());
-
+            // TestExecutor的differentialTesting封装了执行逻辑
+            // 无论测试用例本身是通过还是失败，只要执行器成功完成，这里都会返回一个有效的TestResult
             TestResult result = executor.differentialTesting(testFile);
             
+            // 工具本身执行成功，返回包含测试结果的ToolResponse
             return ToolResponse.success(result);
         } catch (Exception e) {
-            LoggerUtil.logExec(Level.SEVERE, "测试执行失败: " + e.getMessage());
+            // 如果TestExecutor执行过程中抛出异常，说明工具执行失败
+            LoggerUtil.logExec(Level.SEVERE, "JtregExecuteTool执行失败: " + e.getMessage());
             e.printStackTrace();
-            return ToolResponse.failure("测试执行失败: " + e.getMessage());
+            return ToolResponse.failure("JtregExecuteTool执行时发生异常: " + e.getMessage());
         }
     }
 
