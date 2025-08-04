@@ -17,8 +17,6 @@ import edu.tju.ista.llm4test.config.GlobalConfig;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.logging.Level;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -76,10 +74,15 @@ public class BugVerify extends Agent {
     private String verifyContextFolder = null;
     private String testCaseName = null;
     private Path verifyContextPath = null;
+    private Path sharedVerifyDir = null;
     
     // 信息源标记
     private int infoCounter = 0;
     private Map<String, String> infoSourceMap = new HashMap<>();
+
+    public void setSharedVerifyDir(Path sharedVerifyDir) {
+        this.sharedVerifyDir = sharedVerifyDir;
+    }
     
     /**
      * 获取测试用例标识符，用于日志记录
@@ -195,52 +198,48 @@ public class BugVerify extends Agent {
         Path verifyContextPath = sourceTestCaseDir.resolve(verifyContextFolder);
 
         // 0. TestCase Reproduce & reduce - 在完整环境中进行约简
-        if (this.testCase != null && this.testCase.getResult() != null && this.testCase.getResult().isFail()) {
-            logWithTestCase("Verified failure detected. Setting up verify environment for minimization: " + testCase.name);
+        if (this.testCase != null && this.testCase.getResult() != null && this.testCase.getResult().isFail() && this.sharedVerifyDir != null) {
+            logWithTestCase("Verified failure detected. Preparing shared verify environment for minimization: " + testCase.name);
             
-            // 创建verify环境并复制完整测试目录
-            Path verifyDir = setupVerifyEnvironment();
-            if (verifyDir == null) {
-                logWithTestCase(Level.WARNING, "Failed to setup verify environment, skipping minimization");
-            } else {
-                // 更新测试用例路径到verify目录
-                TestCase verifyTestCase = updateTestCaseToVerifyDir(this.testCase, verifyDir);
-                
-                if (verifyTestCase != null) {
-                    logWithTestCase("Starting test case minimization in verify environment for: " + verifyTestCase.name);
-                    try {
-                        TestCase minimizedCase = minimizationAgent.run(verifyTestCase, verifyDir);
+            // 更新测试用例路径到verify目录
+            TestCase verifyTestCase = prepareTestCaseInSharedDir(this.testCase, this.sharedVerifyDir);
+            
+            if (verifyTestCase != null) {
+                logWithTestCase("Starting test case minimization in shared verify environment for: " + verifyTestCase.name);
+                try {
+                    TestCase minimizedCase = minimizationAgent.run(verifyTestCase, this.sharedVerifyDir);
 
-                        // 检查约简是否成功
-                        if (minimizedCase != null && minimizedCase.getSourceCode() != null &&
-                            !minimizedCase.getSourceCode().equals(verifyTestCase.getSourceCode())) {
+                    // 检查约简是否成功
+                    if (minimizedCase != null && minimizedCase.getSourceCode() != null &&
+                        !minimizedCase.getSourceCode().equals(verifyTestCase.getSourceCode())) {
 
-                            String minimizedCode = minimizedCase.getSourceCode();
-                            // Save the minimized code to the original context path for record keeping
-                            String originalFileName = this.testCase.getFile().getName();
-                            String minimizedFileName = originalFileName.replace(".java", "_minimized.java");
-                            Path minimizedFilePath = verifyContextPath.resolve(minimizedFileName);
+                        String minimizedCode = minimizedCase.getSourceCode();
+                        // Save the minimized code to the original context path for record keeping
+                        String originalFileName = this.testCase.getFile().getName();
+                        String minimizedFileName = originalFileName.replace(".java", "_minimized.java");
+                        Path minimizedFilePath = verifyContextPath.resolve(minimizedFileName);
 
-                            Files.writeString(minimizedFilePath, minimizedCode);
-                            File minimizedFile = minimizedFilePath.toFile();
+                        Files.writeString(minimizedFilePath, minimizedCode);
+                        File minimizedFile = minimizedFilePath.toFile();
 
-                            logWithTestCase("Minimization successful in verify environment. Minimized code saved at: " + minimizedFile.getAbsolutePath());
-                            
-                            // Update the agent's state to use the minimized test case for subsequent steps
-                            this.testCase.setFile(minimizedFile);
-                            this.testCode = minimizedCode;
-                            this.testOutput = minimizedCase.getResult().getOutput();
-                            logWithTestCase("BugVerifyAgent will now proceed with the minimized test case from verify environment.");
-                        } else {
-                            logWithTestCase(Level.WARNING, "Minimization process in verify environment did not reduce the test case. Continuing with the original test case.");
-                        }
-                    } catch (Exception e) {
-                        logWithTestCase(Level.SEVERE, "An exception occurred during test case minimization in verify environment. Continuing with the original test case. " + e);
+                        logWithTestCase("Minimization successful in verify environment. Minimized code saved at: " + minimizedFile.getAbsolutePath());
+                        
+                        // Update the agent's state to use the minimized test case for subsequent steps
+                        this.testCase.setFile(minimizedFile);
+                        this.testCode = minimizedCode;
+                        this.testOutput = minimizedCase.getResult().getOutput();
+                        logWithTestCase("BugVerifyAgent will now proceed with the minimized test case from verify environment.");
+                    } else {
+                        logWithTestCase(Level.WARNING, "Minimization process in verify environment did not reduce the test case. Continuing with the original test case.");
                     }
-                } else {
-                    logWithTestCase(Level.WARNING, "Failed to update test case to verify directory, skipping minimization");
+                } catch (Exception e) {
+                    logWithTestCase(Level.SEVERE, "An exception occurred during test case minimization in verify environment. Continuing with the original test case. " + e);
                 }
+            } else {
+                logWithTestCase(Level.WARNING, "Failed to prepare test case in shared directory, skipping minimization");
             }
+        } else if (this.sharedVerifyDir == null) {
+            logWithTestCase(Level.WARNING, "Shared verify directory not set, skipping minimization.");
         }
 
         // 1. 初始分析
@@ -1194,8 +1193,15 @@ public class BugVerify extends Agent {
     public static void verifyBugsFromLog(String logPath, String javadocPath, String sourcePath, String bugReportPath) {
         LoggerUtil.logExec(Level.INFO, "开始从日志文件验证bug: " + logPath);
         
-        // 创建BugVerifyAgent
+        Path sharedVerifyDir = null;
         try {
+            // 1. 在批处理开始前，创建一次共享的验证环境
+            sharedVerifyDir = setupSharedVerifyEnvironment();
+            if (sharedVerifyDir == null) {
+                LoggerUtil.logExec(Level.SEVERE, "无法创建共享验证环境，中止任务。");
+                return;
+            }
+
             // 读取日志文件
             File logFile = new File(logPath);
             if (!logFile.exists()) {
@@ -1259,6 +1265,7 @@ public class BugVerify extends Agent {
             var futures = new ArrayList<CompletableFuture<Void>>();
             
             // 为每个bug并发生成报告
+            final Path finalSharedVerifyDir = sharedVerifyDir;
             for (Map.Entry<String, String> entry : verifiedBugs.entrySet()) {
                 String originFilePath = entry.getKey();
                 String filePath = originFilePath.replace("jdk17u-dev/test", "test");
@@ -1298,7 +1305,9 @@ public class BugVerify extends Agent {
                         } else {
                             LoggerUtil.logVerify(Level.SEVERE, testcase.getFile().getAbsolutePath() + ": 无法获取测试输出");
                         }
-
+                        
+                        // 2. 将共享目录路径设置给 agent
+                        agent.setSharedVerifyDir(finalSharedVerifyDir);
                         agent.setTestCase(testcase);
 
 
@@ -1336,6 +1345,11 @@ public class BugVerify extends Agent {
         } catch (Exception e) {
             LoggerUtil.logExec(Level.SEVERE, "Bug验证过程失败: " + e.getMessage());
             e.printStackTrace();
+        } finally {
+            // 3. 在所有操作完成后，清理共享环境
+            if (sharedVerifyDir != null) {
+                cleanupSharedVerifyEnvironment(sharedVerifyDir);
+            }
         }
     }
 
@@ -1445,11 +1459,22 @@ public class BugVerify extends Agent {
     }
 
 
+    private static void cleanupSharedVerifyEnvironment(Path sharedVerifyDir) {
+        if (sharedVerifyDir != null && Files.exists(sharedVerifyDir)) {
+            try {
+                FileUtils.deleteDirectory(sharedVerifyDir.toFile());
+                LoggerUtil.logExec(Level.INFO, "Shared verify environment cleaned up: " + sharedVerifyDir);
+            } catch (IOException e) {
+                LoggerUtil.logExec(Level.SEVERE, "Failed to clean up shared verify environment: " + e.getMessage());
+            }
+        }
+    }
+
     /**
-     * 设置验证环境：拷贝整个test目录到verify目录
+     * 设置共享的验证环境：拷贝整个test目录到verify目录
      * @return verify目录路径，失败时返回null
      */
-    private Path setupVerifyEnvironment() {
+    private static Path setupSharedVerifyEnvironment() {
         try {
             // 创建verify根目录
             Path verifyRootDir = Paths.get("verify");
@@ -1464,43 +1489,40 @@ public class BugVerify extends Agent {
             
             // 目标verify目录（包含时间戳以避免冲突）
             String timestamp = String.valueOf(System.currentTimeMillis());
-            Path targetVerifyDir = verifyRootDir.resolve("test_" + timestamp);
+            Path targetVerifyDir = verifyRootDir.resolve("test_shared_" + timestamp);
             
             // 复制整个test目录
-            LoggerUtil.logExec(Level.INFO, "Copying test environment: " + sourceTestDir + " -> " + targetVerifyDir);
+            LoggerUtil.logExec(Level.INFO, "Copying shared test environment: " + sourceTestDir + " -> " + targetVerifyDir);
             FileUtils.copyDirectory(sourceTestDir.toFile(), targetVerifyDir.toFile());
             
-            LoggerUtil.logExec(Level.INFO, "Verify environment setup complete: " + targetVerifyDir);
+            LoggerUtil.logExec(Level.INFO, "Shared verify environment setup complete: " + targetVerifyDir);
             return targetVerifyDir;
             
         } catch (IOException e) {
-            LoggerUtil.logExec(Level.SEVERE, "Failed to setup verify environment: " + e.getMessage());
+            LoggerUtil.logExec(Level.SEVERE, "Failed to setup shared verify environment: " + e.getMessage());
             return null;
         }
     }
 
     /**
-     * 更新测试用例路径到verify目录
+     * 在共享目录中准备测试用例，将其恢复到原始状态。
      * @param originalTestCase 原始测试用例
      * @param verifyDir verify目录路径
      * @return 更新后的测试用例，失败时返回null
      */
-    private TestCase updateTestCaseToVerifyDir(TestCase originalTestCase, Path verifyDir) {
+    private TestCase prepareTestCaseInSharedDir(TestCase originalTestCase, Path verifyDir) {
         try {
             // 计算相对路径：从test目录到具体测试文件
             Path testDir = Paths.get(GlobalConfig.getTestDir()).toAbsolutePath();
             Path originalPath = originalTestCase.getFile().toPath().toAbsolutePath();
-            logWithTestCase(Level.INFO, "Updating test case paths: testDir=" + testDir + ", originalPath=" + originalPath);
             Path relativePath = testDir.relativize(originalPath);
-            logWithTestCase(Level.INFO, "Calculated relativePath: " + relativePath);
 
             // 在verify目录中的新路径
             Path newTestPath = verifyDir.resolve(relativePath);
             
-            if (!Files.exists(newTestPath)) {
-                logWithTestCase(Level.WARNING, "Test file not found in verify dir: " + newTestPath);
-                return null;
-            }
+            // 关键步骤：用原始文件内容覆盖共享目录中的同名文件，以重置状态
+            String originalContent = Files.readString(originalTestCase.getFile().toPath());
+            Files.writeString(newTestPath, originalContent);
             
             // 创建新的TestCase对象
             TestCase verifyTestCase = new TestCase(newTestPath.toFile());
@@ -1511,11 +1533,11 @@ public class BugVerify extends Agent {
             // 设置API文档处理器（使用配置创建新的处理器以保证一致性）
             verifyTestCase.setApiDocProcessor(ApiInfoProcessor.fromConfig());
             
-            logWithTestCase(Level.INFO, "Test case updated to verify environment: " + newTestPath);
+            logWithTestCase(Level.INFO, "Test case prepared in shared verify environment: " + newTestPath);
             return verifyTestCase;
             
         } catch (Exception e) {
-            logWithTestCase(Level.SEVERE, "Failed to update test case to verify dir: " + e.getMessage());
+            logWithTestCase(Level.SEVERE, "Failed to prepare test case in shared dir: " + e.getMessage());
             return null;
         }
     }
