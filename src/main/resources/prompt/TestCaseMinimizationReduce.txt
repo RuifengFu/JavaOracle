@@ -12,25 +12,31 @@ ${test_failure_output}
 
 **Test File Path:** ${test_file_path}
 
-<#if previous_feedback?has_content>
-**Previous Feedback from Last Iteration:**
-${previous_feedback}
-</#if>
+**Previous Feedback:** ${previous_feedback}
 
-**Primary Directive: Analyze the failure, identify the critical code path, and aggressively remove everything else.**
+**Primary Directive: Your goal is to methodically reduce the test case. Analyze the failure to identify the critical code path, then systematically remove all non-essential code. Be decisive with clearly irrelevant code, but careful with code that might influence the failure path.**
 
 **1. Analyze the Failure:**
 - **Stack Trace is Key:** The test failure output above is your ground truth. Pinpoint the exact line number where the failure occurs.
 - **Trace Backwards:** From the point of failure, trace the control and data flow backwards. Identify the specific variables, objects, and method calls that are essential to create the failing state.
 - **Define the Failure Path:** Any code not on this direct path to failure is a candidate for removal.
 
-**2. Surgical Reduction Strategy (Your Mindset):**
-- **Hypothesize and Cut:** Form a clear hypothesis about a large chunk of code being irrelevant. Example: "I hypothesize the entire `try-catch` block in method `foo` is unnecessary because the failure happens in `bar`." Then, act on it. Be bold. The system will revert your change if you are wrong.
-- **High-Impact Removals First:**
-    - **Dead Code:** Aggressively remove entire methods, helper classes, or `if`/`else` branches that are not part of the failure path.
-    - **Harden Variables:** If a variable is always the same value on the path to failure, replace it with that hardcoded value and remove the logic that calculated it.
-    - **Simplify Control Flow:** Can a loop be replaced by the one or two iterations that matter? Can a complex condition be simplified to `true` or `false`?
-    - **Eliminate Boilerplate:** Remove all comments **EXCEPT** jtreg tags like `@test`, `@bug`, `@summary`, `@library`, `@run`, `@key`, `@requires` - these are **CRITICAL** and must **NEVER** be removed. Remove unused imports and local variables that don't contribute to the failure.
+**2. Reduction Strategy: A Two-Phase Approach**
+
+**Phase 1: Quick Wins - Eliminate the Obvious**
+First, perform decisive cuts on code that is clearly irrelevant to the failure. This includes:
+- **Code after the failure point:** Any statement after the line that throws the exception can almost always be removed.
+- **Unrelated test logic:** If the file contains multiple test cases or methods, remove all of them except the one that fails.
+- **Unused helpers:** Remove any helper methods, classes, or variables that are not called or used on the path to the failure.
+
+**Phase 2: Principled Simplification - Isolate the Core Logic**
+Once the obvious parts are gone, methodically simplify the remaining code that is on or near the failure path.
+- **Hypothesize and Simplify:** For each piece of remaining code, form a hypothesis about its relevance. "I hypothesize this `try-catch` block is not necessary as the exception is uncaught." Then, attempt to remove or simplify it.
+- **Focus on High-Impact Simplifications:**
+    - **Harden Variables:** Replace variables with hardcoded values if their computation is not relevant to the bug.
+    - **Simplify Control Flow:** Reduce loops to the single iteration that matters. Simplify complex `if` conditions to `true` or `false` if the other path is never taken.
+    - **Inline Methods:** Replace calls to simple helper methods with the method's body to make removal easier.
+    - **Eliminate Boilerplate:** Remove unused imports and local variables. **CRITICAL:** Do **NOT** remove jtreg tags like `@test`, `@bug`, `@summary`, `@run`.
 
 **3. When Reduction Stalls -> Switch to Debugging:**
 - If you cannot identify any more code to remove, your task is to **increase observability**.
@@ -45,9 +51,8 @@ ${previous_feedback}
   ```
 
 **Tool Protocol:**
-You have access to the following tool. 
+You have access to the following tool. You must call it in each turn.
 
-- `write_to_file(path: str, content: str)`: Use this to apply your change (either a reduction or adding debug logs). The system will automatically execute the test to verify your change. If the original failure is not reproduced, your change is automatically reverted.
+- `write_to_file(file_path: str, content: str)`: Use this to apply your change (either a reduction or adding debug logs). The system will automatically execute the test to verify your change. If the original failure is not reproduced, your change is automatically reverted.
 
-**Final Instruction:** Think like a delta-debugging pass, but supercharged with an understanding of the program's runtime failure. Be relentless. Be precise. Isolate the bug.
-**If you believe the code is fully minimized and no further simplification is possible, do not call any tools.** Otherwise, you must end your response with a call to `write_to_file`.
+**Final Instruction:** Think like a delta-debugging pass, but supercharged with an understanding of the program's runtime failure. Be relentless. Be precise. Isolate the bug. **You must end your response with a call to `write_to_file`.**

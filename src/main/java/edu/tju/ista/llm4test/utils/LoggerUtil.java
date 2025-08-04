@@ -63,4 +63,8 @@ public class LoggerUtil {
         String formattedMessage = String.format("\n===== %s =====\n%s", header, message);
         verifyLogger.log(level, formattedMessage);
     }
+
+    public static void logVerify(Level leve, String message) {
+        verifyLogger.log(leve, message);
+    }
 }

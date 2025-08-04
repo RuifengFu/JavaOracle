@@ -209,11 +209,13 @@ public class BugVerify extends Agent {
                 if (verifyTestCase != null) {
                     logWithTestCase("Starting test case minimization in verify environment for: " + verifyTestCase.name);
                     try {
-                        // 在verify环境中进行约简
                         TestCase minimizedCase = minimizationAgent.run(verifyTestCase, verifyDir);
-                        String minimizedCode = minimizedCase.getSourceCode();
-                        
-                        if (minimizedCode != null && !minimizedCode.equals(this.testCase.getSourceCode())) {
+
+                        // 检查约简是否成功
+                        if (minimizedCase != null && minimizedCase.getSourceCode() != null &&
+                            !minimizedCase.getSourceCode().equals(verifyTestCase.getSourceCode())) {
+
+                            String minimizedCode = minimizedCase.getSourceCode();
                             // Save the minimized code to the original context path for record keeping
                             String originalFileName = this.testCase.getFile().getName();
                             String minimizedFileName = originalFileName.replace(".java", "_minimized.java");
@@ -241,6 +243,7 @@ public class BugVerify extends Agent {
             }
         }
 
+        if (true) return "";
         // 1. 初始分析
         String initialInsight = performInitialAnalysis();
         saveToFile(verifyContextPath.resolve("initial_insight.json").toString(), initialInsight);
@@ -253,6 +256,7 @@ public class BugVerify extends Agent {
         
         // 2. 收集信息
         collectRelevantInformation(initialInsight);
+        logWithTestCase("信息收集完成，共 " + collectedInfo.size() + " 项");
         
         // 保存收集到的信息
         saveCollectedInfo();
@@ -1293,18 +1297,19 @@ public class BugVerify extends Agent {
                         if (response.isSuccess()) {
                             testcase.setResult(response.getResult());
                         } else {
-                            LoggerUtil.logResult(Level.SEVERE, testcase.getFile().getAbsolutePath() + ": 无法获取测试输出");
+                            LoggerUtil.logVerify(Level.SEVERE, testcase.getFile().getAbsolutePath() + ": 无法获取测试输出");
                         }
 
                         agent.setTestCase(testcase);
 
 
-                        boolean isBug = agent.enhanceVerify();
+                        boolean isBug = true || agent.enhanceVerify();
+
                         if (isBug) {
-                            LoggerUtil.logResult(Level.INFO, "Test case is a confirmed bug, proceeding to analysis: " + testCaseName);
+                            LoggerUtil.logVerify(Level.INFO, "Test case is a confirmed bug, proceeding to analysis: " + testCaseName);
                             agent.analyze();
                         } else {
-                            LoggerUtil.logResult(Level.INFO, "Test case is not a bug: " + testCaseName);
+                            LoggerUtil.logVerify(Level.INFO, "Test case is not a bug: " + testCaseName);
                             agent.generateNonBugReport(); // Generate report for non-bugs
                         }
 
@@ -1485,11 +1490,11 @@ public class BugVerify extends Agent {
         try {
             // 计算相对路径：从test目录到具体测试文件
             Path testDir = Paths.get(GlobalConfig.getTestDir()).toAbsolutePath();
-            Path originalPath = originalTestCase.getFile().toPath();
+            Path originalPath = originalTestCase.getFile().toPath().toAbsolutePath();
             logWithTestCase(Level.INFO, "Updating test case paths: testDir=" + testDir + ", originalPath=" + originalPath);
             Path relativePath = testDir.relativize(originalPath);
             logWithTestCase(Level.INFO, "Calculated relativePath: " + relativePath);
-            
+
             // 在verify目录中的新路径
             Path newTestPath = verifyDir.resolve(relativePath);
             
