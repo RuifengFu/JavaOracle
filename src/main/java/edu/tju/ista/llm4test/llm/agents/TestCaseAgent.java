@@ -32,6 +32,7 @@ public class TestCaseAgent extends Agent {
     private final List<String> history;
     private final List<String> feedbackHistory;
     private static final int MAX_ITERATIONS = 10; // Safety limit for the reduction loop
+    private static final int MAX_FEEDBACK_CONTEXT = 10;
     private List<String> lastExecutedTools; // Track executed tools for observe method
 
     private String workspace_testcase_path;
@@ -105,7 +106,7 @@ public class TestCaseAgent extends Agent {
             if (toolCalls.isEmpty()) {
                 addToHistory(Level.INFO, "LOOP: THINK proposed no tool calls. Proceeding to DECIDE whether to finish.");
                 feedbackHistory.add("Iteration " + (i + 1) + ": THINK step failed to produce any action. Retrying.");
-                if (feedbackHistory.size() > 5) feedbackHistory.remove(0);
+                if (feedbackHistory.size() > MAX_FEEDBACK_CONTEXT) feedbackHistory.remove(0);
                 continue;
             }
 
@@ -146,7 +147,7 @@ public class TestCaseAgent extends Agent {
                 feedbackHistory.add("Iteration " + (i + 1) + ": " + decision.feedback);
             }
             
-            if (feedbackHistory.size() > 5) {
+            if (feedbackHistory.size() > MAX_FEEDBACK_CONTEXT) {
                 feedbackHistory.remove(0);
             }
         }
