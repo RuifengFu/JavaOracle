@@ -243,7 +243,6 @@ public class BugVerify extends Agent {
             }
         }
 
-        if (true) return "";
         // 1. 初始分析
         String initialInsight = performInitialAnalysis();
         saveToFile(verifyContextPath.resolve("initial_insight.json").toString(), initialInsight);
@@ -1303,7 +1302,7 @@ public class BugVerify extends Agent {
                         agent.setTestCase(testcase);
 
 
-                        boolean isBug = true || agent.enhanceVerify();
+                        boolean isBug = agent.enhanceVerify();
 
                         if (isBug) {
                             LoggerUtil.logVerify(Level.INFO, "Test case is a confirmed bug, proceeding to analysis: " + testCaseName);

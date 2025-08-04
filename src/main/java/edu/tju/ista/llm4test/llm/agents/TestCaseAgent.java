@@ -14,10 +14,7 @@ import freemarker.template.TemplateException;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.logging.Level;
 
 /**
@@ -61,6 +58,15 @@ public class TestCaseAgent extends Agent {
         toolRegistry.register(new JtregExecuteTool());
     }
 
+    private static String codeWithLineNumber(String s) {
+        var sb = new StringBuilder();
+        var lines = s.split("\n");
+        for (int i = 0; i < lines.length; i++) {
+            sb.append(String.format("%4d: %s\n", i + 1, lines[i]));
+        }
+        return sb.toString();
+    }
+
     public TestCase run(TestCase testCase, Path workspaceRoot) {
         String header = "Test Case Minimization Run: " + testCase.getName();
         LoggerUtil.logVerify(Level.INFO, header, "Minimization agent started.");
@@ -77,6 +83,7 @@ public class TestCaseAgent extends Agent {
         String originalFailureOutput = testCase.getResult().getOutput();
         String originalCode = testCase.getSourceCode();
         String currentCode = originalCode;
+        String currentFailureOutput = originalFailureOutput;
 
         addToHistory("=== TestCaseAgent Started ===");
         addToHistory("Target: " + testCase.name);
@@ -94,9 +101,9 @@ public class TestCaseAgent extends Agent {
 
             // THINK
             String previousFeedback = feedbackHistory.isEmpty() ? "" : String.join("\n", feedbackHistory);
-            List<ToolCall> toolCalls = think(currentCode, originalFailureOutput, previousFeedback, testFilePath);
+            List<ToolCall> toolCalls = think(codeWithLineNumber(currentCode), currentFailureOutput, previousFeedback, testFilePath);
             if (toolCalls.isEmpty()) {
-                addToHistory(Level.WARNING, "LOOP: THINK failed to produce a tool call, skipping.");
+                addToHistory(Level.INFO, "LOOP: THINK proposed no tool calls. Proceeding to DECIDE whether to finish.");
                 feedbackHistory.add("Iteration " + (i + 1) + ": THINK step failed to produce any action. Retrying.");
                 if (feedbackHistory.size() > 5) feedbackHistory.remove(0);
                 continue;
@@ -128,6 +135,12 @@ public class TestCaseAgent extends Agent {
                 currentCode = observeResult.newCode;
                 minimizedTestCase.setSourceCode(currentCode);
                 minimizedTestCase.setResult(observeResult.lastTestResult);
+
+                if (observeResult.lastTestResult != null && observeResult.lastTestResult.isFail()) {
+                    currentFailureOutput = observeResult.lastTestResult.getOutput();
+                    addToHistory("LOOP: Updated reference failure output for the next iteration.");
+                }
+
                 // Use the LLM's own explanation for 'continue' as the feedback. It's more insightful
                 // than the raw observation summary.
                 feedbackHistory.add("Iteration " + (i + 1) + ": " + decision.feedback);
@@ -157,17 +170,17 @@ public class TestCaseAgent extends Agent {
         }
     }
 
-    private List<ToolCall> think(String currentCode, String originalFailureOutput, String previousFeedback, Path testFilePath) {
+    private List<ToolCall> think(String currentCode, String currentFailureOutput, String previousFeedback, Path testFilePath) {
         try {
             String relativeTestPath = testFilePath.getFileName().toString();
             if (!previousFeedback.isEmpty()) {
                 addToHistory("THINK: Providing previous feedback to LLM:\n" + previousFeedback);
             }
-            String prompt = PromptGen.generateTestCaseMinimizationReducePrompt(originalFailureOutput, currentCode, relativeTestPath, previousFeedback);
+            String prompt = PromptGen.generateTestCaseMinimizationReducePrompt(currentFailureOutput, currentCode, relativeTestPath, previousFeedback);
             DebugUtils.getInstance().saveToFileWithTimestamp("TestCaseAgent", testCase.name + "_think_prompt", prompt);
             addToHistory("THINK: Analyzing current code and proposing reduction...");
 
-            List<Tool<?>> tools = List.of(toolRegistry.get("write_to_file"), ACTION_FINISH);
+            List<Tool<?>> tools = List.of(toolRegistry.get("write_to_file"));
             OpenAI.ToolCallResult response = this.LLM.toolCallWithContent(prompt, tools);
             List<ToolCall> toolCalls = response.toolCalls();
 
