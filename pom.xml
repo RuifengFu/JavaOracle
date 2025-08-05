@@ -150,6 +150,13 @@
             <scope>test</scope>
         </dependency>
 
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-params</artifactId>
+            <version>5.11.4</version> <!-- 你可以根据你的项目情况选择一个合适的版本 -->
+            <scope>test</scope>
+        </dependency>
+
         <!-- JUnit 5 Engine -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>

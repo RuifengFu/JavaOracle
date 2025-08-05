@@ -34,7 +34,7 @@ Implement the new test scenarios with clarity and precision.
 3.3. **Provide Clear Rationale**: Immediately follow the marker comment with another comment explaining:
     - *What* specific scenario this test covers.
     - *Why* this assertion is valuable and what risk it mitigates.
-3.4. **Write Rich Diagnostics**: Include descriptive messages in your assertions to provide clear context upon failure. Print crucial state variables if it aids debugging.
+3.4. **Write Rich Diagnostics**: Include descriptive messages in your assertions to provide clear context upon failure. For instance, when dealing with collections, your assertion message must detail both the size and the elements (e.g., using `Arrays.toString(collection.toArray())`, not too long). For other objects, include the state of relevant fields. This provides a clear snapshot of the state at the time of failure, aiding debugging.
 3.5. **Maintain Code Integrity**: Ensure the final, enhanced test case is complete, compiles without errors, and adheres to the existing code style and test framework conventions (e.g., `jtreg` tags).
 </Tasks>
 
