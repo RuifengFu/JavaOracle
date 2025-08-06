@@ -30,13 +30,20 @@ First, perform decisive cuts on code that is clearly irrelevant to the failure. 
 - **Unused helpers:** Remove any helper methods, classes, or variables that are not called or used on the path to the failure.
 
 **Phase 2: Principled Simplification - Isolate the Core Logic**
-Once the obvious parts are gone, methodically simplify the remaining code that is on or near the failure path.
+Once the obvious parts are gone, methodically simplify the remaining code that is on or near the failure path. This involves simplifying both logic and data.
 - **Hypothesize and Simplify:** For each piece of remaining code, form a hypothesis about its relevance. "I hypothesize this `try-catch` block is not necessary as the exception is uncaught." Then, attempt to remove or simplify it.
 - **Focus on High-Impact Simplifications:**
-    - **Harden Variables:** Replace variables with hardcoded values if their computation is not relevant to the bug.
-    - **Simplify Control Flow:** Reduce loops to the single iteration that matters. Simplify complex `if` conditions to `true` or `false` if the other path is never taken.
-    - **Inline Methods:** Replace calls to simple helper methods with the method's body to make removal easier.
-    - **Eliminate Boilerplate:** Remove unused imports and local variables. **CRITICAL:** Do **NOT** remove jtreg tags like `@test`, `@bug`, `@summary`, `@run`.
+    - **Simplify Data Structures and Values:** The complexity of data can hide the bug. Your goal is to use the simplest possible data that still triggers the failure.
+        - **Harden Variables:** Replace variables with hardcoded, constant values if their computation is not relevant to the bug.
+        - **Reduce Collection Size:** If a collection (like a `List` or `Array`) is involved, reduce it to the minimum number of elements required. For instance, if a loop over 100 items fails on the 5th, create a collection with just that one item (or as few as needed).
+        - **Replace Complex Types:** If a complex object (e.g., `CustomClass`, `HashMap`) is used, try to replace it with a simpler one (e.g., `Object`, `String`, a primitive type, or a simpler collection like `ArrayList`).
+        - **Minimize Object Fields:** If using a custom object, remove any fields and methods that are not read or do not influence the failing behavior.
+    - **Simplify Control Flow:**
+        - **Loops:** Reduce loops to the single iteration that matters.
+        - **Conditionals:** Simplify complex `if` conditions to `true` or `false` if the other path is never taken.
+    - **Inline and Remove Code:**
+        - **Inline Methods:** Replace calls to simple helper methods with the method's body to make removal easier.
+        - **Eliminate Boilerplate:** Remove unused imports, local variables, and unneeded class/interface declarations (`implements Serializable`, etc.). **CRITICAL:** Do **NOT** remove jtreg tags like `@test`, `@bug`, `@summary`, `@run`.
 
 **3. When Reduction Stalls -> Switch to Debugging:**
 - If you cannot identify any more code to remove, your task is to **increase observability**.
