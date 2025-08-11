@@ -115,4 +115,13 @@ public class FileUtils {
         }
     }
 
+    public static void appendToFile(String filePath, String content) {
+        try (FileWriter writer = new FileWriter(filePath, true)) {
+            writer.write(content);
+            LoggerUtil.logExec(Level.INFO, "已追加文件: " + filePath);
+        } catch (IOException e) {
+            LoggerUtil.logExec(Level.WARNING, "追加文件失败 " + filePath + ": " + e.getMessage());
+        }
+    }
+
 } 

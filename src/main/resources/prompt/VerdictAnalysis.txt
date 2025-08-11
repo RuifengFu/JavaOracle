@@ -30,7 +30,7 @@ Your primary task is not to simply weigh two arguments. Your task is to conduct 
 
 Follow this rigorous investigation process:
 
-1. Form an Independent Hypothesis: Before you even read the arguments in detail, perform a quick, independent review of the <TestCase>, <Test Output>, and <API docs>. Form your own initial theory about the failure. This prevents your analysis from being biased from the start.
+1. Form an Independent Hypothesis: Before you even read the arguments in detail, perform a quick, independent review of the <TestCase>, <Test Output>, and <API docs>. Form your own initial theory about the failure. Your review should not be superficial; consider underlying principles, language specifications (like JLS), and relevant standards (like IEEE 754 for math, or RFCs for networking) that might govern the behavior. This prevents your analysis from being biased from the start.
 
 2. Dissect and Verify Each Argument:
 - Treat each argument (bugArgument, testcaseArgument) as a set of claims that must be verified.
@@ -56,7 +56,7 @@ You must call the following function in the tool call, not in the content:
 verdict_analysis(bug_argument, testcase_argument, verdict, reasoning)
 
 **Parameters**:
-- bug_argument (string): A brief critique of the bug argument, stating which of its points were valid and which were refuted by evidence.
-- testcase_argument (string): A brief critique of the test case issue argument, stating which of its points were valid and which were refuted by evidence.
-- verdict (string): Your final, evidence-based verdict: "BUG", "TESTCASE_ISSUE", or "UNCLEAR".
+- bug_argument (string): A focused critique of the bug argument. Summarize which of its claims you verified as correct and which you refuted, citing your evidence.
+- testcase_argument (string): A focused critique of the test case issue argument. Summarize which of its claims you verified as correct and which you refuted, citing your evidence.
+- verdict (string): Your final, evidence-based verdict: "BUG", "TESTCASE_ISSUE", or "UNCLEAR". Use "UNCLEAR" only when essential information is missing from the provided inputs, or if the evidence is genuinely and irreconcilably contradictory.
 - reasoning (string): Your detailed, definitive explanation of the failure's root cause, based on your own investigation. Explain the core contradiction you found and why the evidence points to your conclusion.

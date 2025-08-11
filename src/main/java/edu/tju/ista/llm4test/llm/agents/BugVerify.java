@@ -19,12 +19,13 @@ import java.util.concurrent.CompletableFuture;
 import java.util.logging.Level;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
 import static edu.tju.ista.llm4test.utils.FileUtils.saveToFile;
-
+import static edu.tju.ista.llm4test.utils.FileUtils.appendToFile;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -297,15 +298,36 @@ public class BugVerify extends Agent {
                     case "JDK_BUG":
                     case "BOTH":
                         fileName = "BugReport.md";
+                        reportDir = sourceTestCaseDir; // Default to source path in case of any failure
+
                         if (Files.exists(sourceTestCaseDir)) {
-                            try {
-                                Files.move(sourceTestCaseDir, targetBugDir);
-                                logWithTestCase("已将确认的bug文件夹移动到: " + targetBugDir);
-                            } catch (IOException e) {
-                                logWithTestCase(Level.SEVERE, "移动bug文件夹失败: " + e.getMessage());
+                            if (Files.exists(targetBugDir)) {
+                                // Target exists, so we must merge.
+                                logWithTestCase(Level.WARNING, "目标文件夹 " + targetBugDir + " 已存在，将合并内容。");
+                                try {
+                                    FileUtils.copyDirectory(sourceTestCaseDir.toFile(), targetBugDir.toFile());
+                                    FileUtils.deleteDirectory(sourceTestCaseDir.toFile());
+                                    logWithTestCase("文件夹内容合并完成。");
+                                    reportDir = targetBugDir; // Success, update report dir
+                                } catch (IOException mergeEx) {
+                                    logWithTestCase(Level.SEVERE, "合并文件夹失败: " + mergeEx.getMessage() + "。报告将保存在原位置。");
+                                    // On merge failure, reportDir remains sourceTestCaseDir (its default value)
+                                }
+                            } else {
+                                // Target does not exist, so we can try a clean move.
+                                try {
+                                    Files.move(sourceTestCaseDir, targetBugDir);
+                                    logWithTestCase("已将确认的bug文件夹移动到: " + targetBugDir);
+                                    reportDir = targetBugDir; // Success, update report dir
+                                } catch (IOException moveEx) {
+                                    logWithTestCase(Level.SEVERE, "移动bug文件夹失败: " + moveEx.getMessage() + "。报告将保存在原位置。");
+                                    // On move failure, reportDir remains sourceTestCaseDir (its default value)
+                                }
                             }
+                        } else {
+                            // Source does not exist, which is strange, but the report should be in the target bug directory.
+                            reportDir = targetBugDir;
                         }
-                        reportDir = targetBugDir;
                         break;
                     case "TESTCASE_ERROR":
                         fileName = "TestCaseErrorAnalysis.md";
@@ -388,9 +410,13 @@ public class BugVerify extends Agent {
         // ===== 第一步：多重验证确保一致性 =====
         // 目标：通过两次额外的验证来确保bug判断的稳定性
         // 如果任何一次验证不认为是bug，则停止增强验证流程
-        List<String> verificationResults = new ArrayList<>();
+        List<String> verificationLog = new ArrayList<>();
         List<String> nonBugResults = new ArrayList<>();
-        
+        List<String> bugArguments = new ArrayList<>();
+        if (this.testCase.verifyMessage != null && !this.testCase.verifyMessage.isEmpty()){
+            bugArguments.add(this.testCase.verifyMessage);
+        }
+
         for (int i = 1; i <= 2; i++) {
             logWithTestCase("执行第 " + i + " 次额外验证");
             
@@ -404,7 +430,8 @@ public class BugVerify extends Agent {
                 saveToFile(verifyContextPath.resolve("enhance_verify_" + i + ".json").toString(), verificationResult);
 
                 if (testCase.getResult().isBug()) {
-                    verificationResults.add("验证 " + i + ": BUG - " + testCase.verifyMessage);
+                    verificationLog.add("验证 " + i + ": BUG - " + testCase.verifyMessage);
+                    bugArguments.add(testCase.verifyMessage);
                     logWithTestCase("第 " + i + " 次验证确认是bug");
                 } else {
                     nonBugResults.add("验证 " + i + ": NOT_BUG - " + testCase.verifyMessage);
@@ -423,7 +450,7 @@ public class BugVerify extends Agent {
         }
         
         // 检查验证一致性：所有验证都必须认为是bug才能继续
-        boolean allBugResults = verificationResults.size() == 2;
+        boolean allBugResults = verificationLog.size() == 2;
         
         if (!allBugResults) {
             logWithTestCase("增强验证失败：不是所有验证都认为是bug");
@@ -433,7 +460,7 @@ public class BugVerify extends Agent {
             StringBuilder failureSummary = new StringBuilder();
             failureSummary.append("# 增强验证失败\n\n");
             failureSummary.append("## 验证结果\n");
-            for (String result : verificationResults) {
+            for (String result : verificationLog) {
                 failureSummary.append("- ").append(result).append("\n");
             }
             failureSummary.append("\n## 非Bug结果\n");
@@ -448,44 +475,101 @@ public class BugVerify extends Agent {
         
         logWithTestCase("所有验证都确认是bug，进入第二步：生成测试用例问题解释");
         
-        // ===== 第二步：生成反方论证 =====
+        // ===== 第二步：生成反方论证 (3次) =====
         // 目标：专门寻找测试用例中的问题，提供反方观点
-        // 这有助于避免误判，确保bug判断的准确性
-        String testCaseIssueExplanation = generateTestCaseIssueExplanation();
-        
-        // 保存测试用例问题解释结果
-        if (testCaseIssueExplanation != null && !testCaseIssueExplanation.isEmpty()) {
-            saveToFile(verifyContextPath.resolve("testcase_issue_explanation.txt").toString(), testCaseIssueExplanation);
-        } else {
-            logWithTestCase(Level.WARNING, "测试用例问题解释生成失败");
-            saveToFile(verifyContextPath.resolve("testcase_issue_explanation_failed.txt").toString(), "生成失败");
+        List<String> testCaseIssueExplanations = new ArrayList<>();
+        for (int i = 1; i <= 3; i++) {
+            logWithTestCase("生成第 " + i + " 次测试用例问题解释");
+            String explanation = generateTestCaseIssueExplanation();
+            if (explanation != null && !explanation.isEmpty()) {
+                testCaseIssueExplanations.add(explanation);
+                saveToFile(verifyContextPath.resolve("testcase_issue_explanation_" + i + ".txt").toString(), explanation);
+            } else {
+                logWithTestCase(Level.WARNING, "第 " + i + " 次测试用例问题解释生成失败");
+                saveToFile(verifyContextPath.resolve("testcase_issue_explanation_" + i + "_failed.txt").toString(), "生成失败");
+            }
+        }
+
+        if (testCaseIssueExplanations.isEmpty()) {
+            logWithTestCase(Level.SEVERE, "所有测试用例问题解释都生成失败，中止验证");
+            this.enhanceVerifyFailureReason = "All attempts to generate test case issue explanations failed.";
+            LoggerUtil.logVerify(Level.SEVERE, header, "Final Verdict: UNKNOWN (Explanation generation failed)");
+            return false; // 中止流程
         }
         
-        // ===== 第三步：裁决分析 =====
-        // 目标：使用K2模型作为公正的裁决者，比较双方论证
-        // 决定哪一方更有说服力：bug论证 vs 测试用例问题论证
-        String verdict = performVerdictAnalysis(testCaseIssueExplanation);
-        
-        // ===== 第四步：基于裁决结果决定后续流程 =====
-        // 如果裁决确认是bug，继续完整的分析流程
-        // 如果裁决认为是测试用例问题，停止并返回增强验证结果
-        if (verdict != null && !verdict.isEmpty()) {
-            LoggerUtil.logVerify(Level.INFO, header, "Final Verdict: " + verdict);
-            if ("BUG".equals(verdict)) {
-                logWithTestCase("裁决确认是bug，继续进行分析");
-                return true;
-            } else if("UNCLEAR".equals(verdict)) {
-                logWithTestCase("裁决结果不明确，无法判断");
-                return true; // UNCLEAR需要继续判断。
-            }   else {
-                logWithTestCase("裁决认为是测试用例问题");
-                this.enhanceVerifyFailureReason = "Verdict: " + verdict + ". The adjudicator determined the issue does not qualify as a bug.";
-                return false;
+        // ===== 第三步：裁决分析 (3次投票) =====
+        String bugArgumentJson;
+        String testCaseExplanationsJson;
+        try {
+            ObjectMapper objectMapper = new ObjectMapper();
+            bugArgumentJson = objectMapper.writeValueAsString(bugArguments);
+            testCaseExplanationsJson = objectMapper.writeValueAsString(testCaseIssueExplanations);
+        } catch (IOException e) {
+            logWithTestCase(Level.SEVERE, "无法将论点序列化为JSON: " + e.getMessage());
+            this.enhanceVerifyFailureReason = "Failed to serialize arguments to JSON.";
+            LoggerUtil.logVerify(Level.SEVERE, header, "Final Verdict: UNKNOWN (JSON serialization failed)");
+            return false;
+        }
+
+        int totalScore = 0;
+        List<String> verdictResultsForLog = new ArrayList<>();
+        for (int i = 1; i <= 3; i++) {
+            logWithTestCase("执行第 " + i + " 次裁决分析");
+            String verdict = performVerdictAnalysis(bugArgumentJson, testCaseExplanationsJson);
+            verdictResultsForLog.add("裁决 " + i + ": " + verdict);
+            if (verdict != null) {
+                switch (verdict) {
+                    case "BUG":
+                        totalScore += 1;
+                        break;
+                    case "TESTCASE_ISSUE":
+                        totalScore -= 1;
+                        break;
+                    case "UNCLEAR":
+                        // 0分，不操作
+                        break;
+                    default:
+                        logWithTestCase(Level.WARNING, "未知的裁决结果: " + verdict);
+                        break;
+                }
+            } else {
+                logWithTestCase(Level.WARNING, "第 " + i + " 次裁决分析返回空结果");
             }
+        }
+
+        String finalVerdict;
+        if (totalScore >= 2) {
+            finalVerdict = "BUG";
+        } else if (totalScore <= -2) {
+            finalVerdict = "TESTCASE_ISSUE";
         } else {
-            logWithTestCase(Level.WARNING, "裁决结果为空，无法判断");
-            this.enhanceVerifyFailureReason = "Verdict is null or empty. Adjudication process failed.";
-            LoggerUtil.logVerify(Level.WARNING, header, "Final Verdict: UNKNOWN (Adjudication failed)");
+            finalVerdict = "UNCLEAR";
+        }
+        
+        logWithTestCase("裁决投票完成. 总分: " + totalScore + ". 最终裁决: " + finalVerdict);
+
+        // 保存投票过程用于调试
+        StringBuilder verdictSummary = new StringBuilder("# 裁决投票过程\n\n");
+        verdictSummary.append("## Bug方论点 (").append(bugArguments.size()).append("条)\n\n```json\n").append(bugArgumentJson).append("\n```\n\n");
+        verdictSummary.append("## TestCase方论点 (").append(testCaseIssueExplanations.size()).append("条)\n\n```json\n").append(testCaseExplanationsJson).append("\n```\n\n");
+        verdictSummary.append("## 投票结果\n\n");
+        verdictResultsForLog.forEach(res -> verdictSummary.append("- ").append(res).append("\n"));
+        verdictSummary.append("\n**总分**: ").append(totalScore).append("\n");
+        verdictSummary.append("**最终裁决**: ").append(finalVerdict).append("\n");
+        saveToFile(verifyContextPath.resolve("verdict_voting_summary.md").toString(), verdictSummary.toString());
+
+        // ===== 第四步：基于裁决结果决定后续流程 =====
+        LoggerUtil.logVerify(Level.INFO, header, "Final Verdict: " + finalVerdict + " (Score: " + totalScore + ")");
+        if ("BUG".equals(finalVerdict)) {
+            logWithTestCase("裁决确认是bug，继续进行分析");
+            return true;
+        } else if("UNCLEAR".equals(finalVerdict)) {
+            logWithTestCase("裁决结果不明确，按BUG处理以进行深入分析");
+            this.enhanceVerifyFailureReason = "Verdict is UNCLEAR (Score: " + totalScore + "). Proceeding with analysis for safety.";
+            return true;
+        } else { // TESTCASE_ISSUE
+            logWithTestCase("裁决认为是测试用例问题");
+            this.enhanceVerifyFailureReason = "Verdict: TESTCASE_ISSUE (Score: " + totalScore + "). The adjudicator determined the issue is with the test case.";
             return false;
         }
     }
@@ -562,7 +646,7 @@ public class BugVerify extends Agent {
      * @param testCaseIssueExplanation 测试用例问题解释
      * @return 裁决结果字符串（"BUG", "TESTCASE_ISSUE", "UNCLEAR"），失败时返回null
      */
-    private String performVerdictAnalysis(String testCaseIssueExplanation) {
+    private String performVerdictAnalysis(String bugArgument, String testCaseIssueExplanation) {
         LoggerUtil.logExec(Level.INFO, "执行裁决分析");
         
         try {
@@ -574,9 +658,6 @@ public class BugVerify extends Agent {
                 sb.append(i).append("\t:").append(lines[i]).append("\n");
             }
             var testcase = sb.toString();
-            
-            // 构建bug论证：基于初始的bug分析结果
-            String bugArgument = initialAnalysis != null ? initialAnalysis : "{\"root_cause\": \"Initial analysis not available\"}";
             
             // 生成裁决分析prompt，包含双方论证
             String prompt = PromptGen.generateVerdictAnalysisPrompt(testcase, testOutput, testCase.getApiDoc(), bugArgument, testCaseIssueExplanation);
@@ -597,9 +678,9 @@ public class BugVerify extends Agent {
             String verdict = (String) verdictCall.arguments.get("verdict");
             
             // 保存完整的裁决分析内容到文件（包含推理过程）
-            String fullAnalysis = content + "\n" + verdictCall.arguments.toString();
+            String fullAnalysis = content + "\n" + verdictCall.arguments.toString() + "\n================================\n";
             if (verifyContextPath != null) {
-                saveToFile(verifyContextPath.resolve("verdict_full_analysis.txt").toString(), fullAnalysis);
+                appendToFile(verifyContextPath.resolve("verdict_full_analysis.txt").toString(), fullAnalysis);
             }
             
             LoggerUtil.logExec(Level.INFO, "裁决分析完成，结果: " + verdict);
@@ -820,6 +901,8 @@ public class BugVerify extends Agent {
             LoggerUtil.logExec(Level.WARNING, "保存收集的信息失败: " + e.getMessage());
         }
     }
+    
+
     
 
     
