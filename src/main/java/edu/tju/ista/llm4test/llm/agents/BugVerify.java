@@ -4,8 +4,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.tju.ista.llm4test.concurrent.ConcurrentExecutionManager;
 import edu.tju.ista.llm4test.execute.TestCase;
-import edu.tju.ista.llm4test.llm.OpenAI;
-import edu.tju.ista.llm4test.llm.tools.*;
 import edu.tju.ista.llm4test.execute.TestResult;
 import edu.tju.ista.llm4test.utils.ApiInfoProcessor;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
@@ -13,13 +11,14 @@ import edu.tju.ista.llm4test.prompt.PromptGen;
 import freemarker.template.TemplateException;
 import org.apache.commons.io.FileUtils;
 import edu.tju.ista.llm4test.config.GlobalConfig;
+import edu.tju.ista.llm4test.llm.OpenAI;
+import edu.tju.ista.llm4test.llm.tools.*;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.logging.Level;
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -29,6 +28,8 @@ import static edu.tju.ista.llm4test.utils.FileUtils.appendToFile;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 
 public class BugVerify extends Agent {
 
@@ -40,7 +41,8 @@ public class BugVerify extends Agent {
     // Agent for test case minimization
     private final TestCaseAgent minimizationAgent;
     
-    // Agent for hypothesis formation and verification
+    // Agent for hypothesis formation and verification (暂时未使用)
+    @SuppressWarnings("unused")
     private final HypothesisAgent hypothesisAgent;
     
     // LLM实例
@@ -56,12 +58,32 @@ public class BugVerify extends Agent {
         this.testOutput = testCase.getResult().getOutput();
         this.initialAnalysis = testCase.verifyMessage;
 
+        // 保存原始（未约简）测试用例与原始执行输出
+        try {
+            if (testCase.getOriginFile() != null) {
+                this.originalTestCode = Files.readString(testCase.getOriginFile().toPath());
+            } else {
+                this.originalTestCode = this.testCode;
+            }
+        } catch (IOException e) {
+            LoggerUtil.logExec(Level.WARNING, "读取原始测试用例失败: " + e.getMessage());
+            this.originalTestCode = this.testCode;
+        }
+        if (testCase.getResult() != null && testCase.getResult().getOutput() != null) {
+            this.originalTestOutput = testCase.getResult().getOutput();
+        } else {
+            this.originalTestOutput = this.testOutput;
+        }
+
         // 创建验证上下文文件夹
         createVerifyContextFolder();
     }
 
     // 分析状态
     private TestCase testCase;
+    @SuppressWarnings("unused")
+    private String originalTestCode;
+    private String originalTestOutput;
     private String testCode;
     private String testOutput;
     private String initialAnalysis;
@@ -81,6 +103,11 @@ public class BugVerify extends Agent {
     private int infoCounter = 0;
     private Map<String, String> infoSourceMap = new HashMap<>();
 
+    // 在字段定义区新增结果目录字段
+    private Path resultDir;
+    @SuppressWarnings("unused")
+    private String resultTimestamp;
+    
     public void setSharedVerifyDir(Path sharedVerifyDir) {
         this.sharedVerifyDir = sharedVerifyDir;
     }
@@ -193,6 +220,15 @@ public class BugVerify extends Agent {
      * 执行完整的Bug验证流程
      */
     public String analyze() {
+        // 初始化结果目录
+        String resultTimestamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
+        this.resultTimestamp = resultTimestamp;
+        this.resultDir = Paths.get("result", resultTimestamp);
+        try {
+            Files.createDirectories(this.resultDir);
+        } catch (IOException e) {
+            logWithTestCase(Level.WARNING, "创建结果目录失败: " + e.getMessage());
+        }
         logWithTestCase("开始Bug验证流程");
 
         Path sourceTestCaseDir = Paths.get(bugReportPath, "testcase", testCaseName);
@@ -207,9 +243,11 @@ public class BugVerify extends Agent {
             
             if (verifyTestCase != null) {
                 logWithTestCase("Starting test case minimization in shared verify environment for: " + verifyTestCase.name);
+                // 新增：记录原始代码长度以便计算统计信息
+                int originalLength = verifyTestCase.getSourceCode().length();
                 try {
                     TestCase minimizedCase = minimizationAgent.run(verifyTestCase, this.sharedVerifyDir);
-
+                    Path miniCsv = this.resultDir.resolve("minimization_status.csv");
                     // 检查约简是否成功
                     if (minimizedCase != null && minimizedCase.getSourceCode() != null &&
                         !minimizedCase.getSourceCode().equals(verifyTestCase.getSourceCode())) {
@@ -229,9 +267,47 @@ public class BugVerify extends Agent {
                         this.testCase.setFile(minimizedFile);
                         this.testCode = minimizedCode;
                         this.testOutput = minimizedCase.getResult().getOutput();
+                        this.testCase = minimizedCase;
+                        // Recalculate API docs for the minimized test case
+                        this.testCase.recalculateApiDocs();
                         logWithTestCase("BugVerifyAgent will now proceed with the minimized test case from verify environment.");
+                        
+                        // 新增：记录约简统计信息
+                        int minimizedLength = minimizedCode.length();
+                        int reduction = originalLength - minimizedLength;
+                        double reductionPercentage = originalLength > 0 ? (double) reduction / originalLength * 100 : 0;
+                        // 保存约简统计到CSV并追加
+                        
+                        try {
+                            boolean existsMini = Files.exists(miniCsv);
+                            if (!existsMini) {
+                                appendToFile(miniCsv.toString(), "TestCase,Success,OriginalLength,MinimizedLength,Reduction,ReductionPercentage,Timestamp\n");
+                            }
+                            String csvLineMini = String.format(
+                                "%s,%b,%d,%d,%d,%.2f%%,%s\n",
+                                getTestCaseIdentifier(), true, originalLength, minimizedLength, reduction, reductionPercentage, this.resultTimestamp
+                            );
+                            appendToFile(miniCsv.toString(), csvLineMini);
+                        } catch (Exception e) {
+                            logWithTestCase(Level.WARNING, "写入约简CSV失败: " + e.getMessage());
+                        }
                     } else {
                         logWithTestCase(Level.WARNING, "Minimization process in verify environment did not reduce the test case. Continuing with the original test case.");
+                        // 新增：记录未减少情况
+                        // 失败情况也追加CSV
+                        try {
+                            boolean existsMini = Files.exists(miniCsv);
+                            if (!existsMini) {
+                                appendToFile(miniCsv.toString(), "TestCase,Success,OriginalLength,MinimizedLength,Reduction,ReductionPercentage,Timestamp\n");
+                            }
+                            String csvLineFail = String.format(
+                                "%s,%b,%d,%d,%d,%.2f%%,%s\n",
+                                getTestCaseIdentifier(), false, originalLength, originalLength, 0, 0.0, this.resultTimestamp
+                            );
+                            appendToFile(miniCsv.toString(), csvLineFail);
+                        } catch (Exception e) {
+                            logWithTestCase(Level.WARNING, "写入约简CSV失败: " + e.getMessage());
+                        }
                     }
                 } catch (Exception e) {
                     logWithTestCase(Level.SEVERE, "An exception occurred during test case minimization in verify environment. Continuing with the original test case. " + e);
@@ -261,21 +337,8 @@ public class BugVerify extends Agent {
         saveCollectedInfo();
         List<String> hypotheses = new ArrayList<>();
         Map<String, TestResult> verificationResults = new HashMap<>();
-        if (edu.tju.ista.llm4test.config.GlobalConfig.isIncludeHypothesis()) {
-            // 3. 设置HypothesisAgent工作环境
-            hypothesisAgent.setWorkingEnvironment(verifyContextPath.toString(), testCaseName);
 
-            // 4. 形成假设
-            hypotheses = hypothesisAgent.formHypotheses(testCode, testOutput,
-                    buildCollectedInformationString());
-            logWithTestCase("形成 " + hypotheses.size() + " 个假设");
-
-            // 5. 验证假设
-            verificationResults = hypothesisAgent.verifyHypotheses(testCode);
-            logWithTestCase("验证完成，结果数: " + verificationResults.size());
-        }
-
-        // 6. 形成结论和报告
+        // 4. 形成结论和报告
         String reportJson = generateReport(hypotheses, verificationResults);
         logWithTestCase("Bug验证报告已生成");
         
@@ -396,12 +459,18 @@ public class BugVerify extends Agent {
     public boolean enhanceVerify() {
         String header = "Enhance Verification: " + getTestCaseIdentifier();
         LoggerUtil.logVerify(Level.INFO, header, "Verification process started.");
+        // 新增：状态记录列表
+        List<String> verifyStatusLog = new ArrayList<>();
+        verifyStatusLog.add("Start Enhance Verify: " + getTestCaseIdentifier());
         
         // 前置条件检查：确保测试用例存在且被识别为bug
         if (testCase == null || testCase.getResult() == null) {
             logWithTestCase("测试用例未设置，跳过增强验证");
             this.enhanceVerifyFailureReason = "Test case not set.";
             LoggerUtil.logVerify(Level.WARNING, header, "Verification failed: Test case not set.");
+            // 记录状态并保存
+            verifyStatusLog.add("Precondition failed: Test case not set.");
+            saveToFile(this.resultDir.resolve("verify_status.txt").toString(), String.join("\n", verifyStatusLog));
             return false;
         }
         
@@ -433,10 +502,15 @@ public class BugVerify extends Agent {
                     verificationLog.add("验证 " + i + ": BUG - " + testCase.verifyMessage);
                     bugArguments.add(testCase.verifyMessage);
                     logWithTestCase("第 " + i + " 次验证确认是bug");
+                    // 新增：记录每次验证结果
+                    verifyStatusLog.add("Verify " + i + ": BUG");
                 } else {
                     nonBugResults.add("验证 " + i + ": NOT_BUG - " + testCase.verifyMessage);
                     logWithTestCase("第 " + i + " 次验证认为不是bug");
-                    break;
+                    // 新增：记录并保存后终止
+                    verifyStatusLog.add("Verify " + i + ": NOT_BUG");
+                    saveToFile(this.resultDir.resolve("verify_status.txt").toString(), String.join("\n", verifyStatusLog));
+                    return false;
                 }
 
             } catch (Exception e) {
@@ -915,6 +989,7 @@ public class BugVerify extends Agent {
     /**
      * 构建收集信息的字符串
      */
+    @SuppressWarnings("unused")
     private String buildCollectedInformationString() {
         StringBuilder infoBuilder = new StringBuilder();
         infoBuilder.append("# 收集的信息\n\n");
@@ -956,16 +1031,17 @@ public class BugVerify extends Agent {
         boolean enableAblationTest = edu.tju.ista.llm4test.config.GlobalConfig.isEnableAblationTest();
         
         if (enableAblationTest) {
-            LoggerUtil.logExec(Level.INFO, "开始消融实验：生成3个配置组合");
+            LoggerUtil.logExec(Level.INFO, "开始消融实验：生成4个配置组合");
             
-            // 定义3个消融实验配置
+            // 定义消融实验配置：移除Hypothesis选项，仅保留信息源、约简及API文档切换
             List<AblationConfig> configs = Arrays.asList(
-                new AblationConfig(true, true, true, true, 1),   // 完整配置
-                new AblationConfig(true, false, true, true, 2), // 无信息源
-                new AblationConfig(false, true, true, true, 3)  // 无假设
+                new AblationConfig(true, true, true, 1),   // 完整配置 (信息源+约简+API)
+                new AblationConfig(false, true, true, 2),  // 无信息源
+                new AblationConfig(true, false, true, 3),  // 无约简
+                new AblationConfig(true, true, false, 4)  // 无API文档
             );
             
-            // 并行执行3个配置
+            // 并行执行4个配置
             var manager = ConcurrentExecutionManager.getInstance();
             List<CompletableFuture<AblationResult>> futures = new ArrayList<>();
             
@@ -994,16 +1070,48 @@ public class BugVerify extends Agent {
             
             saveAblationResults(results);
             
+            // 新增：保存消融实验状态到单独文件
+            StringBuilder ablationStatus = new StringBuilder();
+            for (AblationResult r : results) {
+                try {
+                    JsonNode node = new ObjectMapper().readTree(r.result);
+                    String bugType = node.path("bug_type").asText("UNKNOWN");
+                    ablationStatus.append("Config ").append(r.config.id).append(": ").append(bugType).append("\n");
+                } catch (Exception e) {
+                    ablationStatus.append("Config ").append(r.config.id).append(": 解析错误\n");
+                }
+            }
+            // 保存消融实验状态为CSV并追加
+            Path ablationCsv = this.resultDir.resolve("ablation_status.csv");
+            try {
+                boolean exists = Files.exists(ablationCsv);
+                if (!exists) {
+                    appendToFile(ablationCsv.toString(), "TestCase,ConfigId,BugType,Timestamp\n");
+                }
+                String identifier = getTestCaseIdentifier();
+                String timestamp = this.resultTimestamp;
+                for (String line : ablationStatus.toString().split("\n")) {
+                    // line format: Config <id>: <bugType>
+                    String[] parts = line.replace("Config ","").split(": ");
+                    String id = parts[0].trim();
+                    String bugType = parts.length>1?parts[1].trim():"UNKNOWN";
+                    String csvLine = String.format("%s,%s,%s,%s\n", identifier, id, bugType, timestamp);
+                    appendToFile(ablationCsv.toString(), csvLine);
+                }
+            } catch (Exception e) {
+                logWithTestCase(Level.WARNING, "写入消融实验CSV失败: " + e.getMessage());
+            }
+            
             // 返回第一个配置的结果
             return results.get(0).result;
         } else {
             // 非消融实验，使用原有配置
-            boolean includeHypothesis = edu.tju.ista.llm4test.config.GlobalConfig.isIncludeHypothesis();
+            // 默认不包含假设
             boolean includeInfoSource = edu.tju.ista.llm4test.config.GlobalConfig.isIncludeInfoSource();
             boolean useMinimizedTestcase = edu.tju.ista.llm4test.config.GlobalConfig.isUseMinimizedTestcase();
             boolean includeApiDocs = edu.tju.ista.llm4test.config.GlobalConfig.isIncludeApiDocs();
             
-            AblationConfig config = new AblationConfig(includeHypothesis, includeInfoSource, 
+            AblationConfig config = new AblationConfig(includeInfoSource, 
                 useMinimizedTestcase, includeApiDocs, 0);
             
             return generateReportWithConfig(hypotheses, verificationResults, config);
@@ -1026,6 +1134,12 @@ public class BugVerify extends Agent {
             }
         }
         
+        // 根据配置选择输出
+        String actualTestOutput = testOutput;
+        if (!config.useMinimizedTestcase && originalTestOutput != null) {
+            actualTestOutput = originalTestOutput;
+        }
+        
         // 构建验证结果
         StringBuilder resultsBuilder = new StringBuilder();
         for (Map.Entry<String, TestResult> entry : verificationResults.entrySet()) {
@@ -1036,13 +1150,8 @@ public class BugVerify extends Agent {
             resultsBuilder.append("</").append(entry.getKey()).append("_Result>\n\n");
         }
         
-        // 构建假设信息
-        StringBuilder hypothesesBuilder = new StringBuilder();
-        if (config.includeHypothesis) {
-            for (String hypothesis : hypotheses) {
-                hypothesesBuilder.append(hypothesis).append("\n\n");
-            }
-        }
+        // 构建假设信息：已移除Hypothesis选项，始终不输出hypotheses
+        StringBuilder hypothesesBuilder = new StringBuilder(); // Hypotheses disabled
         
         // 构建信息源内容
         StringBuilder infoSourceBuilder = new StringBuilder();
@@ -1064,7 +1173,7 @@ public class BugVerify extends Agent {
         // 生成prompt并获取结果
         try {
             String prompt = PromptGen.generateBugVerifyBugReportPrompt(
-                actualTestCode, testOutput, hypothesesBuilder.toString(),
+                actualTestCode, actualTestOutput, hypothesesBuilder.toString(),
                 resultsBuilder.toString(), infoSourceBuilder.toString());
             
             // 保存prompt到文件
@@ -1120,16 +1229,13 @@ public class BugVerify extends Agent {
      * 消融实验配置类
      */
     private static class AblationConfig {
-        final boolean includeHypothesis;
         final boolean includeInfoSource;
         final boolean useMinimizedTestcase;
         final boolean includeApiDocs;
-
         final int id;
         
-        AblationConfig(boolean includeHypothesis, boolean includeInfoSource, 
+        AblationConfig(boolean includeInfoSource, 
                       boolean useMinimizedTestcase, boolean includeApiDocs, int id) {
-            this.includeHypothesis = includeHypothesis;
             this.includeInfoSource = includeInfoSource;
             this.useMinimizedTestcase = useMinimizedTestcase;
             this.includeApiDocs = includeApiDocs;
@@ -1173,7 +1279,6 @@ public class BugVerify extends Agent {
             
             for (AblationResult result : results) {
                 summary.append("## 配置 ").append(result.config.id).append("\n");
-                summary.append("- 包含假设: ").append(result.config.includeHypothesis).append("\n");
                 summary.append("- 包含信息源: ").append(result.config.includeInfoSource).append("\n");
                 summary.append("- 使用最小化测试用例: ").append(result.config.useMinimizedTestcase).append("\n");
                 summary.append("- 包含API文档: ").append(result.config.includeApiDocs).append("\n\n");
@@ -1181,10 +1286,54 @@ public class BugVerify extends Agent {
             
             saveToFile(ablationDir.resolve("ablation_summary.md").toString(), summary.toString());
             
+            // 保存CSV格式的结果
+            saveAblationResultsToCSV(results, ablationDir);
+            
             LoggerUtil.logExec(Level.INFO, "已保存消融实验结果到: " + ablationDir);
             
         } catch (IOException e) {
             LoggerUtil.logExec(Level.WARNING, "保存消融实验结果失败: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * 将消融实验结果保存为CSV格式
+     */
+    private void saveAblationResultsToCSV(List<AblationResult> results, Path ablationDir) {
+        try {
+            Path csvFile = ablationDir.resolve("ablation.csv");
+            StringBuilder csvContent = new StringBuilder();
+            
+            // CSV表头
+            csvContent.append("config_id,test_case,bug_type,include_info_source,use_minimized_testcase,include_api_docs,timestamp\n");
+            
+            String testCaseName = getTestCaseIdentifier();
+            String timestamp = String.valueOf(System.currentTimeMillis());
+            
+            for (AblationResult result : results) {
+                String bugType = "UNKNOWN";
+                try {
+                    ObjectMapper objectMapper = new ObjectMapper();
+                    JsonNode rootNode = objectMapper.readTree(result.result);
+                    bugType = rootNode.path("bug_type").asText("UNKNOWN");
+                } catch (IOException e) {
+                    LoggerUtil.logExec(Level.WARNING, "解析消融实验结果JSON失败: " + e.getMessage());
+                }
+                
+                csvContent.append(result.config.id).append(",")
+                         .append(testCaseName).append(",")
+                         .append(bugType).append(",")
+                         .append(result.config.includeInfoSource).append(",")
+                         .append(result.config.useMinimizedTestcase).append(",")
+                         .append(result.config.includeApiDocs).append(",")
+                         .append(timestamp).append("\n");
+            }
+            
+            saveToFile(csvFile.toString(), csvContent.toString());
+            LoggerUtil.logExec(Level.INFO, "已保存消融实验CSV结果到: " + csvFile);
+            
+        } catch (Exception e) {
+            LoggerUtil.logExec(Level.WARNING, "保存消融实验CSV结果失败: " + e.getMessage());
         }
     }
     
@@ -1375,6 +1524,7 @@ public class BugVerify extends Agent {
                         testcase.setOriginFile(originFile);
                         testcase.verifyMessage = verifyMessage;
                         testcase.setApiDocProcessor(ApiInfoProcessor.fromConfig());
+                        testcase.recalculateApiDocs();
 
                         String testCaseName = testFile.getName().replace(".java", "");
                         LoggerUtil.logExec(Level.INFO, "正在分析bug: " + testCaseName);
