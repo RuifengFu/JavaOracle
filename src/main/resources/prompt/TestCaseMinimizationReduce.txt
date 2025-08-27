@@ -43,7 +43,7 @@ Once the obvious parts are gone, methodically simplify the remaining code that i
         - **Conditionals:** Simplify complex `if` conditions to `true` or `false` if the other path is never taken.
     - **Inline and Remove Code:**
         - **Inline Methods:** Replace calls to simple helper methods with the method's body to make removal easier.
-        - **Eliminate Boilerplate:** Remove unused imports, local variables, and unneeded class/interface declarations (`implements Serializable`, etc.). **CRITICAL:** Do **NOT** remove jtreg tags like `@test`, `@bug`, `@summary`, `@run`.
+        - **Eliminate Boilerplate:** Remove unused imports, local variables, and unneeded class/interface declarations (`implements Serializable`, etc.). **CRITICAL:** Do **NOT** remove any jtreg tags(`@test`, `@bug`, `@summary`, `@run`, `@build`, `@library`, ...).
 
 **3. When Reduction Stalls -> Switch to Debugging:**
 - If you cannot identify any more code to remove, your task is to **increase observability**.

@@ -90,7 +90,7 @@ public class TestCaseAgent extends Agent {
         addToHistory("Target: " + testCase.name);
         addToHistory("MinimizationPath: " + testFilePath);
 
-        this.minimizedTestCase = new TestCase(testFilePath.toFile());
+        minimizedTestCase = new TestCase(testFilePath.toFile());
         minimizedTestCase.setOriginFile(testCase.getFile());
         minimizedTestCase.setResult(testCase.getResult());
         minimizedTestCase.setSourceCode(currentCode);

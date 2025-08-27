@@ -48,6 +48,18 @@ public class BugVerify extends Agent {
     // LLM实例
     private final OpenAI llm = OpenAI.K2;
 
+    // 全局结果目录，仅生成一次
+    private static final String GLOBAL_RESULT_TIMESTAMP = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
+    private static final Path GLOBAL_RESULT_DIR = Paths.get("result", GLOBAL_RESULT_TIMESTAMP);
+    static {
+        try {
+            Files.createDirectories(GLOBAL_RESULT_DIR);
+        } catch (IOException e) {
+            // 静态初始化失败记录日志
+            LoggerUtil.logExec(Level.WARNING, "创建全局结果目录失败: " + e.getMessage());
+        }
+    }
+
     public TestCase getTestCase() {
         return testCase;
     }
@@ -103,10 +115,7 @@ public class BugVerify extends Agent {
     private int infoCounter = 0;
     private Map<String, String> infoSourceMap = new HashMap<>();
 
-    // 在字段定义区新增结果目录字段
-    private Path resultDir;
-    @SuppressWarnings("unused")
-    private String resultTimestamp;
+    // 使用全局结果目录，无需实例字段
     
     public void setSharedVerifyDir(Path sharedVerifyDir) {
         this.sharedVerifyDir = sharedVerifyDir;
@@ -117,7 +126,8 @@ public class BugVerify extends Agent {
      */
     private String getTestCaseIdentifier() {
         if (testCase != null && testCase.getFile() != null) {
-            return testCase.getFile().getName().replace(".java", "");
+            // 使用绝对路径以避免不同目录下的同名文件冲突
+            return testCase.getFile().getAbsolutePath();
         } else if (testCaseName != null) {
             return testCaseName;
         } else {
@@ -220,15 +230,8 @@ public class BugVerify extends Agent {
      * 执行完整的Bug验证流程
      */
     public String analyze() {
-        // 初始化结果目录
-        String resultTimestamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
-        this.resultTimestamp = resultTimestamp;
-        this.resultDir = Paths.get("result", resultTimestamp);
-        try {
-            Files.createDirectories(this.resultDir);
-        } catch (IOException e) {
-            logWithTestCase(Level.WARNING, "创建结果目录失败: " + e.getMessage());
-        }
+        // 使用全局结果目录
+        logWithTestCase("结果目录: " + GLOBAL_RESULT_DIR);
         logWithTestCase("开始Bug验证流程");
 
         Path sourceTestCaseDir = Paths.get(bugReportPath, "testcase", testCaseName);
@@ -247,10 +250,10 @@ public class BugVerify extends Agent {
                 int originalLength = verifyTestCase.getSourceCode().length();
                 try {
                     TestCase minimizedCase = minimizationAgent.run(verifyTestCase, this.sharedVerifyDir);
-                    Path miniCsv = this.resultDir.resolve("minimization_status.csv");
+                    Path miniCsv = GLOBAL_RESULT_DIR.resolve("minimization_status.csv");
                     // 检查约简是否成功
                     if (minimizedCase != null && minimizedCase.getSourceCode() != null &&
-                        !minimizedCase.getSourceCode().equals(verifyTestCase.getSourceCode())) {
+                        !minimizedCase.getSourceCode().equals(testCase.getSourceCode())) {
 
                         String minimizedCode = minimizedCase.getSourceCode();
                         // Save the minimized code to the original context path for record keeping
@@ -281,11 +284,11 @@ public class BugVerify extends Agent {
                         try {
                             boolean existsMini = Files.exists(miniCsv);
                             if (!existsMini) {
-                                appendToFile(miniCsv.toString(), "TestCase,Success,OriginalLength,MinimizedLength,Reduction,ReductionPercentage,Timestamp\n");
+                                saveToFile(miniCsv.toString(), "TestCase,Success,OriginalLength,MinimizedLength,Reduction,ReductionPercentage,Timestamp\n");
                             }
                             String csvLineMini = String.format(
                                 "%s,%b,%d,%d,%d,%.2f%%,%s\n",
-                                getTestCaseIdentifier(), true, originalLength, minimizedLength, reduction, reductionPercentage, this.resultTimestamp
+                                getTestCaseIdentifier(), true, originalLength, minimizedLength, reduction, reductionPercentage, GLOBAL_RESULT_TIMESTAMP
                             );
                             appendToFile(miniCsv.toString(), csvLineMini);
                         } catch (Exception e) {
@@ -302,7 +305,7 @@ public class BugVerify extends Agent {
                             }
                             String csvLineFail = String.format(
                                 "%s,%b,%d,%d,%d,%.2f%%,%s\n",
-                                getTestCaseIdentifier(), false, originalLength, originalLength, 0, 0.0, this.resultTimestamp
+                                getTestCaseIdentifier(), false, originalLength, originalLength, 0, 0.0, GLOBAL_RESULT_TIMESTAMP
                             );
                             appendToFile(miniCsv.toString(), csvLineFail);
                         } catch (Exception e) {
@@ -459,9 +462,8 @@ public class BugVerify extends Agent {
     public boolean enhanceVerify() {
         String header = "Enhance Verification: " + getTestCaseIdentifier();
         LoggerUtil.logVerify(Level.INFO, header, "Verification process started.");
-        // 新增：状态记录列表
-        List<String> verifyStatusLog = new ArrayList<>();
-        verifyStatusLog.add("Start Enhance Verify: " + getTestCaseIdentifier());
+        // 新增：直接写入CSV状态
+        writeVerifyStatus("Start", "Started", "Enhance verification process initiated.");
         
         // 前置条件检查：确保测试用例存在且被识别为bug
         if (testCase == null || testCase.getResult() == null) {
@@ -469,8 +471,7 @@ public class BugVerify extends Agent {
             this.enhanceVerifyFailureReason = "Test case not set.";
             LoggerUtil.logVerify(Level.WARNING, header, "Verification failed: Test case not set.");
             // 记录状态并保存
-            verifyStatusLog.add("Precondition failed: Test case not set.");
-            saveToFile(this.resultDir.resolve("verify_status.txt").toString(), String.join("\n", verifyStatusLog));
+            writeVerifyStatus("Precondition", "Failed", "Test case not set.");
             return false;
         }
         
@@ -503,13 +504,12 @@ public class BugVerify extends Agent {
                     bugArguments.add(testCase.verifyMessage);
                     logWithTestCase("第 " + i + " 次验证确认是bug");
                     // 新增：记录每次验证结果
-                    verifyStatusLog.add("Verify " + i + ": BUG");
+                    writeVerifyStatus("Verification " + i, "BUG", testCase.verifyMessage);
                 } else {
                     nonBugResults.add("验证 " + i + ": NOT_BUG - " + testCase.verifyMessage);
                     logWithTestCase("第 " + i + " 次验证认为不是bug");
                     // 新增：记录并保存后终止
-                    verifyStatusLog.add("Verify " + i + ": NOT_BUG");
-                    saveToFile(this.resultDir.resolve("verify_status.txt").toString(), String.join("\n", verifyStatusLog));
+                    writeVerifyStatus("Verification " + i, "NOT_BUG", testCase.verifyMessage);
                     return false;
                 }
 
@@ -621,6 +621,8 @@ public class BugVerify extends Agent {
         }
         
         logWithTestCase("裁决投票完成. 总分: " + totalScore + ". 最终裁决: " + finalVerdict);
+        // 新增：记录最终裁决并保存状态
+        writeVerifyStatus("Verdict", finalVerdict, "Total score: " + totalScore);
 
         // 保存投票过程用于调试
         StringBuilder verdictSummary = new StringBuilder("# 裁决投票过程\n\n");
@@ -678,7 +680,10 @@ public class BugVerify extends Agent {
             var testcase = sb.toString();
             
             // 生成专门的测试用例问题分析prompt
-            String prompt = PromptGen.generateTestCaseIssueExplanationPrompt(testcase, testOutput, testCase.getApiDoc());
+            // 避免 apiDoc 为 null 导致模板渲染失败
+            String apiDoc = testCase.getApiDoc();
+            if (apiDoc == null) apiDoc = "";
+            String prompt = PromptGen.generateTestCaseIssueExplanationPrompt(testcase, testOutput, apiDoc);
             ArrayList<Tool<?>> tools = new ArrayList<>();
             tools.add(new TestCaseIssueExplanationTool());
             
@@ -734,7 +739,10 @@ public class BugVerify extends Agent {
             var testcase = sb.toString();
             
             // 生成裁决分析prompt，包含双方论证
-            String prompt = PromptGen.generateVerdictAnalysisPrompt(testcase, testOutput, testCase.getApiDoc(), bugArgument, testCaseIssueExplanation);
+            // 避免 apiDoc 为 null
+            String apiDoc2 = testCase.getApiDoc();
+            if (apiDoc2 == null) apiDoc2 = "";
+            String prompt = PromptGen.generateVerdictAnalysisPrompt(testcase, testOutput, apiDoc2, bugArgument, testCaseIssueExplanation);
             ArrayList<Tool<?>> tools = new ArrayList<>();
             tools.add(new VerdictTool());
             
@@ -1031,17 +1039,16 @@ public class BugVerify extends Agent {
         boolean enableAblationTest = edu.tju.ista.llm4test.config.GlobalConfig.isEnableAblationTest();
         
         if (enableAblationTest) {
-            LoggerUtil.logExec(Level.INFO, "开始消融实验：生成4个配置组合");
+            LoggerUtil.logExec(Level.INFO, "开始消融实验：生成3个配置组合");
             
             // 定义消融实验配置：移除Hypothesis选项，仅保留信息源、约简及API文档切换
             List<AblationConfig> configs = Arrays.asList(
                 new AblationConfig(true, true, true, 1),   // 完整配置 (信息源+约简+API)
                 new AblationConfig(false, true, true, 2),  // 无信息源
-                new AblationConfig(true, false, true, 3),  // 无约简
-                new AblationConfig(true, true, false, 4)  // 无API文档
+                new AblationConfig(true, false, true, 3)  // 无约简
             );
             
-            // 并行执行4个配置
+            // 并行执行3个配置
             var manager = ConcurrentExecutionManager.getInstance();
             List<CompletableFuture<AblationResult>> futures = new ArrayList<>();
             
@@ -1082,14 +1089,14 @@ public class BugVerify extends Agent {
                 }
             }
             // 保存消融实验状态为CSV并追加
-            Path ablationCsv = this.resultDir.resolve("ablation_status.csv");
+            Path ablationCsv = GLOBAL_RESULT_DIR.resolve("ablation_status.csv");
             try {
                 boolean exists = Files.exists(ablationCsv);
                 if (!exists) {
                     appendToFile(ablationCsv.toString(), "TestCase,ConfigId,BugType,Timestamp\n");
                 }
                 String identifier = getTestCaseIdentifier();
-                String timestamp = this.resultTimestamp;
+                String timestamp = GLOBAL_RESULT_TIMESTAMP;
                 for (String line : ablationStatus.toString().split("\n")) {
                     // line format: Config <id>: <bugType>
                     String[] parts = line.replace("Config ","").split(": ");
@@ -1748,10 +1755,10 @@ public class BugVerify extends Agent {
             // 计算相对路径：从test目录到具体测试文件
             Path testDir = Paths.get(GlobalConfig.getTestDir()).toAbsolutePath();
             Path originalPath = originalTestCase.getFile().toPath().toAbsolutePath();
-            Path relativePath = testDir.relativize(originalPath);
+            Path relativePath = testDir.relativize(originalPath).normalize();
 
-            // 在verify目录中的新路径
-            Path newTestPath = verifyDir.resolve(relativePath);
+            // 在verify目录中的新路径并规范化
+            Path newTestPath = verifyDir.resolve(relativePath).normalize();
             
             // 关键步骤：用原始文件内容覆盖共享目录中的同名文件，以重置状态
             String originalContent = Files.readString(originalTestCase.getFile().toPath());
@@ -1810,6 +1817,32 @@ public class BugVerify extends Agent {
 
         } catch (IOException e) {
             LoggerUtil.logExec(Level.SEVERE, "Failed to generate non-bug report for " + testCaseName + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * Writes a status update to the verify_status.csv file.
+     * This method is synchronized to handle concurrent writes from multiple threads.
+     * @param step The current step in the verification process.
+     * @param status The status of the step.
+     * @param details Additional details.
+     */
+    private synchronized void writeVerifyStatus(String step, String status, String details) {
+        try {
+            Path statusCsv = GLOBAL_RESULT_DIR.resolve("verify_status.csv");
+            if (!Files.exists(statusCsv)) {
+                appendToFile(statusCsv.toString(), "TestCase,Timestamp,Step,Status,Details\n");
+            }
+            String line = String.format("\"%s\",\"%s\",\"%s\",\"%s\",\"%s\"\n",
+                getTestCaseIdentifier(),
+                GLOBAL_RESULT_TIMESTAMP,
+                step,
+                status,
+                details.replace("\"", "'") // simple CSV escape for quotes
+            );
+            appendToFile(statusCsv.toString(), line);
+        } catch (Exception e) {
+            logWithTestCase(Level.WARNING, "Failed to write to verify_status.csv: " + e.getMessage());
         }
     }
 }
