@@ -267,10 +267,11 @@ public class BugVerify extends Agent {
                         logWithTestCase("Minimization successful in verify environment. Minimized code saved at: " + minimizedFile.getAbsolutePath());
                         
                         // Update the agent's state to use the minimized test case for subsequent steps
-                        this.testCase.setFile(minimizedFile);
                         this.testCode = minimizedCode;
                         this.testOutput = minimizedCase.getResult().getOutput();
                         this.testCase = minimizedCase;
+                        // 关键修复: 为约简后的测试用例设置ApiDocProcessor, 因为minimizationAgent返回的新TestCase对象可能未设置它
+                        this.testCase.setApiDocProcessor(ApiInfoProcessor.fromConfig());
                         // Recalculate API docs for the minimized test case
                         this.testCase.recalculateApiDocs();
                         logWithTestCase("BugVerifyAgent will now proceed with the minimized test case from verify environment.");
@@ -382,6 +383,8 @@ public class BugVerify extends Agent {
                             } else {
                                 // Target does not exist, so we can try a clean move.
                                 try {
+                                    // 修复：在移动之前，确保目标父目录存在
+                                    Files.createDirectories(targetBugDir.getParent());
                                     Files.move(sourceTestCaseDir, targetBugDir);
                                     logWithTestCase("已将确认的bug文件夹移动到: " + targetBugDir);
                                     reportDir = targetBugDir; // Success, update report dir
@@ -407,6 +410,8 @@ public class BugVerify extends Agent {
                                 fileName = "BugReport.md";
                                 if (Files.exists(sourceTestCaseDir)) {
                                     try {
+                                        // 修复：在移动之前，确保目标父目录存在
+                                        Files.createDirectories(targetBugDir.getParent());
                                         Files.move(sourceTestCaseDir, targetBugDir);
                                         logWithTestCase("已将确认的bug文件夹移动到 (WrongFormat): " + targetBugDir);
                                     } catch (IOException e) {
