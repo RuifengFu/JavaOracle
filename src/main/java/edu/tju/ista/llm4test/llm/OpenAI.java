@@ -170,6 +170,23 @@ public class OpenAI {
         }
     }
 
+    /**
+     * 内部类，用于封装流式工具调用响应的结果
+     */
+    private static class StreamedToolCallResponse {
+        final List<ToolCall> toolCalls;
+        final String content;
+        final String reasoningContent;
+        final String thinkingAndContent;
+
+        StreamedToolCallResponse(List<ToolCall> toolCalls, String content, String reasoningContent, String thinkingAndContent) {
+            this.toolCalls = toolCalls;
+            this.content = content;
+            this.reasoningContent = reasoningContent;
+            this.thinkingAndContent = thinkingAndContent;
+        }
+    }
+
 
     private Map<String, Object> getBaseRequestMap(String prompt) {
         // Create request body
@@ -456,31 +473,42 @@ public class OpenAI {
         try {
             Map<String, Object> requestBody = getBaseRequestMap(prompt);
             requestBody.put("tools", ToolFactory.toToolsArray(tools));
-            requestBody.put("stream", false);
-            requestBody.put("max_tokens", 4096);
 
-            return executeWithRetryAsync("toolCallWithContent", () -> getResponseBodyAsync(requestBody), 0)
-                    .thenApply(responseBody -> {
-                        @SuppressWarnings("unchecked")
-                        List<Map<String, Object>> choices = (List<Map<String, Object>>) responseBody.get("choices");
-                        if (choices != null && !choices.isEmpty()) {
-                            @SuppressWarnings("unchecked")
-                            Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
-                            String content = (String) message.get("content");
-                            String reasoning = (String) message.get("reasoning_content");
-                            List<ToolCall> calls = parseToolCalls(message.get("tool_calls"));
-
-                            if (requirement == ToolCallRequirement.REQUIRED && (calls == null || calls.isEmpty())) {
-                                throw new CompletionException(new NoToolCallException("Response did not contain required tool calls.", content, reasoning));
+            if (STREAM) {
+                return executeWithRetryAsync("streamToolCallResponse", () -> streamToolCallResponseAsync(requestBody), 0)
+                        .thenApply(streamedResult -> {
+                            LoggerUtil.logOpenAI(Level.INFO, "OpenAI async tool call response: \n" + streamedResult.thinkingAndContent);
+                            
+                            if (requirement == ToolCallRequirement.REQUIRED && (streamedResult.toolCalls == null || streamedResult.toolCalls.isEmpty())) {
+                                throw new CompletionException(new NoToolCallException("Response did not contain required tool calls.", streamedResult.content, streamedResult.reasoningContent));
                             }
 
-                            return new ToolCallResult(calls, content != null ? content : "", reasoning != null ? reasoning : "");
-                        }
-                        if(requirement == ToolCallRequirement.REQUIRED) {
-                            throw new CompletionException(new NoToolCallException("Response was empty and did not contain required tool calls.", "", ""));
-                        }
-                        return new ToolCallResult(new ArrayList<>(), "", "");
-                    });
+                            return new ToolCallResult(streamedResult.toolCalls, streamedResult.content, streamedResult.reasoningContent);
+                        });
+            } else {
+                return executeWithRetryAsync("toolCallWithContent", () -> getResponseBodyAsync(requestBody), 0)
+                        .thenApply(responseBody -> {
+                            @SuppressWarnings("unchecked")
+                            List<Map<String, Object>> choices = (List<Map<String, Object>>) responseBody.get("choices");
+                            if (choices != null && !choices.isEmpty()) {
+                                @SuppressWarnings("unchecked")
+                                Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
+                                String content = (String) message.get("content");
+                                String reasoning = (String) message.get("reasoning_content");
+                                List<ToolCall> calls = parseToolCalls(message.get("tool_calls"));
+
+                                if (requirement == ToolCallRequirement.REQUIRED && (calls == null || calls.isEmpty())) {
+                                    throw new CompletionException(new NoToolCallException("Response did not contain required tool calls.", content, reasoning));
+                                }
+
+                                return new ToolCallResult(calls, content != null ? content : "", reasoning != null ? reasoning : "");
+                            }
+                            if(requirement == ToolCallRequirement.REQUIRED) {
+                                throw new CompletionException(new NoToolCallException("Response was empty and did not contain required tool calls.", "", ""));
+                            }
+                            return new ToolCallResult(new ArrayList<>(), "", "");
+                        });
+            }
         } catch (Exception e) {
             LoggerUtil.logExec(Level.SEVERE, "Failed to start OpenAI function calling async: " + e.getMessage());
             return CompletableFuture.failedFuture(e);
@@ -615,6 +643,75 @@ public class OpenAI {
 
                         String fullLog = "<thinking>\n" + reasonSb + "\n</thinking>\n\n" + contentSb;
                         return new StreamedResponse(contentSb.toString(), fullLog);
+                    });
+        } catch (JsonProcessingException e) {
+            return CompletableFuture.failedFuture(e);
+        }
+    }
+
+    /**
+     * 异步处理流式工具调用响应，并将结果聚合后返回
+     */
+    @SuppressWarnings("unchecked")
+    private CompletableFuture<StreamedToolCallResponse> streamToolCallResponseAsync(Map<String, Object> requestBody) {
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            String requestBodyJson = mapper.writeValueAsString(requestBody);
+            HttpClient httpClient = buildHttpClient();
+            HttpRequest request = buildRequest(requestBodyJson);
+
+            return httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofLines())
+                    .thenApply(response -> {
+                        if (response.statusCode() != 200) {
+                            throw new CompletionException(new RuntimeException("HTTP error: " + response.statusCode() + "\n" +
+                                    response.body().collect(Collectors.joining("\n"))));
+                        }
+
+                        StringBuilder reasonSb = new StringBuilder();
+                        StringBuilder contentSb = new StringBuilder();
+                        List<ToolCall> toolCalls = new ArrayList<>();
+                        boolean[] hasValidData = {false};
+
+                        response.body().forEach(line -> {
+                            if (isValidDataLine(line)) {
+                                try {
+                                    if (line.startsWith("data: [DONE]")) return;
+                                    hasValidData[0] = true;
+                                    String jsonContent = extractJsonContent(line);
+                                    Map<String, Object> chunk = mapper.readValue(jsonContent, Map.class);
+
+                                    List<Map<String, Object>> choices = (List<Map<String, Object>>) chunk.get("choices");
+                                    if (choices != null && !choices.isEmpty()) {
+                                        Map<String, Object> choice = choices.get(0);
+                                        Map<String, Object> message = (Map<String, Object>) choice.get("delta");
+                                        if (message != null) {
+                                            String reasoning_content = (String) message.get("reasoning_content");
+                                            if (reasoning_content != null)
+                                                reasonSb.append(reasoning_content);
+                                            String content = (String) message.get("content");
+                                            if (content != null)
+                                                contentSb.append(content);
+                                            
+                                            // Parse tool calls from delta
+                                            Object toolCallsObj = message.get("tool_calls");
+                                            if (toolCallsObj != null) {
+                                                List<ToolCall> deltaToolCalls = parseToolCalls(toolCallsObj);
+                                                toolCalls.addAll(deltaToolCalls);
+                                            }
+                                        }
+                                    }
+                                } catch (IOException e) {
+                                    LoggerUtil.logExec(Level.WARNING, "Failed to parse chunk: " + line);
+                                }
+                            }
+                        });
+
+                        if (!hasValidData[0]) {
+                            throw new CompletionException(new RuntimeException("Stream response was empty"));
+                        }
+
+                        String fullLog = "<thinking>\n" + reasonSb + "\n</thinking>\n\n" + contentSb;
+                        return new StreamedToolCallResponse(toolCalls, contentSb.toString(), reasonSb.toString(), fullLog);
                     });
         } catch (JsonProcessingException e) {
             return CompletableFuture.failedFuture(e);
