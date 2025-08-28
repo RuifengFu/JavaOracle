@@ -482,17 +482,14 @@ public class BugVerify extends Agent {
         
         Path verifyContextPath = this.verifyContextPath;
         
-        // ===== 第一步：多重验证确保一致性 =====
-        // 目标：通过两次额外的验证来确保bug判断的稳定性
-        // 如果任何一次验证不认为是bug，则停止增强验证流程
+        // ===== 第一步：多重验证确保一致性 (投票机制) =====
+        // 目标：通过三次验证并投票（2/3多数）来确保bug判断的稳定性
         List<String> verificationLog = new ArrayList<>();
-        List<String> nonBugResults = new ArrayList<>();
         List<String> bugArguments = new ArrayList<>();
-//        if (this.testCase.verifyMessage != null && !this.testCase.verifyMessage.isEmpty()){
-//            bugArguments.add(this.testCase.verifyMessage);
-//        }
+        int bugVerificationCount = 0;
+        final int TOTAL_VERIFICATIONS = 3;
 
-        for (int i = 1; i <= 2; i++) {
+        for (int i = 1; i <= TOTAL_VERIFICATIONS; i++) {
             logWithTestCase("执行第 " + i + " 次额外验证");
             
             try {
@@ -505,22 +502,20 @@ public class BugVerify extends Agent {
                 saveToFile(verifyContextPath.resolve("enhance_verify_" + i + ".json").toString(), verificationResult);
 
                 if (testCase.getResult().isBug()) {
+                    bugVerificationCount++;
                     verificationLog.add("验证 " + i + ": BUG - " + testCase.verifyMessage);
                     bugArguments.add(testCase.verifyMessage);
                     logWithTestCase("第 " + i + " 次验证确认是bug");
-                    // 新增：记录每次验证结果
                     writeVerifyStatus("Verification " + i, "BUG", testCase.verifyMessage);
                 } else {
-                    nonBugResults.add("验证 " + i + ": NOT_BUG - " + testCase.verifyMessage);
+                    verificationLog.add("验证 " + i + ": NOT_BUG - " + testCase.verifyMessage);
                     logWithTestCase("第 " + i + " 次验证认为不是bug");
-                    // 新增：记录并保存后终止
                     writeVerifyStatus("Verification " + i, "NOT_BUG", testCase.verifyMessage);
-                    return false;
                 }
 
             } catch (Exception e) {
                 logWithTestCase(Level.WARNING, "第 " + i + " 次验证失败: " + e.getMessage());
-                nonBugResults.add("验证 " + i + ": ERROR - " + e.getMessage());
+                verificationLog.add("验证 " + i + ": ERROR - " + e.getMessage());
                 
                 // 保存错误信息到文件
                 String errorResult = "{\"verification\": " + i + ", \"result\": \"ERROR\", \"message\": \"" + e.getMessage() + "\"}";
@@ -528,22 +523,18 @@ public class BugVerify extends Agent {
             }
         }
         
-        // 检查验证一致性：所有验证都必须认为是bug才能继续
-        boolean allBugResults = verificationLog.size() == 2;
+        // 检查验证一致性：至少有2次验证认为是bug才能继续
+        boolean isBugConfirmedByMajority = bugVerificationCount >= 2;
         
-        if (!allBugResults) {
-            logWithTestCase("增强验证失败：不是所有验证都认为是bug");
-            this.enhanceVerifyFailureReason = "Inconsistent verification results. Not all validations identified a bug.";
+        if (!isBugConfirmedByMajority) {
+            logWithTestCase("增强验证失败：多数验证 (" + bugVerificationCount + "/" + TOTAL_VERIFICATIONS + ") 未能确认是bug");
+            this.enhanceVerifyFailureReason = "Inconsistent verification results. Only " + bugVerificationCount + " out of " + TOTAL_VERIFICATIONS + " validations identified a bug.";
             
             // 保存验证失败结果
             StringBuilder failureSummary = new StringBuilder();
             failureSummary.append("# 增强验证失败\n\n");
-            failureSummary.append("## 验证结果\n");
+            failureSummary.append("## 验证结果 (").append(bugVerificationCount).append("/").append(TOTAL_VERIFICATIONS).append(" a BUG)\n");
             for (String result : verificationLog) {
-                failureSummary.append("- ").append(result).append("\n");
-            }
-            failureSummary.append("\n## 非Bug结果\n");
-            for (String result : nonBugResults) {
                 failureSummary.append("- ").append(result).append("\n");
             }
             saveToFile(verifyContextPath.resolve("enhance_verify_failed.md").toString(), failureSummary.toString());
@@ -552,7 +543,7 @@ public class BugVerify extends Agent {
             return false;
         }
         
-        logWithTestCase("所有验证都确认是bug，进入第二步：生成测试用例问题解释");
+        logWithTestCase("多数验证 (" + bugVerificationCount + "/" + TOTAL_VERIFICATIONS + ") 确认是bug，进入第二步：生成测试用例问题解释");
         
         // ===== 第二步：生成反方论证 (3次) =====
         // 目标：专门寻找测试用例中的问题，提供反方观点
