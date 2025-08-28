@@ -483,9 +483,9 @@ public class BugVerify extends Agent {
         List<String> verificationLog = new ArrayList<>();
         List<String> nonBugResults = new ArrayList<>();
         List<String> bugArguments = new ArrayList<>();
-        if (this.testCase.verifyMessage != null && !this.testCase.verifyMessage.isEmpty()){
-            bugArguments.add(this.testCase.verifyMessage);
-        }
+//        if (this.testCase.verifyMessage != null && !this.testCase.verifyMessage.isEmpty()){
+//            bugArguments.add(this.testCase.verifyMessage);
+//        }
 
         for (int i = 1; i <= 2; i++) {
             logWithTestCase("执行第 " + i + " 次额外验证");
