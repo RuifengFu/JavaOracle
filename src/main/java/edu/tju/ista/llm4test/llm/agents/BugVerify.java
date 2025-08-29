@@ -214,7 +214,7 @@ public class BugVerify extends Agent {
         
             // 保存测试用例和输出
             saveToFile(testCasePath.resolve(this.testCaseName + ".java").toString(), testCode);
-            saveToFile(verifyContextPath.resolve("output.txt").toString(), testOutput);
+            saveToFile(verifyContextPath.resolve("original_output.txt").toString(), originalTestOutput);
             if (initialAnalysis != null) {
                 saveToFile(verifyContextPath.resolve("initial_analysis.txt").toString(), initialAnalysis);
             }
@@ -269,6 +269,7 @@ public class BugVerify extends Agent {
                         // Update the agent's state to use the minimized test case for subsequent steps
                         this.testCode = minimizedCode;
                         this.testOutput = minimizedCase.getResult().getOutput();
+                        saveToFile(verifyContextPath.resolve("minimized_output.txt").toString(), this.testOutput);
                         this.testCase = minimizedCase;
                         // 关键修复: 为约简后的测试用例设置ApiDocProcessor, 因为minimizationAgent返回的新TestCase对象可能未设置它
                         this.testCase.setApiDocProcessor(ApiInfoProcessor.fromConfig());

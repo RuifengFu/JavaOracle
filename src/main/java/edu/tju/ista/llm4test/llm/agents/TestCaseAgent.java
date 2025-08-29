@@ -130,6 +130,7 @@ public class TestCaseAgent extends Agent {
                 addToHistory("LOOP: Decision is to FINISH.");
                 currentCode = observeResult.newCode;
                 minimizedTestCase.setSourceCode(currentCode);
+                minimizedTestCase.setResult(observeResult.lastTestResult);
                 break;
             } else { // CONTINUE
                 addToHistory("LOOP: Decision is to CONTINUE.");
