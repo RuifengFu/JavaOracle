@@ -11,10 +11,14 @@ import edu.tju.ista.llm4test.utils.websearch.SearchResult;
 import freemarker.template.TemplateException;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.logging.Level;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
+
+import static edu.tju.ista.llm4test.utils.FileUtils.appendToFile;
 
 /**
  * Simplified Information Collection Agent - Optimized information collection using observe loop
@@ -40,6 +44,9 @@ public class InformationCollectionAgent extends Agent {
     private final Set<String> collectedInfoSources = new HashSet<>();
     private int currentSize = 0;
     private int numIterations = 0;
+    private String currentTestCaseIdentifier;
+    private Path currentResultDir;
+    private String currentTimestamp;
     
     public int getNumIterations() {
         return numIterations;
@@ -68,8 +75,13 @@ public class InformationCollectionAgent extends Agent {
      * Collect relevant information - main entry method
      */
     public List<CollectedInfo> collectInformation(String initialInsight, String testCode, 
-                                                 String testOutput, String apiInfoWithSource) {
+                                                 String testOutput, String apiInfoWithSource,
+                                                 String testCaseIdentifier, Path resultDir, String timestamp) {
         LoggerUtil.logExec(Level.INFO, "Starting information collection process");
+        
+        this.currentTestCaseIdentifier = testCaseIdentifier;
+        this.currentResultDir = resultDir;
+        this.currentTimestamp = timestamp;
         
         // Reset status
         collectedInfos.clear();
@@ -281,10 +293,20 @@ public class InformationCollectionAgent extends Agent {
             
             if (toolCalls != null) {
                 for (ToolCall toolCall : toolCalls) {
-            if (currentSize >= MAX_TOTAL_SIZE) break;
+                    if (currentSize >= MAX_TOTAL_SIZE) break;
+
+                    String searchType = (String) toolCall.arguments.get("search_type");
+                    String query = generateTitle(searchType, toolCall.arguments);
+                    String argumentsJson = "";
+                    try {
+                        argumentsJson = objectMapper.writeValueAsString(toolCall.arguments);
+                    } catch (Exception e) {
+                        LoggerUtil.logExec(Level.WARNING, "Failed to serialize tool call arguments to JSON: " + e.getMessage());
+                    }
+                    logSearchQuery(prefix, searchType, query, argumentsJson);
             
                     ToolResponse<String> response = tool.execute(toolCall.arguments);
-            if (response.isSuccess()) {
+                    if (response.isSuccess()) {
                         addCollectedInfo(response.getResult(), prefix, toolCall);
                     }
                 }
@@ -397,6 +419,7 @@ public class InformationCollectionAgent extends Agent {
 
             List<SearchResult> allResults = new ArrayList<>();
             for (String query : queriesToRun) {
+                logSearchQuery("WEB", "query", query, "");
                 // Stop fetching if we already have enough results to choose from
                 if (allResults.size() >= 5) break;
 
@@ -795,6 +818,28 @@ public class InformationCollectionAgent extends Agent {
         return new ArrayList<>(collectedInfos);
     }
     
+    private synchronized void logSearchQuery(String searchTool, String searchType, String query, String arguments) {
+        if (currentResultDir == null) return;
+        try {
+            Path statusCsv = currentResultDir.resolve("search_queries.csv");
+            if (!Files.exists(statusCsv)) {
+                String header = "TestCase,Timestamp,SearchTool,SearchType,Query,Arguments\n";
+                appendToFile(statusCsv.toString(), header);
+            }
+            String line = String.format("\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\"\n",
+                currentTestCaseIdentifier != null ? currentTestCaseIdentifier.replace("\"", "'") : "UNKNOWN",
+                currentTimestamp,
+                searchTool.replace("\"", "'"),
+                searchType.replace("\"", "'"),
+                query.replace("\"", "'"),
+                arguments.replace("\"", "'")
+            );
+            appendToFile(statusCsv.toString(), line);
+        } catch (Exception e) {
+            LoggerUtil.logExec(Level.WARNING, "Failed to write to search_queries.csv: " + e.getMessage());
+        }
+    }
+
     private String extractRelevantText(AnalysisResult analysis, String testCode, String testOutput, String text, int maxSize) throws TemplateException, IOException {
         OpenAI summarizerLlm = OpenAI.FlashModel;
         String prompt = PromptGen.generateSummarizeAndExtractPrompt(

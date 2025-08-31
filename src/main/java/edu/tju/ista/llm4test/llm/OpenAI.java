@@ -150,7 +150,7 @@ public class OpenAI {
                 AgentModel = new OpenAI(models.get("doubao-flash"));
             }
 
-            V3.JSON_OUTPUT = true;
+            AgentModel = V3;
         } catch (Exception e) {
             LoggerUtil.logExec(Level.SEVERE, "Can not find LLM config!!!");
             throw new ConfigError("Can not find LLM config, make sure you have config.json!!!");

@@ -78,10 +78,10 @@ public class SimplifiedJavaDocSearchTool implements Tool<String> {
     @Override
     public Map<String, String> getParametersType() {
         return Map.of(
-            "search_type", "string (enum: by_path|by_class|by_package|list_files)",
-            "doc_path", "string (optional, required for by_path)",
-            "class_name", "string (optional, required for by_class)",
-            "package_name", "string (optional, required for by_package, optional for list_files)"
+            "search_type", "string",
+            "doc_path", "string",
+            "class_name", "string",
+            "package_name", "string"
         );
     }
     

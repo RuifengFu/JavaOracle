@@ -828,7 +828,10 @@ public class BugVerify extends Agent {
                 initialInsight, 
                 testCode, 
                 testOutput, 
-                apiInfoWithSource
+                apiInfoWithSource,
+                getTestCaseIdentifier(),
+                GLOBAL_RESULT_DIR,
+                GLOBAL_RESULT_TIMESTAMP
             );
             
             LoggerUtil.logExec(Level.INFO, String.format("信息收集完成，共收集到 %d 条信息", collectedInfos.size()));

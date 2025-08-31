@@ -72,11 +72,11 @@ public class SimplifiedSourceCodeSearchTool implements Tool<String> {
     @Override
     public Map<String, String> getParametersType() {
         return Map.of(
-            "search_type", "string (enum: by_class|by_method|by_keyword|by_path|related_classes)",
-            "class_name", "string (optional, required for by_class|by_method|related_classes)", 
-            "method_name", "string (optional, required for by_method)",
-            "keyword", "string (optional, required for by_keyword)",
-            "file_path", "string (optional, required for by_path)"
+            "search_type", "string",
+            "class_name", "string", 
+            "method_name", "string",
+            "keyword", "string",
+            "file_path", "string"
         );
     }
     
