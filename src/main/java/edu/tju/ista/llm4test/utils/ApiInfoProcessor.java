@@ -519,7 +519,7 @@ public class ApiInfoProcessor {
                     // 优先匹配方法
                     for (JavaMethod method : javaClass.getMethods()) {
                         String qdoxSignature = buildQdoxMethodSignature(javaClass, method);
-                        if (qdoxSignature.equals(signature.getSignature())) {
+                        if (qdoxSignature.replaceAll("\\s", "").equals(signature.getSignature().replaceAll("\\s", ""))) {
                             StringBuilder methodSource = new StringBuilder();
                             methodSource.append("// 源码文件: ").append(sourceFile.getAbsolutePath()).append("\n\n");
                             if (method.getComment() != null) {
@@ -535,7 +535,15 @@ public class ApiInfoProcessor {
                     // 如果方法没有匹配到，再匹配构造函数
                     for (com.thoughtworks.qdox.model.JavaConstructor constructor : javaClass.getConstructors()) {
                         String qdoxSignature = buildQdoxConstructorSignature(javaClass, constructor);
-                        if (qdoxSignature.equals(signature.getSignature())) {
+
+                        // APISignatureExtractor 可能会生成 ClassName.ClassName(...) 格式的签名
+                        // 因此我们需要同时检查两种可能性
+                        int paramsStartIndex = qdoxSignature.indexOf('(');
+                        String params = paramsStartIndex >= 0 ? qdoxSignature.substring(paramsStartIndex) : "()";
+                        String alternativeSignature = javaClass.getFullyQualifiedName() + "." + javaClass.getName() + params;
+
+                        String targetSignature = signature.getSignature().replaceAll("\\s", "");
+                        if (qdoxSignature.replaceAll("\\s", "").equals(targetSignature) || alternativeSignature.replaceAll("\\s", "").equals(targetSignature)) {
                             StringBuilder constructorSource = new StringBuilder();
                             constructorSource.append("// 源码文件: ").append(sourceFile.getAbsolutePath()).append("\n\n");
                             if (constructor.getComment() != null) {
@@ -567,7 +575,7 @@ public class ApiInfoProcessor {
         var parameters = method.getParameters();
         for (int i = 0; i < parameters.size(); i++) {
             if (i > 0) signature.append(", ");
-            signature.append(parameters.get(i).getType().getFullyQualifiedName());
+            signature.append(parameters.get(i).getType().toGenericString());
         }
         signature.append(")");
         return signature.toString();
@@ -583,7 +591,7 @@ public class ApiInfoProcessor {
         var parameters = constructor.getParameters();
         for (int i = 0; i < parameters.size(); i++) {
             if (i > 0) signature.append(", ");
-            signature.append(parameters.get(i).getType().getFullyQualifiedName());
+            signature.append(parameters.get(i).getType().toGenericString());
         }
         signature.append(")");
         return signature.toString();

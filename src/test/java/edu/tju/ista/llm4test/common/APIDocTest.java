@@ -1,6 +1,7 @@
 package edu.tju.ista.llm4test.common;
 
 import com.thoughtworks.qdox.model.JavaMethod;
+import edu.tju.ista.llm4test.config.GlobalConfig;
 import edu.tju.ista.llm4test.javaparser.JavaParser;
 import edu.tju.ista.llm4test.utils.ApiInfoProcessor;
 import edu.tju.ista.llm4test.utils.HtmlParser;
@@ -9,6 +10,7 @@ import org.junit.Test;
 import java.io.File;
 import java.io.IOException;
 import java.util.List;
+import org.junit.Assert;
 
 public class APIDocTest {
     @Test
@@ -35,5 +37,20 @@ public class APIDocTest {
         var doc = HtmlParser.getDocumentFromFile(file);
         var constructors = HtmlParser.getConstructorDetails(doc);
         System.out.println(constructors);
+    }
+
+    @Test
+    public void getConstructorSourceTest() throws Exception {
+        File file = new File("JavaTest/jdk/java/net/CookieHandler/B6644726.java");
+        // 初始化ApiInfoProcessor，并提供JDK源码路径
+        // baseDocPath 指向api文档根目录，jdkSourcePath 指向源码根目录
+        ApiInfoProcessor processor = ApiInfoProcessor.fromConfig();
+        
+        var result = processor.getApiDocWithSource(file);
+
+        // 打印结果方便调试
+        result.forEach((key, value) -> System.out.println("Key: " + key + "\nValue:\n" + value));
+
+
     }
 }

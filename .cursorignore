@@ -1,14 +1,7 @@
 # Add directories or file patterns to ignore during indexing (e.g. foo/ or *.csv)
-JavaDoc/
-JavaTest/
-jdk17u-dev/
-jdk21-src/
-./test/*
-.git/
-.idea/
-BugReport/
-Dependency
-JTwork
-Results
-target
-./test/*
+!src/
+!pom.xml
+!config.properties
+!models.json
+!README.md
+!.gitignore
