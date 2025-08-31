@@ -669,8 +669,11 @@ public class OpenAI {
 
                         StringBuilder reasonSb = new StringBuilder();
                         StringBuilder contentSb = new StringBuilder();
-                        List<ToolCall> toolCalls = new ArrayList<>();
                         boolean[] hasValidData = {false};
+
+                        // 用于聚合流式工具调用的数据结构
+                        Map<Integer, String> toolCallNames = new HashMap<>();
+                        Map<Integer, StringBuilder> toolCallArgsBuilders = new HashMap<>();
 
                         response.body().forEach(line -> {
                             if (isValidDataLine(line)) {
@@ -691,12 +694,22 @@ public class OpenAI {
                                             String content = (String) message.get("content");
                                             if (content != null)
                                                 contentSb.append(content);
-                                            
-                                            // Parse tool calls from delta
-                                            Object toolCallsObj = message.get("tool_calls");
-                                            if (toolCallsObj != null) {
-                                                List<ToolCall> deltaToolCalls = parseToolCalls(toolCallsObj);
-                                                toolCalls.addAll(deltaToolCalls);
+
+                                            // 从 delta 聚合工具调用
+                                            if (message.containsKey("tool_calls")) {
+                                                List<Map<String, Object>> toolCallsDeltas = (List<Map<String, Object>>) message.get("tool_calls");
+                                                for (Map<String, Object> delta : toolCallsDeltas) {
+                                                    Integer index = (Integer) delta.get("index");
+                                                    if (delta.containsKey("function")) {
+                                                        Map<String, String> functionDelta = (Map<String, String>) delta.get("function");
+                                                        if (functionDelta.containsKey("name")) {
+                                                            toolCallNames.put(index, functionDelta.get("name"));
+                                                        }
+                                                        if (functionDelta.containsKey("arguments")) {
+                                                            toolCallArgsBuilders.computeIfAbsent(index, k -> new StringBuilder()).append(functionDelta.get("arguments"));
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -710,8 +723,19 @@ public class OpenAI {
                             throw new CompletionException(new RuntimeException("Stream response was empty"));
                         }
 
+                        List<ToolCall> finalToolCalls = new ArrayList<>();
+                        for (Integer index : toolCallNames.keySet()) {
+                            try {
+                                String name = toolCallNames.get(index);
+                                String arguments = toolCallArgsBuilders.getOrDefault(index, new StringBuilder()).toString();
+                                finalToolCalls.add(new ToolCall(name, arguments));
+                            } catch (JsonProcessingException e) {
+                                LoggerUtil.logExec(Level.WARNING, "Failed to parse aggregated tool call arguments for tool '" + toolCallNames.get(index) + "': " + e.getMessage());
+                            }
+                        }
+
                         String fullLog = "<thinking>\n" + reasonSb + "\n</thinking>\n\n" + contentSb;
-                        return new StreamedToolCallResponse(toolCalls, contentSb.toString(), reasonSb.toString(), fullLog);
+                        return new StreamedToolCallResponse(finalToolCalls, contentSb.toString(), reasonSb.toString(), fullLog);
                     });
         } catch (JsonProcessingException e) {
             return CompletableFuture.failedFuture(e);
