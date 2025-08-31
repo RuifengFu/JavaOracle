@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterEach;
 
+import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -53,7 +54,7 @@ public class InformationCollectionAgentTest {
         
         System.out.println("=== 开始测试信息收集 ===");
         List<InformationCollectionAgent.CollectedInfo> results = agent.collectInformation(
-            initialInsight, testCode, testOutput, "");
+            initialInsight, testCode, testOutput, "", "test", Path.of("result"), "1000");
         
         System.out.println("=== 收集结果分析 ===");
         System.out.println("总共收集到 " + results.size() + " 条信息");

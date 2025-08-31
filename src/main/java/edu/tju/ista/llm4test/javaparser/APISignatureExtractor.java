@@ -3,6 +3,8 @@ import com.github.javaparser.ParserConfiguration;
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.expr.MethodCallExpr;
+import com.github.javaparser.ast.expr.ObjectCreationExpr;
+import com.github.javaparser.resolution.declarations.ResolvedConstructorDeclaration;
 import com.github.javaparser.resolution.declarations.ResolvedMethodDeclaration;
 import com.github.javaparser.symbolsolver.JavaSymbolSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.CombinedTypeSolver;
@@ -79,6 +81,25 @@ public class APISignatureExtractor {
 //                            methodCall.getBegin().get().line
 //                    ));
 //                    System.err.println("Failed to resolve method call: " + methodCall);
+                }
+            });
+
+            // 访问所有构造函数调用
+            cu.findAll(ObjectCreationExpr.class).forEach(objectCreation -> {
+                try {
+                    ResolvedConstructorDeclaration resolvedConstructor = objectCreation.resolve();
+                    signatures.add(new MethodSignature(
+                            resolvedConstructor.getQualifiedName(),
+                            resolvedConstructor.getPackageName(),
+                            resolvedConstructor.getClassName(),
+                            resolvedConstructor.getName(),
+                            resolvedConstructor.getClassName(), // 构造函数返回类型是类本身
+                            resolvedConstructor.getQualifiedSignature(),
+                            objectCreation.getBegin().get().line
+                    ));
+                } catch (Exception e) {
+                    // 记录无法解析的构造函数调用
+//                    System.err.println("Failed to resolve constructor call: " + objectCreation);
                 }
             });
             var signs = signatures.stream().filter(sign -> !sign.getPackageName().isEmpty()).collect(Collectors.toSet()); // 去除本地api

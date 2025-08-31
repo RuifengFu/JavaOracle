@@ -323,6 +323,23 @@ public class ApiInfoProcessor {
      * @return API文档，如果找不到返回null
      */
     private String getApiDocumentation(APISignatureExtractor.MethodSignature signature) throws ApiInfoProcessingException {
+        // 判断是否为构造函数：方法名与类名相同，或者返回类型与类名相同
+        boolean isConstructor = signature.getMethodName().equals(signature.getClassName()) || 
+                               signature.getReturnType().equals(signature.getClassName());
+        
+        if (isConstructor) {
+            return getConstructorDocumentation(signature);
+        } else {
+            return getMethodDocumentation(signature);
+        }
+    }
+
+    /**
+     * 获取普通方法文档
+     * @param signature 方法签名
+     * @return 方法文档
+     */
+    private String getMethodDocumentation(APISignatureExtractor.MethodSignature signature) throws ApiInfoProcessingException {
         try {
             String docFilePath = findClassPath(signature.getPackageName(), signature.getClassName(), PathType.DOC);
             if (docFilePath == null) {
@@ -347,6 +364,116 @@ public class ApiInfoProcessor {
         } catch (Exception e) {
             throw new ApiInfoProcessingException("获取 API 文档失败: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * 获取构造函数文档
+     * @param signature 构造函数签名
+     * @return 构造函数文档
+     */
+    private String getConstructorDocumentation(APISignatureExtractor.MethodSignature signature) throws ApiInfoProcessingException {
+        try {
+            String docFilePath = findClassPath(signature.getPackageName(), signature.getClassName(), PathType.DOC);
+            if (docFilePath == null) {
+                throw new ApiInfoProcessingException("构造函数文档文件不存在: " + signature.getPackageName() + "." + signature.getClassName());
+            }
+            File docFile = new File(docFilePath);
+            if (!docFile.exists()) {
+                throw new ApiInfoProcessingException("构造函数文档文件不存在: " + docFilePath);
+            }
+            Document doc = HtmlParser.getDocumentFromFile(docFile);
+            if (doc == null) {
+                throw new ApiInfoProcessingException("解析构造函数文档失败: " + docFilePath);
+            }
+
+            var constructorDetails = HtmlParser.getConstructorDetails(doc);
+
+            // 尝试多种方式匹配构造函数文档
+            String constructorDoc = findConstructorDoc(constructorDetails, signature);
+            
+            if (constructorDoc == null) {
+                throw new ApiInfoProcessingException("未找到构造函数文档: " + signature.getSignature());
+            }
+            return constructorDoc;
+        } catch (ApiInfoProcessingException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ApiInfoProcessingException("获取构造函数文档失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 从构造函数详细信息中查找匹配的文档
+     * @param constructorDetails 构造函数详细信息映射
+     * @param signature 构造函数签名
+     * @return 匹配的构造函数文档，如果找不到返回null
+     */
+    private String findConstructorDoc(Map<String, String> constructorDetails, APISignatureExtractor.MethodSignature signature) {
+        String className = signature.getClassName();
+        String fullSignature = signature.getSignature();
+        
+        // 方案1: 直接用类名匹配（无参构造函数）
+        if (constructorDetails.containsKey(className)) {
+            return constructorDetails.get(className);
+        }
+        
+        // 方案2: 提取参数部分，构造短签名进行匹配
+        int parenIndex = fullSignature.indexOf('(');
+        if (parenIndex > 0) {
+            String paramsPart = fullSignature.substring(parenIndex);
+            String shortSignature = className + paramsPart;
+            if (constructorDetails.containsKey(shortSignature)) {
+                return constructorDetails.get(shortSignature);
+            }
+        }
+        
+        // 方案3: 模糊匹配 - 查找以类名开头且包含参数的构造函数
+        for (String key : constructorDetails.keySet()) {
+            if (key.startsWith(className + "(")) {
+                // 进一步检查参数是否匹配
+                if (compareConstructorSignatures(key, fullSignature)) {
+                    return constructorDetails.get(key);
+                }
+            }
+        }
+        
+        // 方案4: 如果只有一个构造函数，直接返回
+        if (constructorDetails.size() == 1) {
+            return constructorDetails.values().iterator().next();
+        }
+        
+        return null;
+    }
+
+    /**
+     * 比较构造函数签名是否匹配
+     * @param docSignature 文档中的签名
+     * @param extractedSignature 提取的签名
+     * @return 是否匹配
+     */
+    private boolean compareConstructorSignatures(String docSignature, String extractedSignature) {
+        // 简单的参数数量比较
+        int docParamCount = countParameters(docSignature);
+        int extractedParamCount = countParameters(extractedSignature);
+        return docParamCount == extractedParamCount;
+    }
+
+    /**
+     * 计算签名中的参数数量
+     * @param signature 方法或构造函数签名
+     * @return 参数数量
+     */
+    private int countParameters(String signature) {
+        int start = signature.indexOf('(');
+        int end = signature.lastIndexOf(')');
+        if (start == -1 || end == -1 || start >= end) {
+            return 0;
+        }
+        String params = signature.substring(start + 1, end).trim();
+        if (params.isEmpty()) {
+            return 0;
+        }
+        return params.split(",").length;
     }
     
     /**
@@ -389,8 +516,10 @@ public class ApiInfoProcessor {
             builder.addSource(sourceFile);
             for (JavaClass javaClass : builder.getClasses()) {
                 if (javaClass.getName().equals(signature.getClassName())) {
+                    // 优先匹配方法
                     for (JavaMethod method : javaClass.getMethods()) {
-                        if (method.getName().equals(signature.getMethodName())) {
+                        String qdoxSignature = buildQdoxMethodSignature(javaClass, method);
+                        if (qdoxSignature.equals(signature.getSignature())) {
                             StringBuilder methodSource = new StringBuilder();
                             methodSource.append("// 源码文件: ").append(sourceFile.getAbsolutePath()).append("\n\n");
                             if (method.getComment() != null) {
@@ -402,14 +531,62 @@ public class ApiInfoProcessor {
                             return methodSource.toString();
                         }
                     }
+
+                    // 如果方法没有匹配到，再匹配构造函数
+                    for (com.thoughtworks.qdox.model.JavaConstructor constructor : javaClass.getConstructors()) {
+                        String qdoxSignature = buildQdoxConstructorSignature(javaClass, constructor);
+                        if (qdoxSignature.equals(signature.getSignature())) {
+                            StringBuilder constructorSource = new StringBuilder();
+                            constructorSource.append("// 源码文件: ").append(sourceFile.getAbsolutePath()).append("\n\n");
+                            if (constructor.getComment() != null) {
+                                constructorSource.append("// 构造函数注释:\n");
+                                constructorSource.append(constructor.getComment()).append("\n\n");
+                            }
+                            constructorSource.append("// 构造函数实现:\n");
+                            constructorSource.append(constructor.getSourceCode());
+                            return constructorSource.toString();
+                        }
+                    }
                 }
             }
-            throw new ApiInfoProcessingException("在源码文件中未找到方法: " + signature.getMethodName() + " (文件: " + sourceFile.getAbsolutePath() + ")");
+            throw new ApiInfoProcessingException("在源码文件中未找到方法或构造函数: " + signature.getSignature() + " (文件: " + sourceFile.getAbsolutePath() + ")");
         } catch (ApiInfoProcessingException e) {
             throw e;
         } catch (Exception e) {
             throw new ApiInfoProcessingException("解析源码文件失败: " + e.getMessage() + " (文件: " + sourceFile.getAbsolutePath() + ")", e);
         }
+    }
+
+    /**
+     * 构建QDox方法签名
+     */
+    private String buildQdoxMethodSignature(JavaClass javaClass, JavaMethod method) {
+        StringBuilder signature = new StringBuilder();
+        signature.append(javaClass.getFullyQualifiedName()).append(".").append(method.getName()).append("(");
+
+        var parameters = method.getParameters();
+        for (int i = 0; i < parameters.size(); i++) {
+            if (i > 0) signature.append(", ");
+            signature.append(parameters.get(i).getType().getFullyQualifiedName());
+        }
+        signature.append(")");
+        return signature.toString();
+    }
+
+    /**
+     * 构建QDox构造函数签名
+     */
+    private String buildQdoxConstructorSignature(JavaClass javaClass, com.thoughtworks.qdox.model.JavaConstructor constructor) {
+        StringBuilder signature = new StringBuilder();
+        signature.append(javaClass.getFullyQualifiedName()).append("(");
+
+        var parameters = constructor.getParameters();
+        for (int i = 0; i < parameters.size(); i++) {
+            if (i > 0) signature.append(", ");
+            signature.append(parameters.get(i).getType().getFullyQualifiedName());
+        }
+        signature.append(")");
+        return signature.toString();
     }
 
     /**

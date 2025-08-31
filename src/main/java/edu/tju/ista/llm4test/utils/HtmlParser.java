@@ -54,6 +54,66 @@ public class HtmlParser {
         return methodDetails;
     }
 
+    /**
+     * 获取构造函数详细信息
+     * @param document Jsoup解析的HTML文档
+     * @return 构造函数名称到详细信息的映射
+     */
+    public static Map<String, String> getConstructorDetails(Document document) {
+        Map<String, String> constructorDetails = new HashMap<>();
+        
+        // 尝试不同的选择器来匹配构造函数详细信息
+        Elements details = document.select("section.constructor-details ul.member-list li section.detail");
+        
+        // 如果上面的选择器没找到，尝试更通用的选择器
+        if (details.isEmpty()) {
+            details = document.select("section.details ul.member-list li section.detail");
+            // 过滤出构造函数相关的detail
+            Elements filteredDetails = new Elements();
+            for (Element detail : details) {
+                Element h3 = detail.select("h3").first();
+                if (h3 != null) {
+                    String heading = h3.text();
+                    // 构造函数的标题通常是类名开头，而不是方法名
+                    if (heading.contains("(") && !heading.contains(".")) {
+                        filteredDetails.add(detail);
+                    }
+                }
+            }
+            details = filteredDetails;
+        }
+        
+        // 如果还是没找到，尝试从构造函数摘要表格中提取
+        if (details.isEmpty()) {
+            Elements constructorRows = document.select("section.constructor-summary table tbody tr");
+            for (Element row : constructorRows) {
+                Element constructorCell = row.select("th.col-constructor-name, td.col-constructor-name").first();
+                Element descCell = row.select("th.col-last, td.col-last").first();
+                if (constructorCell != null && descCell != null) {
+                    String constructorName = constructorCell.text().trim();
+                    String description = descCell.text().trim();
+                    constructorDetails.put(constructorName, description);
+                }
+            }
+        } else {
+            // 从详细信息section中提取
+            for (Element detail : details) {
+                Element h3 = detail.select("h3").first();
+                if (h3 != null) {
+                    String constructorName = h3.text();
+                    String text = detail.text();
+                    if (constructorDetails.containsKey(constructorName)) {
+                        text = constructorDetails.get(constructorName) + "\n" + text;
+                        LoggerUtil.logExec(Level.FINE, "Overloaded constructor detected: " + constructorName + ", combining details.");
+                    }
+                    constructorDetails.put(constructorName, text);
+                }
+            }
+        }
+        
+        return constructorDetails;
+    }
+
     /*
         * Get the document from the API with the given prefix and signature.
         * @param prefix The prefix of the API URL.
@@ -80,16 +140,15 @@ public class HtmlParser {
     public static void main(String[] args) {
         // Example usage
         try {
-            Document document = Jsoup.connect("http://example.com/api-docs").get();
-            HtmlParser parser = new HtmlParser();
+            Document document = Jsoup.connect("https://docs.oracle.com/javase/8/docs/api/java/util/ArrayList.html").get();
 
-            System.out.println("Header Text: " + parser.getHeaderText(document));
-            System.out.println("Class Description Text: " + parser.getClassDescriptionText(document));
-            System.out.println("Summary Text: " + parser.getSummaryText(document));
-            System.out.println("Nested Class Summary Text: " + parser.getNestedClassSummaryText(document));
-            System.out.println("Method Summary Text: " + parser.getMethodSummaryText(document));
+            System.out.println("Header Text: " + HtmlParser.getHeaderText(document));
+            System.out.println("Class Description Text: " + HtmlParser.getClassDescriptionText(document));
+            System.out.println("Summary Text: " + HtmlParser.getSummaryText(document));
+            System.out.println("Nested Class Summary Text: " + HtmlParser.getNestedClassSummaryText(document));
+            System.out.println("Method Summary Text: " + HtmlParser.getMethodSummaryText(document));
 
-            Map<String, String> methodDetails = parser.getMethodDetails(document);
+            Map<String, String> methodDetails = HtmlParser.getMethodDetails(document);
             for (Map.Entry<String, String> entry : methodDetails.entrySet()) {
                 System.out.println("Method Detail ID: " + entry.getKey() + ", Text: " + entry.getValue());
             }

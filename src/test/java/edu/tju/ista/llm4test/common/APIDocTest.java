@@ -28,4 +28,12 @@ public class APIDocTest {
         var description = HtmlParser.getClassDescriptionText(doc);
         System.out.println(description);
     }
+
+    @Test
+    public void constructor() throws Exception {
+        File file = new File("JavaDoc/docs/api/java.sql/java/sql/Timestamp.html");
+        var doc = HtmlParser.getDocumentFromFile(file);
+        var constructors = HtmlParser.getConstructorDetails(doc);
+        System.out.println(constructors);
+    }
 }
