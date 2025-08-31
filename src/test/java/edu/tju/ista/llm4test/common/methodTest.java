@@ -68,7 +68,7 @@ public class methodTest {
         System.out.println(method_info.toString());
         try {
             String prompt = PromptGen.generatePrompt("FuzzDriver", objectMap);
-            String text = OpenAI.DoubaoFlash.messageCompletion(prompt);
+            String text = OpenAI.FlashModel.messageCompletion(prompt);
 //            System.out.println("Answer: \n" + text);
             ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
             for (String code: codeBlocks) {
@@ -132,7 +132,7 @@ public class methodTest {
         dataModel.put("testOutput", result.toString());
 
         String prompt = PromptGen.generatePrompt("RootCause", dataModel);
-        var call = OpenAI.DoubaoFlash.toolCall(prompt, List.of(new RootCauseOutputTool())).get(0);
+        var call = OpenAI.FlashModel.toolCall(prompt, List.of(new RootCauseOutputTool())).get(0);
         var map = call.arguments;
         System.out.println(map);
         System.out.println(map.get("report_bug"));

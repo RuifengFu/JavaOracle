@@ -13,22 +13,20 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static java.lang.Thread.sleep;
 import edu.tju.ista.llm4test.llm.tools.Tool;
-import edu.tju.ista.llm4test.llm.tools.ToolCall;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import static org.junit.Assert.*;
 
 public class OpenAITest {
 
     @Test
     public void testCall() {
-        String res = OpenAI.R1.messageCompletion("write a snake game");
+        String res = OpenAI.ThinkingModel.messageCompletion("write a snake game");
         System.out.println("Answer: " + res);
     }
 
 
     @Test
     public void testExtractCode() {
-        String text = OpenAI.DoubaoFlash.messageCompletion("write a quicksort");
+        String text = OpenAI.FlashModel.messageCompletion("write a quicksort");
         ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
         for (String code: codeBlocks) {
             System.out.println("Code: \n" + code);
@@ -37,7 +35,7 @@ public class OpenAITest {
 
     @Test
     public void limitTest() throws InterruptedException {
-        var r1 = OpenAI.R1;
+        var r1 = OpenAI.ThinkingModel;
         var manager = ConcurrentExecutionManager.getInstance();
         AtomicInteger cnt = new AtomicInteger(0);
         AtomicInteger failed = new AtomicInteger(0);
@@ -150,7 +148,7 @@ public class OpenAITest {
         String prompt = "北京的天气怎么样";
 
         // 使用支持工具调用的模型，例如 DoubaoFlash
-        OpenAI llm = OpenAI.DoubaoFlash;
+        OpenAI llm = OpenAI.FlashModel;
 
         // 调用被测试的方法
         OpenAI.ToolCallResult result = llm.toolCallWithContent(prompt, tools);

@@ -2,6 +2,22 @@ You are a top Java Bug analysis expert. Your task is to generate a rigorous and 
 
 Your entire report must be strictly based on the provided text content. It is strictly forbidden to speculate or introduce any external information.
 
+<#if previousReport?has_content && feedback?has_content>
+You have already generated a report, but it needs improvement. 
+This is an iterative process. Please refine your previous report based on the feedback provided.
+
+<Last Report>
+${previousReport}
+</Last Report>
+
+<Feedback>
+${feedback}
+</Feedback>
+
+Your new report should address the feedback while still adhering to all the original instructions and information sources.
+---
+</#if>
+
 <TestCase>
 ${testCase}
 </TestCase>

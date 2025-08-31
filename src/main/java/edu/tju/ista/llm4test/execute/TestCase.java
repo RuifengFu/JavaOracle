@@ -351,7 +351,7 @@ public class TestCase {
             String prompt = PromptGen.generatePrompt("RootCause", dataModel);
             ArrayList<Tool<?>> tools = new ArrayList<>();
             tools.add(new RootCauseOutputTool());
-            var result = OpenAI.K2.toolCallWithContent(prompt, tools);
+            var result = OpenAI.AgentModel.toolCallWithContent(prompt, tools);
             var callList = result.toolCalls();
             var content = result.content();
             if (callList.isEmpty()) {
@@ -423,7 +423,7 @@ public class TestCase {
             dataModel.put("apiDocs", apiDoc);
             dataModel.put("rootCause", verifyMessage);
             String prompt = PromptGen.generatePrompt("FixTestCase", dataModel);
-            String text = OpenAI.R1.messageCompletion(prompt);
+            String text = OpenAI.ThinkingModel.messageCompletion(prompt);
             ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
             if (codeBlocks.isEmpty()) {
                 applyChange(text);
@@ -446,7 +446,7 @@ public class TestCase {
             dataModel.put("testcase", getTestcaseWithLineNumber());
             dataModel.put("apiDocs", apiDoc);
             String prompt = PromptGen.generatePrompt("EnhanceTestCase", dataModel);
-            String text = OpenAI.R1.messageCompletion(prompt);
+            String text = OpenAI.ThinkingModel.messageCompletion(prompt);
             ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
 
             if (codeBlocks.isEmpty()) {
@@ -471,7 +471,7 @@ public class TestCase {
             dataModel.put("originTestcase", testcase);
             dataModel.put("modified", change);
             String prompt = PromptGen.generatePrompt("ApplyChange", dataModel);
-            String text = OpenAI.DoubaoFlash.messageCompletion(prompt);
+            String text = OpenAI.FlashModel.messageCompletion(prompt);
             ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
             if (codeBlocks.isEmpty() && !text.contains("```")) {
                 writeTestCaseToFile(text);

@@ -31,7 +31,7 @@ public class TestCaseTest {
             dataModel.put("testcase", testCase.getTestcaseWithLineNumber());
             dataModel.put("apiDocs", testCase.getApiDoc());
             String prompt = PromptGen.generatePrompt("EnhanceTestCase", dataModel);
-            String text = OpenAI.R1.messageCompletion(prompt);
+            String text = OpenAI.ThinkingModel.messageCompletion(prompt);
             ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
             System.out.println(text);
 

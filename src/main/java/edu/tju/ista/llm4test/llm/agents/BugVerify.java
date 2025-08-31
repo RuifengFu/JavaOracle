@@ -46,7 +46,7 @@ public class BugVerify extends Agent {
     private final HypothesisAgent hypothesisAgent;
     
     // LLM实例
-    private final OpenAI llm = OpenAI.K2;
+    private final OpenAI llm = OpenAI.V3;
 
     // 全局结果目录，仅生成一次
     private static final String GLOBAL_RESULT_TIMESTAMP = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
@@ -68,7 +68,6 @@ public class BugVerify extends Agent {
         this.testCase = testCase;
         this.testCode = testCase.getSourceCode();
         this.testOutput = testCase.getResult().getOutput();
-        this.initialAnalysis = testCase.verifyMessage;
 
         // 保存原始（未约简）测试用例与原始执行输出
         try {
@@ -215,9 +214,7 @@ public class BugVerify extends Agent {
             // 保存测试用例和输出
             saveToFile(testCasePath.resolve(this.testCaseName + ".java").toString(), testCode);
             saveToFile(verifyContextPath.resolve("original_output.txt").toString(), originalTestOutput);
-            if (initialAnalysis != null) {
-                saveToFile(verifyContextPath.resolve("initial_analysis.txt").toString(), initialAnalysis);
-            }
+           
             
             logWithTestCase("创建验证上下文文件夹: " + verifyContextPath);
         } catch (IOException e) {
@@ -630,6 +627,7 @@ public class BugVerify extends Agent {
         verdictSummary.append("\n**总分**: ").append(totalScore).append("\n");
         verdictSummary.append("**最终裁决**: ").append(finalVerdict).append("\n");
         saveToFile(verifyContextPath.resolve("verdict_voting_summary.md").toString(), verdictSummary.toString());
+        this.initialAnalysis = verdictSummary.toString();
 
         // ===== 第四步：基于裁决结果决定后续流程 =====
         LoggerUtil.logVerify(Level.INFO, header, "Final Verdict: " + finalVerdict + " (Score: " + totalScore + ")");
@@ -1110,7 +1108,6 @@ public class BugVerify extends Agent {
             return results.get(0).result;
         } else {
             // 非消融实验，使用原有配置
-            // 默认不包含假设
             boolean includeInfoSource = edu.tju.ista.llm4test.config.GlobalConfig.isIncludeInfoSource();
             boolean useMinimizedTestcase = edu.tju.ista.llm4test.config.GlobalConfig.isUseMinimizedTestcase();
             boolean includeApiDocs = edu.tju.ista.llm4test.config.GlobalConfig.isIncludeApiDocs();
@@ -1118,7 +1115,74 @@ public class BugVerify extends Agent {
             AblationConfig config = new AblationConfig(includeInfoSource, 
                 useMinimizedTestcase, includeApiDocs, 0);
             
-            return generateReportWithConfig(hypotheses, verificationResults, config);
+            String reportJson = "";
+            String feedback = "";
+            for (int i = 0; i < 3; i++) {
+                logWithTestCase("Generating report, iteration " + (i + 1));
+                
+                reportJson = generateReportWithConfig(hypotheses, verificationResults, config, reportJson, feedback);
+                
+                // After the last iteration, no need to review.
+                if (i < 2) {
+                    logWithTestCase("Reviewing report, iteration " + (i + 1));
+                    feedback = reviewReport(reportJson, i + 1);
+                    
+                    // Save intermediate results
+                    if (verifyContextPath != null) {
+                        saveToFile(verifyContextPath.resolve("report_iteration_" + (i + 1) + ".json").toString(), reportJson);
+                        saveToFile(verifyContextPath.resolve("feedback_iteration_" + (i + 1) + ".txt").toString(), feedback);
+                    }
+                }
+            }
+            return reportJson;
+        }
+    }
+    
+    /**
+     * Reviews a generated bug report using an LLM to provide feedback for improvement.
+     * @param reportJson The JSON string of the bug report to review.
+     * @param iteration The current iteration number.
+     * @return Feedback on the report as a string.
+     */
+    private String reviewReport(String reportJson, int iteration) {
+        logWithTestCase("Starting report review for iteration " + iteration);
+        if (reportJson == null || reportJson.trim().isEmpty()) {
+            logWithTestCase(Level.WARNING, "Report for review is empty or null.");
+            return "The previous report was empty. Please generate a complete bug report.";
+        }
+
+        if (!isValidJson(reportJson)) {
+            logWithTestCase(Level.WARNING, "Invalid JSON report submitted for review.");
+            return "The previous report was not valid JSON. Please generate a report in valid JSON format with 'bug_type' and 'report' fields.";
+        }
+
+        try {
+            ObjectMapper objectMapper = new ObjectMapper();
+            JsonNode rootNode = objectMapper.readTree(reportJson);
+            String reportContent = rootNode.path("report").asText("");
+
+            // The prompt for the review agent
+            String prompt = PromptGen.generateBugReportReviewPrompt(testCode, testOutput, reportContent);
+            
+            // Log the prompt for debugging
+            if (verifyContextPath != null) {
+                try {
+                    Path promptsDir = verifyContextPath.resolve("prompts");
+                    Files.createDirectories(promptsDir);
+                    saveToFile(promptsDir.resolve("review_prompt_iteration_" + iteration + ".txt").toString(), prompt);
+                } catch (IOException e) {
+                    logWithTestCase(Level.WARNING, "Failed to save review prompt: " + e.getMessage());
+                }
+            }
+
+            // Call LLM for review
+            String feedback = llm.messageCompletion(prompt, 0.7, false);
+            logWithTestCase("Review feedback received for iteration " + iteration);
+            return feedback;
+
+        } catch (TemplateException | IOException e) {
+            logWithTestCase(Level.SEVERE, "Error generating review prompt or reviewing report: " + e.getMessage());
+            return "Error during review process: " + e.getMessage();
         }
     }
     
@@ -1127,6 +1191,14 @@ public class BugVerify extends Agent {
      */
     private String generateReportWithConfig(List<String> hypotheses, Map<String, TestResult> verificationResults, 
                                           AblationConfig config) {
+        return generateReportWithConfig(hypotheses, verificationResults, config, "", "");
+    }
+    
+    /**
+     * 使用指定配置生成报告
+     */
+    private String generateReportWithConfig(List<String> hypotheses, Map<String, TestResult> verificationResults, 
+                                          AblationConfig config, String previousReport, String feedback) {
         
         // 根据配置选择测试用例
         String actualTestCode = testCode;
@@ -1178,7 +1250,7 @@ public class BugVerify extends Agent {
         try {
             String prompt = PromptGen.generateBugVerifyBugReportPrompt(
                 actualTestCode, actualTestOutput, hypothesesBuilder.toString(),
-                resultsBuilder.toString(), infoSourceBuilder.toString());
+                resultsBuilder.toString(), infoSourceBuilder.toString(), previousReport, feedback);
             
             // 保存prompt到文件
             savePromptToFile(prompt, config);
@@ -1222,7 +1294,7 @@ public class BugVerify extends Agent {
         try {
             String jsonFormat = "{\"bug_type\": \"<bug_type>\", \"report\": \"<markdown_report>\"}";
             String prompt = PromptGen.generateExtractJsonPrompt(brokenJson, jsonFormat);
-            return OpenAI.DoubaoFlash.messageCompletion(prompt, 0.3, true);
+            return OpenAI.FlashModel.messageCompletion(prompt, 0.3, true);
         } catch (Exception e) {
             logWithTestCase(Level.SEVERE, "使用LLM修复JSON失败: " + e.getMessage());
             return brokenJson; // 返回原始的错误JSON

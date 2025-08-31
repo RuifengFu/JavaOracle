@@ -4,8 +4,7 @@ import edu.tju.ista.llm4test.llm.OpenAI;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+
 import java.util.stream.Collectors;
 
 import java.io.*;
@@ -32,7 +31,7 @@ public class ContentProcessor implements Tool<String> {
     private static final double OVERLAP_RATIO = 0.1; // 重叠比例
     
     public ContentProcessor(String cacheDir) {
-        this.llm = OpenAI.R1;
+        this.llm = OpenAI.ThinkingModel;
         this.cacheDir = cacheDir != null ? cacheDir : "content_cache";
         this.objectMapper = new ObjectMapper();
         

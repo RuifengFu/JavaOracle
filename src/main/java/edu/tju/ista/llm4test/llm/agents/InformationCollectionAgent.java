@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.util.*;
 import java.util.logging.Level;
 import java.util.concurrent.*;
+import java.util.stream.Collectors;
 
 /**
  * Simplified Information Collection Agent - Optimized information collection using observe loop
@@ -27,7 +28,7 @@ public class InformationCollectionAgent extends Agent {
     private final SimplifiedSourceCodeSearchTool sourceTool;
     private final SimplifiedJavaDocSearchTool javadocTool;
     private final BochaSearch webSearchTool;
-    private final OpenAI llm = OpenAI.K2;
+    private final OpenAI llm = OpenAI.AgentModel;
     private final ObjectMapper objectMapper;
     
     // Information collection configuration
@@ -36,6 +37,7 @@ public class InformationCollectionAgent extends Agent {
     
     // Current collection status
     private final List<CollectedInfo> collectedInfos = new ArrayList<>();
+    private final Set<String> collectedInfoSources = new HashSet<>();
     private int currentSize = 0;
     private int numIterations = 0;
     
@@ -71,10 +73,16 @@ public class InformationCollectionAgent extends Agent {
         
         // Reset status
         collectedInfos.clear();
+        collectedInfoSources.clear();
         currentSize = 0;
         
         // Parse initial insight
         AnalysisResult analysis = parseInitialInsight(initialInsight);
+        
+        // Add API information once at the beginning
+        if (apiInfoWithSource != null && !apiInfoWithSource.isEmpty()) {
+            addApiInfo(apiInfoWithSource, analysis);
+        }
         
         // Observation loop - max 3 iterations
         for (int iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
@@ -82,7 +90,7 @@ public class InformationCollectionAgent extends Agent {
             LoggerUtil.logExec(Level.INFO, "Information collection iteration " + iteration + "/" + MAX_ITERATIONS);
             
             // Collect information
-            collectAllInformation(analysis, testCode, testOutput, apiInfoWithSource);
+            collectAllInformation(analysis, testCode, testOutput);
             
             // Observe and evaluate
             if (isInformationSufficient(analysis, testCode, testOutput, iteration)) {
@@ -94,9 +102,6 @@ public class InformationCollectionAgent extends Agent {
             if (iteration < MAX_ITERATIONS) {
                 LoggerUtil.logExec(Level.INFO, "Information insufficient, preparing for iteration " + (iteration + 1));
                 analysis = refineAnalysis(analysis, testCode, testOutput);
-                // Clear collected information, prepare for re-collection
-                collectedInfos.clear();
-                currentSize = 0;
             }
         }
         
@@ -251,7 +256,7 @@ public class InformationCollectionAgent extends Agent {
      * Collect all information
      */
     private void collectAllInformation(AnalysisResult analysis, String testCode, 
-                                     String testOutput, String apiInfoWithSource) {
+                                     String testOutput) {
         // 1. Collect source code information
         if (sourceTool != null) {
             collectWithTool(sourceTool, buildSourceCodePrompt(analysis, testCode), "SOURCE");
@@ -262,15 +267,9 @@ public class InformationCollectionAgent extends Agent {
             collectWithTool(javadocTool, buildJavaDocPrompt(analysis, testCode), "JAVADOC");
         }
         
-        // 3. Add API information
-        if (apiInfoWithSource != null && !apiInfoWithSource.isEmpty()) {
-            addApiInfo(apiInfoWithSource, analysis);
-        }
+        // 3. Simple Web search (if there is space)
+        collectWebInfo(analysis, testCode, testOutput);
         
-        // 4. Simple Web search (if there is space)
-        if (currentSize < MAX_TOTAL_SIZE * 0.8) { // Reserve 20% space
-            collectWebInfo(analysis, testCode, testOutput);
-        }
     }
     
     /**
@@ -304,11 +303,17 @@ public class InformationCollectionAgent extends Agent {
         String searchType = (String) toolCall.arguments.get("search_type");
         String id = prefix + "_" + searchType + "_" + System.currentTimeMillis();
         String title = generateTitle(searchType, toolCall.arguments);
+        
+        if (collectedInfoSources.contains(title)) {
+            LoggerUtil.logExec(Level.INFO, "Skipping duplicate information: " + title);
+            return;
+        }
 
         CollectedInfo info = new CollectedInfo(id, title, content,
             prefix.equals("SOURCE") ? InfoType.SOURCE_CODE : InfoType.JAVADOC, 0.8);
 
         collectedInfos.add(info);
+        collectedInfoSources.add(title);
         currentSize += content.length();
     }
         
@@ -352,6 +357,7 @@ public class InformationCollectionAgent extends Agent {
             if (!processedContent.isEmpty()) {
                 CollectedInfo info = new CollectedInfo("API_INFO", "API information and source code", processedContent, InfoType.SOURCE_CODE, 0.9);
                 collectedInfos.add(info);
+                collectedInfoSources.add(info.source);
                 currentSize += processedContent.length();
             }
             
@@ -362,6 +368,7 @@ public class InformationCollectionAgent extends Agent {
                 String content = apiInfoWithSource.substring(0, Math.min(apiInfoWithSource.length(), MAX_TOTAL_SIZE - currentSize));
                 CollectedInfo info = new CollectedInfo("API_INFO", "API information and source code", content, InfoType.SOURCE_CODE, 0.9);
                 collectedInfos.add(info);
+                collectedInfoSources.add(info.source);
                 currentSize += content.length();
             }
         }
@@ -371,65 +378,94 @@ public class InformationCollectionAgent extends Agent {
      * Collect Web information (asynchronous version) - fetch full web page content in parallel
      */
     private void collectWebInfo(AnalysisResult analysis, String testCode, String testOutput) {
-        if (analysis.symptoms == null || analysis.symptoms.isEmpty()) return;
-        
+        // 1. Get queries, with fallback to symptoms
+        List<String> queries = new ArrayList<>(analysis.queries);
+        if (queries.isEmpty() && analysis.symptoms != null && !analysis.symptoms.isEmpty()) {
+            LoggerUtil.logExec(Level.INFO, "No specific queries found, falling back to symptoms for web search.");
+            queries.add(analysis.symptoms + " Java bug");
+        }
+
+        if (queries.isEmpty()) {
+            LoggerUtil.logExec(Level.INFO, "No queries or symptoms available for web search.");
+            return;
+        }
+
         try {
-            String query = analysis.symptoms + " Java bug";
-            ToolResponse<List<SearchResult>> response = webSearchTool.executeForResults(Map.of(
-                "query", query,
-                "max_results", 3
-            ));
-            
-            if (response.isSuccess()) {
-                List<SearchResult> results = response.getResult();
-                
-                // Create a thread pool to execute asynchronous tasks
-                ExecutorService executor = Executors.newFixedThreadPool(Math.min(results.size(), 3));
+            // 2. Execute searches sequentially for up to 3 queries
+            List<String> queriesToRun = queries.stream().limit(3).collect(Collectors.toList());
+            LoggerUtil.logExec(Level.INFO, "Executing web search for queries: " + queriesToRun);
+
+            List<SearchResult> allResults = new ArrayList<>();
+            for (String query : queriesToRun) {
+                // Stop fetching if we already have enough results to choose from
+                if (allResults.size() >= 5) break;
+
+                ToolResponse<List<SearchResult>> response = webSearchTool.executeForResults(Map.of(
+                        "query", query,
+                        "max_results", 3
+                ));
+
+                if (response.isSuccess() && response.getResult() != null) {
+                    allResults.addAll(response.getResult());
+                }
+            }
+
+            if (allResults.isEmpty()) {
+                LoggerUtil.logExec(Level.INFO, "Web search yielded no results.");
+                return;
+            }
+
+            // 3. Deduplicate results by URL and limit to a total of 3
+            Map<String, SearchResult> distinctMap = new LinkedHashMap<>();
+            for (SearchResult sr : allResults) {
+                distinctMap.putIfAbsent(sr.getUrl(), sr);
+            }
+            List<SearchResult> finalResults = distinctMap.values().stream().limit(3).collect(Collectors.toList());
+
+            // 4. Process final results in parallel (existing logic)
+            if (!finalResults.isEmpty()) {
+                ExecutorService executor = Executors.newFixedThreadPool(Math.min(finalResults.size(), 3));
                 List<CompletableFuture<CollectedInfo>> futures = new ArrayList<>();
-                
+
                 try {
-                    // Create an asynchronous task for each search result
-                    for (SearchResult result : results) {
+                    for (SearchResult result : finalResults) {
                         CompletableFuture<CollectedInfo> future = CompletableFuture.supplyAsync(() -> {
                             return extractSingleWebContent(result, analysis, testCode, testOutput);
                         }, executor);
-                        
                         futures.add(future);
                     }
-                    
-                    // Wait for all tasks to complete, set a 30-second timeout
-                    CompletableFuture<Void> allTasks = CompletableFuture.allOf(
-                        futures.toArray(new CompletableFuture[0])
-                    );
-                    
+
+                    CompletableFuture<Void> allTasks = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+
                     try {
                         allTasks.get(30, TimeUnit.SECONDS);
                     } catch (TimeoutException e) {
                         LoggerUtil.logExec(Level.WARNING, "Web page content extraction timed out, using completed results");
-                        // Do not cancel tasks, let completed ones continue
                     }
-                    
-                    // Collect completed results
+
                     for (CompletableFuture<CollectedInfo> future : futures) {
                         if (currentSize >= MAX_TOTAL_SIZE) break;
-                        
+
                         try {
                             if (future.isDone() && !future.isCompletedExceptionally()) {
-                                CollectedInfo info = future.get(1, TimeUnit.SECONDS); // Very short timeout, as it's already done
+                                CollectedInfo info = future.get(1, TimeUnit.SECONDS);
                                 if (info != null && currentSize + info.content.length() <= MAX_TOTAL_SIZE) {
-                                    collectedInfos.add(info);
-                                    currentSize += info.content.length();
-                                    LoggerUtil.logExec(Level.INFO, "Asynchronously added web page content: " + info.source + 
-                                        " (length: " + info.content.length() + ")");
+                                    if (collectedInfoSources.contains(info.source)) {
+                                        LoggerUtil.logExec(Level.INFO, "Skipping duplicate web content: " + info.source);
+                                    } else {
+                                        collectedInfos.add(info);
+                                        collectedInfoSources.add(info.source);
+                                        currentSize += info.content.length();
+                                        LoggerUtil.logExec(Level.INFO, "Asynchronously added web page content: " + info.source +
+                                                " (length: " + info.content.length() + ")");
+                                    }
                                 }
                             }
                         } catch (Exception e) {
                             LoggerUtil.logExec(Level.WARNING, "Failed to get asynchronous result: " + e.getMessage());
                         }
                     }
-                    
                 } finally {
-                    // Shut down the thread pool
                     executor.shutdown();
                     try {
                         if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
@@ -475,7 +511,7 @@ public class InformationCollectionAgent extends Agent {
                 String prompt = PromptGen.generateSummarizeWebSearchResultPrompt(
                     analysis.symptoms, testCode, testOutput, fullContent, 4096 // Max size for summary
                 );
-                processedContent = OpenAI.DoubaoFlash.messageCompletion(prompt, 0.5, false);
+                processedContent = OpenAI.FlashModel.messageCompletion(prompt, 0.5, false);
                 if (processedContent == null || processedContent.trim().isEmpty()) {
                     LoggerUtil.logExec(Level.WARNING, "Summarization returned empty content for: " + result.getUrl());
                     return null; // If summarization fails or returns empty, omit.
@@ -760,7 +796,7 @@ public class InformationCollectionAgent extends Agent {
     }
     
     private String extractRelevantText(AnalysisResult analysis, String testCode, String testOutput, String text, int maxSize) throws TemplateException, IOException {
-        OpenAI summarizerLlm = OpenAI.DoubaoFlash;
+        OpenAI summarizerLlm = OpenAI.FlashModel;
         String prompt = PromptGen.generateSummarizeAndExtractPrompt(
                 analysis.symptoms, testCode, testOutput, text, maxSize
         );

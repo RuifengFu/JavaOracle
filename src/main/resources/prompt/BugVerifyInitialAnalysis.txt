@@ -1,4 +1,5 @@
-You are a Java Bug analysis expert. Please analyze the following test case and its failure output to determine the nature of the issue.
+You are an expert Java developer and bug analyst. Your task is to perform an initial analysis of a failing test case.
+Based on the provided test code, test output, and any existing preliminary analysis, you must provide a structured analysis in JSON format. This analysis will guide the subsequent information collection process.
 
 <TestCase>
 ${testCase}

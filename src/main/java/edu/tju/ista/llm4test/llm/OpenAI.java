@@ -127,27 +127,27 @@ public class OpenAI {
 
     }
 
-    public static OpenAI R1;
+    public static OpenAI ThinkingModel;
     public static OpenAI V3;
-    public static OpenAI DoubaoFlash; // fast and cheap
+    public static OpenAI FlashModel; // fast and cheap
     public static OpenAI DoubaoThinking; // more powerful
-    public static OpenAI K2;
+    public static OpenAI AgentModel;
 
     static {
         try {
             java.util.Map<String, edu.tju.ista.llm4test.config.ModelConfig> models =
                 edu.tju.ista.llm4test.config.ModelConfig.getModelsMap();
-            R1 = new OpenAI(models.get("deepseek-reasoner"));
+            ThinkingModel = new OpenAI(models.get("deepseek-reasoner"));
             V3 = new OpenAI(models.get("deepseek-chat"));
-            DoubaoFlash = new OpenAI(models.get("doubao-flash"));
+            FlashModel = new OpenAI(models.get("doubao-flash"));
             DoubaoThinking = new OpenAI(models.get("doubao-thinking"));
-            K2 = new OpenAI(models.get("k2"));
+            AgentModel = new OpenAI(models.get("k2"));
 
             if (GlobalConfig.isUseFlash() && models.containsKey("doubao-flash")) {
                 DoubaoThinking = new OpenAI(models.get("doubao-flash"));
-                R1 = new OpenAI(models.get("doubao-flash"));
+                ThinkingModel = new OpenAI(models.get("doubao-flash"));
                 V3 = new OpenAI(models.get("doubao-flash"));
-                K2 = new OpenAI(models.get("doubao-flash"));
+                AgentModel = new OpenAI(models.get("doubao-flash"));
             }
 
             V3.JSON_OUTPUT = true;

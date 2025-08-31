@@ -15,6 +15,7 @@ import java.util.logging.Level;
  * 
  * 提供异步LLM调用、连接池管理、重试机制、请求去重等功能
  */
+@Deprecated
 public class AsyncLLMClient {
     
     private static volatile AsyncLLMClient instance;
@@ -92,7 +93,7 @@ public class AsyncLLMClient {
         
         // 创建Doubao客户端池
         for (int i = 0; i < poolSize; i++) {
-            doubaoClientPool.offer(OpenAI.DoubaoFlash);
+            doubaoClientPool.offer(OpenAI.FlashModel);
         }
     }
     
