@@ -44,40 +44,65 @@ Report Generation Instructions:
 
 Please strictly follow the following structure and requirements to generate your analysis report:
 
-1. Report Heading:
-The format of the report must strictly adhere to the following specifications. At the beginning of the report body, you must choose one of the following titles based on your core conclusion to start:
-If the fundamental issue lies in a defect within the JDK, use "BUG REPORT" as the level-1 heading, and refer to the JDK BUG report format when writing.
-If the fundamental issue lies in the design or logical error of the test case itself, use "TESTCASE ERROR ANALYSIS" as the level-1 heading.
-If both issues exist, create two level-1 headings respectively, first "BUG REPORT", then "TESTCASE ERROR ANALYSIS".
 
-2. Report Content:
+
+1. Report Content:
 Under the selected heading, include the following sections:
 
 Problem Overview (Overview):
-Clearly summarize your core findings in one or two sentences. Directly and explicitly state whether this is a product/JDK BUG or a test case design defect.
+Clearly summarize your core findings in one or two sentences. 
 
-Steps to Reproduce:
-Based on the provided <TestCase>, clearly list the specific operation steps that can stably reproduce the issue.
+
+Testcase Behavior (Observed):
+Describe the actual behavior produced by the test case, grounded in <Test Output> and <TestCase> snippets. Quote the exact lines that demonstrate the behavior.
+
+Expected Behavior per Documentation (Quoted):
+State the expected behavior according to the authoritative documentation/specification. Quote the exact sentences from <Information Sources> verbatim and include citation markers.
+
+Contradiction Mapping (Observed vs Documented):
+Map each observed behavior to the corresponding documentation quote and explicitly state whether it aligns or contradicts. For contradictions, show the precise mismatch.
+
+Why This Is Not a Testcase Issue (Elimination):
+Demonstrate that the failure is not caused by the test itself by ruling out common sources with evidence:
+- Assertions match the specification wording and semantics (quote doc and the assertion).
+- Test setup, inputs, and environment are valid and consistent with the docs.
+- No misuse of APIs/classes according to the docs (show correct usage and compare with the test).
+- No mocking/tooling/framework side effects that explain the behavior.
+- Nondeterminism/flakiness is not a factor (or explain mitigation/retries).
+If any item cannot be ruled out, acknowledge it explicitly and consider "TESTCASE_ERROR" or "UNCLEAR" accordingly.
 
 Root Cause Analysis:
 This is the most critical part of the report. Your analysis must be in-depth, logical, and conclusive.
-- **Synthesize All Information**: You must integrate findings from the <TestCase>, <Test Output>, <Hypotheses>, <Verification Results>, and <Information Sources>.
-- **Connect the Dots**: Clearly explain the chain of events that leads to the failure.
-- **Prove Your Conclusion**: Use the information provided, especially from <Information Sources>, to rigorously prove whether this is a genuine JDK bug or a flaw in the test case.
-- **Quotation Rules**: When you quote content from <Information Sources> to support your argument, you must directly quote the relevant original text from the information source verbatim into your analysis.
+- **Synthesize All Information**: Integrate findings from <TestCase>, <Test Output>, <Hypotheses>, <Verification Results>, and <Information Sources>.
+- **Connect the Dots**: Explain the causal chain that leads to the failure.
+- **Prove Your Conclusion**: Use <Information Sources> to rigorously prove whether this is a genuine JDK bug or a flaw in the test case.
+- **Minimal Repro (for JDK_BUG)**: If claiming a JDK bug, outline the minimal reproducible scenario independent of the test harness when possible.
+- **Quotation Rules**: When you quote content from <Information Sources>, paste the relevant original text verbatim and bind it to your reasoning.
+
+Documentation Understanding Discipline:
+- Quote exact passages; do not paraphrase ambiguously.
+- Respect scope/constraints stated in the docs (versions, modes, flags, edge conditions).
+- Prefer specification over secondary sources; if sources conflict, note the precedence.
+- Do not extrapolate beyond the quoted text unless clearly marked as inference and justified.
 
 Correct example: "The behavior here meets expectations because the official documentation clearly states: ‘[Paste the relevant original text from the information source here]’."
 
 Related API/Class Usage Notes (Notes on API/Class Usage):
-If the issue involves misuse or misunderstanding of a certain Java API or class, explain here the correct usage of the API or class, key precautions, or potential pitfalls. Similarly, all explanations must be based on information sources.
+If the issue involves misuse or misunderstanding of a certain Java API or class, explain the correct usage, key precautions, and potential pitfalls, all strictly grounded in <Information Sources> (with verbatim quotes).
+
+Decision Criteria & Guardrails:
+- Conclude "JDK_BUG" only if there is a documented expected behavior that contradicts the observed behavior and test-related causes have been eliminated with evidence.
+- Conclude "TESTCASE_ERROR" if the test violates the documented usage/constraints or misinterprets the spec.
+- Conclude "BOTH" if both a JDK defect and a test deficiency independently contribute.
+- Use "UNCLEAR" if evidence is insufficient or ambiguous; list exactly what is missing.
 
 <Output Format>
 You must wrap your entire response in a single JSON object with the following structure. Do not add any text outside of this JSON object.
 
 ```json
 {
-  "bug_type": "JDK_BUG" | "TESTCASE_ERROR" | "BOTH",
-  "report": "..."
+  "report": "...",
+  "bug_type": "JDK_BUG" | "TESTCASE_ERROR" | "BOTH" | "UNCLEAR",
 }
 ```
 

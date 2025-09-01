@@ -22,20 +22,83 @@ ${reportContent}
 
 ---
 Review Task:
-Please perform a critical review of the "Current Bug Report Draft". Your goal is to identify and challenge any wrong conclusions, misunderstandings, or logical flaws.
+Perform a critical, stability-aware review of the "Current Bug Report Draft" to precisely separate what is correct vs. wrong, attempt to correct errors first, and only consider reversing the conclusion if correction fails under strict change-control.
 
-Critically evaluate the report based on the following aspects:
+Core Review Dimensions (apply rigorously; quote sources):
+1.  **Logical Soundness & Flaws**: Check reasoning from evidence to conclusion; flag logical leaps and fallacies. Consider whether simpler explanations exist.
+2.  **Evidence Interpretation**: Verify deep, correct reading of test output and docs; identify misreads and overlooked contradicting details.
+3.  **Conclusion Verification**: For `JDK_BUG`, require evidence that rules out `TESTCASE_ERROR`; for `TESTCASE_ERROR`, ensure no spec-compliant behavior is being misread.
+4.  **Precision & Ambiguity**: Replace vague phrasing with specific, falsifiable statements.
+5.  **Completeness**: Ensure the analysis explains all observed symptoms; do not ignore contradictory lines in output.
+6.  **Evidence Traceability**: Every claim must map to Test Case / Test Output / Information Sources. Quote exact lines/snippets.
 
-1.  **Logical Soundness & Flaws**: Is the reasoning from evidence to conclusion logically sound? Identify any logical leaps, fallacies, or careless mistakes. Is the conclusion the *only* one that fits the evidence, or are there simpler, overlooked explanations?
+Stability & Change Control Policy:
+- Do NOT recommend changing `bug_type` unless one of the following holds:
+  1) New decisive evidence from the provided sources is surfaced that was not used before; or
+  2) A previously decisive premise is explicitly falsified (quote it and the refutation).
+- If evidence remains insufficient or equivocal after attempted corrections, keep the current `bug_type` or mark the verdict as "Inconclusive" instead of flipping.
+- Default conservatively: without a concrete spec violation or a minimal reproducible case beyond the test harness, avoid concluding `JDK_BUG`.
 
-2.  **Evidence Interpretation**: Is the evidence (e.g., test output, documentation snippets) interpreted correctly and deeply? Challenge any superficial analysis or misinterpretations. Are there subtle details in the evidence that contradict the report's conclusion?
+Correction‑First Workflow (do this in order):
+1) **Triage – Separate Correct vs Wrong vs Uncertain**
+   - List what is correct in the draft (with quotes and why it’s correct).
+   - List what is wrong (with quotes, why it’s wrong, and the specific violated principle/evidence).
+   - List what is uncertain/underspecified (what is missing to decide).
+2) **Attempt Minimal Corrections (keep current `bug_type`)**
+   - Propose precise edits to fix the wrong parts while preserving the current conclusion when logically possible.
+   - Provide corrected statements or revised reasoning grounded in evidence.
+3) **If Corrections Fail, then Reverse‑Thinking**
+   - Only if the conclusion still cannot be supported after corrections, analyze the alternative hypothesis (switching `bug_type`).
+   - Compare both hypotheses with the checklist and only recommend change if the alternative clearly dominates.
 
-3.  **Conclusion Verification**: Is the final conclusion (`bug_type`) definitively proven by the analysis? If the report claims a "JDK_BUG", is the evidence strong enough to rule out a "TESTCASE_ERROR"? Be skeptical.
+Dual‑Hypothesis Checklist (score 0–5 each; justify briefly):
+- TESTCASE_ERROR:
+  - Test setup/preconditions or mocks incorrect?
+  - Assertions match the specification?
+  - Environment/tooling/config interference?
+  - Nondeterminism/flakiness indicated?
+  - Known platform limitations or expected behavior?
+- JDK_BUG:
+  - Explicit spec text violated (quote)?
+  - Minimal repro independent of the test harness?
+  - Matches known/archived issues?
+  - Competing test/environment factors ruled out?
+  - Consistent with full test output (no unexplained lines)?
 
-4.  **Precision and Ambiguity**: Are the statements precise and unambiguous? Flag any vague language that might mask a lack of understanding. The analysis must be technically precise.
+Decision Rule:
+- Sum scores per hypothesis. If the difference < 1 or decisive evidence is missing, do NOT change `bug_type` (prefer keeping current or mark "Inconclusive").
+- If recommending a change, you MUST identify either new decisive evidence or a falsified prior premise (quote both) and explain why corrections could not salvage the original conclusion.
 
-5.  **Completeness**: Does the root cause analysis explain *all* the observed symptoms from the test output? If some parts of the output are ignored, the analysis is incomplete.
+Output Format (Markdown):
 
-6.  **Evidence Traceability**: Every single claim *must* be traceable to the provided sources (Test Case, Test Output, Information Sources). Explicitly point out any claim that is not directly supported.
+### Summary
+- Current `bug_type`: <copy from draft>
+- Change recommended: Yes/No
+- If change: New `bug_type`: <JDK_BUG | TESTCASE_ERROR>
+- Confidence: Low / Medium / High
 
-Your feedback must be direct and act as a set of instructions for correction. For each flaw you find, clearly state what is wrong, why it is wrong, and what needs to be done to fix it. Your goal is to force the LLM to rethink its analysis, correct its faults, and produce a more precise and accurate report. Do not be gentle; the goal is to eliminate all errors.
+### Correct Parts
+- Quote each correct statement and cite the supporting evidence.
+
+### Incorrect Parts (with fixes first)
+- For each incorrect point: quote it, explain why it’s wrong (with evidence), and provide the corrected wording/reasoning.
+
+### Uncertain / Missing Information
+- List what is ambiguous or missing and what evidence would resolve it.
+
+### Attempted Corrections (kept current `bug_type`)
+- Bullet the concrete edits that would fix the draft without changing the conclusion.
+
+### Reverse Analysis (only if corrections fail)
+- Alternative hypothesis: <...>
+- Key evidence supporting it and contradictions to the original.
+
+### Dual‑Hypothesis Evaluation
+- TESTCASE_ERROR score (0–5 each, total=X): <bullets with justifications>
+- JDK_BUG score (0–5 each, total=Y): <bullets with justifications>
+
+### Decision and Rationale
+- Decision: Keep current / Change to <...> / Inconclusive
+- Why now: State the NEW decisive evidence or the falsified premise; if none, explicitly say none and keep prior.
+
+Your feedback must be direct and actionable. For every wrong part, state what is wrong, why it is wrong, and provide a concrete correction before considering a reversal. Only recommend flipping `bug_type` if corrections cannot restore validity and the alternative hypothesis clearly outranks under the checklist and decision rule.
