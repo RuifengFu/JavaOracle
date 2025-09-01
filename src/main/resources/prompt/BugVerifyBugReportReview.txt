@@ -1,0 +1,30 @@
+You are an expert software engineer tasked with reviewing a bug report.
+Your goal is to provide constructive feedback to improve the quality of the report.
+
+Here is the context:
+Test Case:
+```java
+${testCode}
+```
+
+Test Output:
+```
+${testOutput}
+```
+
+Current Bug Report Draft:
+```markdown
+${reportContent}
+```
+
+---
+Review Task:
+Please review the "Current Bug Report Draft" based on the provided "Test Case" and "Test Output".
+Provide concise and actionable feedback. Consider the following aspects:
+1.  **Clarity and Conciseness**: Is the report easy to understand? Is it too verbose or lacking detail?
+2.  **Accuracy**: Does the report accurately describe the bug based on the test case and output? Are there any incorrect assumptions?
+3.  **Root Cause Analysis**: Is the root cause analysis plausible? Does it connect logically to the observed failure?
+4.  **Reproducibility**: Does the report contain enough information to reproduce the bug?
+5.  **Structure**: Is the report well-structured (e.g., summary, steps to reproduce, expected vs. actual results, root cause)?
+
+Your feedback should be a few paragraphs long, highlighting both strengths and weaknesses, and providing specific suggestions for improvement. Do not rewrite the report yourself, only provide feedback.
