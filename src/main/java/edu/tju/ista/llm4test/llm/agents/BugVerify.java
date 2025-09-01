@@ -46,7 +46,7 @@ public class BugVerify extends Agent {
     private final HypothesisAgent hypothesisAgent;
     
     // LLM实例
-    private final OpenAI llm = OpenAI.V3;
+    private final OpenAI llm = OpenAI.AgentModel;
 
     // 全局结果目录，仅生成一次
     private static final String GLOBAL_RESULT_TIMESTAMP = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
@@ -1164,8 +1164,29 @@ public class BugVerify extends Agent {
             JsonNode rootNode = objectMapper.readTree(reportJson);
             String reportContent = rootNode.path("report").asText("");
 
-            // The prompt for the review agent
-            String prompt = PromptGen.generateBugReportReviewPrompt(testCode, testOutput, reportContent);
+            // Build the same information that was used to generate the report
+            StringBuilder hypothesesBuilder = new StringBuilder(); // Empty hypotheses as per current config
+            
+            // Build verification results (empty for current implementation)
+            StringBuilder resultsBuilder = new StringBuilder();
+            
+            // Build information source content
+            StringBuilder infoSourceBuilder = new StringBuilder();
+            if (testCase != null) {
+                buildInfoSourceContent(infoSourceBuilder);
+                String apiInfoWithSource = testCase.getApiInfoWithSource();
+                if (apiInfoWithSource != null && !apiInfoWithSource.isEmpty()) {
+                    infoSourceBuilder.append("\n# 测试用例API信息和源码\n\n").append(apiInfoWithSource).append("\n");
+                }
+            }
+
+            // The prompt for the review agent with all the same information used to generate the report
+            String prompt = PromptGen.generateBugReportReviewPrompt(
+                testCode, 
+                testOutput,
+                infoSourceBuilder.toString(),
+                reportContent
+            );
             
             // Log the prompt for debugging
             if (verifyContextPath != null) {

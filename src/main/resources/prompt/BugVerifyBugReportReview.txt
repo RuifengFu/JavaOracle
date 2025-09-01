@@ -1,5 +1,5 @@
-You are an expert software engineer tasked with reviewing a bug report.
-Your goal is to provide constructive feedback to improve the quality of the report.
+You are an expert software engineer and a critical reviewer. Your task is to rigorously challenge a bug report, identify flawed reasoning, and push for maximum precision.
+Your primary goal is to ensure every claim and conclusion in the report is supported by verifiable evidence and reduce unsupported speculation.
 
 Here is the context:
 Test Case:
@@ -12,6 +12,9 @@ Test Output:
 ${testOutput}
 ```
 
+Information Sources:
+${informationSources}
+
 Current Bug Report Draft:
 ```markdown
 ${reportContent}
@@ -19,12 +22,20 @@ ${reportContent}
 
 ---
 Review Task:
-Please review the "Current Bug Report Draft" based on the provided "Test Case" and "Test Output".
-Provide concise and actionable feedback. Consider the following aspects:
-1.  **Clarity and Conciseness**: Is the report easy to understand? Is it too verbose or lacking detail?
-2.  **Accuracy**: Does the report accurately describe the bug based on the test case and output? Are there any incorrect assumptions?
-3.  **Root Cause Analysis**: Is the root cause analysis plausible? Does it connect logically to the observed failure?
-4.  **Reproducibility**: Does the report contain enough information to reproduce the bug?
-5.  **Structure**: Is the report well-structured (e.g., summary, steps to reproduce, expected vs. actual results, root cause)?
+Please perform a critical review of the "Current Bug Report Draft". Your goal is to identify and challenge any wrong conclusions, misunderstandings, or logical flaws.
 
-Your feedback should be a few paragraphs long, highlighting both strengths and weaknesses, and providing specific suggestions for improvement. Do not rewrite the report yourself, only provide feedback.
+Critically evaluate the report based on the following aspects:
+
+1.  **Logical Soundness & Flaws**: Is the reasoning from evidence to conclusion logically sound? Identify any logical leaps, fallacies, or careless mistakes. Is the conclusion the *only* one that fits the evidence, or are there simpler, overlooked explanations?
+
+2.  **Evidence Interpretation**: Is the evidence (e.g., test output, documentation snippets) interpreted correctly and deeply? Challenge any superficial analysis or misinterpretations. Are there subtle details in the evidence that contradict the report's conclusion?
+
+3.  **Conclusion Verification**: Is the final conclusion (`bug_type`) definitively proven by the analysis? If the report claims a "JDK_BUG", is the evidence strong enough to rule out a "TESTCASE_ERROR"? Be skeptical.
+
+4.  **Precision and Ambiguity**: Are the statements precise and unambiguous? Flag any vague language that might mask a lack of understanding. The analysis must be technically precise.
+
+5.  **Completeness**: Does the root cause analysis explain *all* the observed symptoms from the test output? If some parts of the output are ignored, the analysis is incomplete.
+
+6.  **Evidence Traceability**: Every single claim *must* be traceable to the provided sources (Test Case, Test Output, Information Sources). Explicitly point out any claim that is not directly supported.
+
+Your feedback must be direct and act as a set of instructions for correction. For each flaw you find, clearly state what is wrong, why it is wrong, and what needs to be done to fix it. Your goal is to force the LLM to rethink its analysis, correct its faults, and produce a more precise and accurate report. Do not be gentle; the goal is to eliminate all errors.

@@ -285,10 +285,13 @@ public class PromptGen {
         return generatePrompt("VerdictAnalysis", dataModel);
     }
 
-    public static String generateBugReportReviewPrompt(String testCode, String testOutput, String reportContent) throws TemplateException, IOException {
+    public static String generateBugReportReviewPrompt(String testCode, String testOutput, String informationSources, String reportContent) throws TemplateException, IOException {
         Map<String, Object> dataModel = new HashMap<>();
         dataModel.put("testCode", testCode);
         dataModel.put("testOutput", testOutput);
+//        dataModel.put("hypotheses", hypotheses);
+//        dataModel.put("verificationResults", verificationResults);
+        dataModel.put("informationSources", informationSources);
         dataModel.put("reportContent", reportContent);
         return generatePrompt("BugVerifyBugReportReview", dataModel);
     }

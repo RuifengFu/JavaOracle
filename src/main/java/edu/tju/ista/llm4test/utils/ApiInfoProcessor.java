@@ -203,7 +203,14 @@ public class ApiInfoProcessor {
         }
         
         String foundPath = null;
-        String fileName = className + type.getExtension();
+        
+        // 获取外部类名用于文件查找
+        String outerClassName = className;
+        int dotIndex = outerClassName.indexOf('.');
+        if (dotIndex != -1) {
+            outerClassName = outerClassName.substring(0, dotIndex);
+        }
+        String fileName = outerClassName + type.getExtension();
         String packagePath = packageName.replace('.', File.separatorChar);
         
         try {
@@ -514,48 +521,78 @@ public class ApiInfoProcessor {
         try {
             JavaProjectBuilder builder = new JavaProjectBuilder();
             builder.addSource(sourceFile);
-            for (JavaClass javaClass : builder.getClasses()) {
-                if (javaClass.getName().equals(signature.getClassName())) {
-                    // 优先匹配方法
-                    for (JavaMethod method : javaClass.getMethods()) {
-                        String qdoxSignature = buildQdoxMethodSignature(javaClass, method);
-                        if (qdoxSignature.replaceAll("\\s", "").equals(signature.getSignature().replaceAll("\\s", ""))) {
-                            StringBuilder methodSource = new StringBuilder();
-                            methodSource.append("// 源码文件: ").append(sourceFile.getAbsolutePath()).append("\n\n");
-                            if (method.getComment() != null) {
+            String fullTargetClassName = signature.getPackageName() + "." + signature.getClassName();
+            JavaClass javaClass = builder.getClassByName(fullTargetClassName);
+
+            String targetSignature = signature.getSignature().replace("...", "[]");
+
+            if (javaClass != null) {
+                // 优先匹配方法
+                for (JavaMethod method : javaClass.getMethods()) {
+                    String qdoxSignature = buildQdoxMethodSignature(javaClass, method);
+                    
+                    // 为varargs问题创建备用签名
+                    String alternativeQdoxSignature = null;
+                    if (method.isVarArgs()) {
+                        int lastParamIndex = qdoxSignature.lastIndexOf(',');
+                        if (lastParamIndex == -1) { // 只有一个参数
+                            lastParamIndex = qdoxSignature.indexOf('(');
+                        }
+                        if (lastParamIndex != -1) {
+                            String paramPart = qdoxSignature.substring(lastParamIndex + 1, qdoxSignature.length() - 1).trim();
+                            if (!paramPart.endsWith("[]")) {
+                                alternativeQdoxSignature = qdoxSignature.substring(0, qdoxSignature.length() - 1) + "[])";
+                            }
+                        }
+                    }
+                    
+                    String targetSigNoSpace = targetSignature.replaceAll("\\s", "");
+                    boolean match = qdoxSignature.replaceAll("\\s", "").equals(targetSigNoSpace);
+                    if (!match && alternativeQdoxSignature != null) {
+                        match = alternativeQdoxSignature.replaceAll("\\s", "").equals(targetSigNoSpace);
+                    }
+
+                    if (match) {
+                        StringBuilder methodSource = new StringBuilder();
+                        methodSource.append("// 源码文件: ").append(sourceFile.getAbsolutePath()).append("\n\n");
+                        if (method.getComment() != null) {
                                 methodSource.append("// 方法注释:\n");
                                 methodSource.append(method.getComment()).append("\n\n");
                             }
-                            methodSource.append("// 方法实现:\n");
-                            methodSource.append(method.getSourceCode());
-                            return methodSource.toString();
-                        }
+                        methodSource.append("// 方法实现:\n");
+                        methodSource.append(method.getSourceCode());
+                        return methodSource.toString();
                     }
+                }
 
-                    // 如果方法没有匹配到，再匹配构造函数
-                    for (com.thoughtworks.qdox.model.JavaConstructor constructor : javaClass.getConstructors()) {
-                        String qdoxSignature = buildQdoxConstructorSignature(javaClass, constructor);
+                // 如果方法没有匹配到，再匹配构造函数
+                for (com.thoughtworks.qdox.model.JavaConstructor constructor : javaClass.getConstructors()) {
+                    String qdoxSignature = buildQdoxConstructorSignature(javaClass, constructor);
+                    String targetSign = signature.getSignature().replace("...", "[]");
 
-                        // APISignatureExtractor 可能会生成 ClassName.ClassName(...) 格式的签名
-                        // 因此我们需要同时检查两种可能性
-                        int paramsStartIndex = qdoxSignature.indexOf('(');
-                        String params = paramsStartIndex >= 0 ? qdoxSignature.substring(paramsStartIndex) : "()";
-                        String alternativeSignature = javaClass.getFullyQualifiedName() + "." + javaClass.getName() + params;
+                    // APISignatureExtractor 可能会生成 ClassName.ClassName(...) 格式的签名
+                    // 因此我们需要同时检查两种可能性
+                    int paramsStartIndex = qdoxSignature.indexOf('(');
+                    String params = paramsStartIndex >= 0 ? qdoxSignature.substring(paramsStartIndex) : "()";
+                    String alternativeSignature = javaClass.getFullyQualifiedName() + "." + javaClass.getName() + params;
+                    alternativeSignature = alternativeSignature.replace("...", "[]");
 
-                        String targetSignature = signature.getSignature().replaceAll("\\s", "");
-                        if (qdoxSignature.replaceAll("\\s", "").equals(targetSignature) || alternativeSignature.replaceAll("\\s", "").equals(targetSignature)) {
-                            StringBuilder constructorSource = new StringBuilder();
-                            constructorSource.append("// 源码文件: ").append(sourceFile.getAbsolutePath()).append("\n\n");
-                            if (constructor.getComment() != null) {
+
+                    String targetSignatureNoSpace = targetSign.replaceAll("\\s", "");
+                    if (qdoxSignature.replaceAll("\\s", "").equals(targetSignatureNoSpace) || alternativeSignature.replaceAll("\\s", "").equals(targetSignatureNoSpace)) {
+                        StringBuilder constructorSource = new StringBuilder();
+                        constructorSource.append("// 源码文件: ").append(sourceFile.getAbsolutePath()).append("\n\n");
+                        if (constructor.getComment() != null) {
                                 constructorSource.append("// 构造函数注释:\n");
                                 constructorSource.append(constructor.getComment()).append("\n\n");
                             }
-                            constructorSource.append("// 构造函数实现:\n");
-                            constructorSource.append(constructor.getSourceCode());
-                            return constructorSource.toString();
-                        }
+                        constructorSource.append("// 构造函数实现:\n");
+                        constructorSource.append(constructor.getSourceCode());
+                        return constructorSource.toString();
                     }
                 }
+            } else {
+                System.out.println("[DEBUG] Class not found in Qdox: " + fullTargetClassName);
             }
             throw new ApiInfoProcessingException("在源码文件中未找到方法或构造函数: " + signature.getSignature() + " (文件: " + sourceFile.getAbsolutePath() + ")");
         } catch (ApiInfoProcessingException e) {
@@ -575,10 +612,20 @@ public class ApiInfoProcessor {
         var parameters = method.getParameters();
         for (int i = 0; i < parameters.size(); i++) {
             if (i > 0) signature.append(", ");
-            signature.append(parameters.get(i).getType().toGenericString());
+            var param = parameters.get(i);
+            String typeName = param.getType().toGenericString();
+            
+            // 修正Qdox对varargs的处理，它有时不会将varargs参数报告为数组
+            if (method.isVarArgs() && i == parameters.size() - 1) {
+                if (!typeName.endsWith("[]")) {
+                    typeName += "[]";
+                }
+            }
+            signature.append(typeName);
         }
         signature.append(")");
-        return signature.toString();
+        // 统一内部类分隔符
+        return signature.toString().replace('$', '.');
     }
 
     /**
@@ -591,10 +638,20 @@ public class ApiInfoProcessor {
         var parameters = constructor.getParameters();
         for (int i = 0; i < parameters.size(); i++) {
             if (i > 0) signature.append(", ");
-            signature.append(parameters.get(i).getType().toGenericString());
+            var param = parameters.get(i);
+            String typeName = param.getType().toGenericString();
+
+            // 修正Qdox对varargs的处理
+            if (constructor.isVarArgs() && i == parameters.size() - 1) {
+                if (!typeName.endsWith("[]")) {
+                    typeName += "[]";
+                }
+            }
+            signature.append(typeName);
         }
         signature.append(")");
-        return signature.toString();
+        // 统一内部类分隔符
+        return signature.toString().replace('$', '.');
     }
 
     /**

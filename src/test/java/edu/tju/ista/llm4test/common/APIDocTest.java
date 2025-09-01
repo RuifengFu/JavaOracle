@@ -53,4 +53,93 @@ public class APIDocTest {
 
 
     }
+
+    @Test
+    public void comprehensiveSourceExtractionTest() throws Exception {
+        // 创建一个包含多种方法调用的临时 Java 文件
+        String sourceCode = "package tmp;\n" +
+                "import java.util.*;\n" +
+                "import java.nio.file.Paths;\n" +
+                "import java.text.MessageFormat;\n" +
+                "import java.awt.font.NumericShaper;\n" +
+                "public class ComprehensiveTest {\n" +
+                "    public void test() throws Exception {\n" +
+                "        Arrays.asList(\"a\", \"b\", \"c\");\n" +
+                "        System.out.format(\"%s\", \"hello\");\n" +
+                "        Paths.get(\"/tmp\", \"a\", \"b\");\n" +
+                "        MessageFormat.format(\"{0}\", \"world\");\n" +
+                "        Map.Entry<String, String> entry = null;\n" +
+                "        NumericShaper.getContextualShaper(Set.of(NumericShaper.Range.EUROPEAN), NumericShaper.Range.EUROPEAN);\n" +
+                "    }\n" +
+                "}";
+
+        File tempDir = new File("tmp");
+        if (!tempDir.exists()) {
+            tempDir.mkdirs();
+        }
+        File tempFile = new File(tempDir, "ComprehensiveTest.java");
+        try (java.io.FileWriter writer = new java.io.FileWriter(tempFile)) {
+            writer.write(sourceCode);
+        }
+
+        try {
+            ApiInfoProcessor processor = ApiInfoProcessor.fromConfig();
+            var result = processor.getApiDocWithSource(tempFile);
+
+            // 打印结果方便调试
+            result.forEach((key, value) -> System.out.println("Key: " + key + "\nValue:\n" + value));
+
+        } finally {
+            // 清理临时文件
+            if (tempFile.exists()) {
+                tempFile.delete();
+            }
+            if (tempDir.exists()) {
+                tempDir.delete();
+            }
+        }
+    }
+
+    @Test
+    public void printStreamFormatTest() throws Exception {
+        // 创建一个只包含 PrintStream.format 调用的临时 Java 文件
+        String sourceCode = "package tmp;\n" +
+                "public class PrintStreamTest {\n" +
+                "    public void test() {\n" +
+                "        System.out.format(\"Hello %s\", \"World\");\n" +
+                "    }\n" +
+                "}";
+
+        File tempDir = new File("tmp");
+        if (!tempDir.exists()) {
+            tempDir.mkdirs();
+        }
+        File tempFile = new File(tempDir, "PrintStreamTest.java");
+        try (java.io.FileWriter writer = new java.io.FileWriter(tempFile)) {
+            writer.write(sourceCode);
+        }
+
+        try {
+            ApiInfoProcessor processor = ApiInfoProcessor.fromConfig();
+            var result = processor.getApiDocWithSource(tempFile);
+
+            // 打印结果方便调试
+            result.forEach((key, value) -> System.out.println("Key: " + key + "\nValue:\n" + value));
+
+            // 验证是否成功获取了 format 的源码
+            boolean found = result.values().stream()
+                    .anyMatch(v -> v.contains("public PrintStream format(String format, Object... args)"));
+
+            Assert.assertTrue("未找到 PrintStream.format 的源码", found);
+
+        } finally {
+            // 清理临时文件
+            if (tempFile.exists()) {
+                tempFile.delete();
+            }
+            if (tempDir.exists()) {
+                tempDir.delete();
+            }
+        }
+    }
 }
