@@ -1124,6 +1124,19 @@ public class BugVerify extends Agent {
                 logWithTestCase("Generating report, iteration " + (i + 1));
                 
                 reportJson = generateReportWithConfig(hypotheses, verificationResults, config, reportJson, feedback);
+
+                // 如果报告是测试用例错误，则中断审查过程
+                try {
+                    ObjectMapper objectMapper = new ObjectMapper();
+                    JsonNode rootNode = objectMapper.readTree(reportJson);
+                    String bugType = rootNode.path("bug_type").asText("UNKNOWN");
+                    if ("TESTCASE_ERROR".equals(bugType)) {
+                        logWithTestCase("在迭代 " + (i + 1) + " 中检测到TESTCASE_ERROR，停止迭代优化。");
+                        break;
+                    }
+                } catch (IOException e) {
+                    logWithTestCase(Level.WARNING, "在迭代优化期间解析报告JSON失败: " + e.getMessage());
+                }
                 
                 // After the last iteration, no need to review.
                 if (i < 2) {
@@ -1724,7 +1737,16 @@ public class BugVerify extends Agent {
                 testcase.verifyTestFail();
             }
             this.setTestCase(testcase);
-            this.analyze();
+
+            boolean isBug = this.enhanceVerify();
+            if (isBug) {
+                LoggerUtil.logVerify(Level.INFO, "Test case is a confirmed bug, proceeding to analysis: " + testCaseName);
+                this.analyze();
+            } else {
+                LoggerUtil.logVerify(Level.INFO, "Test case is not a bug: " + testCaseName);
+                this.generateNonBugReport(); // 为非bug情况生成报告
+            }
+            
             LoggerUtil.logExec(Level.INFO, "Bug报告已生成: " + testCaseName);
         } catch (Exception e) {
             LoggerUtil.logExec(Level.WARNING, "为测试用例生成报告失败: " + testCaseName);
