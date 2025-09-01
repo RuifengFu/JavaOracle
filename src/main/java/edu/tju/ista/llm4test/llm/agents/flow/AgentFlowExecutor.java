@@ -97,7 +97,7 @@ public class AgentFlowExecutor {
         String prompt = renderTemplate(promptTemplate);
 
         boolean expectJson = prompt.toLowerCase().contains("json");
-        String response = llm.messageCompletion(prompt, 0.7, expectJson); // Temperature could also be a parameter
+        String response = llm.messageCompletion(prompt, 0.5, expectJson); // Temperature could also be a parameter
 
         if (action.getOutputKey() != null) {
             context.put(action.getOutputKey(), response);

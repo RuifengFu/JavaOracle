@@ -800,7 +800,7 @@ public class BugVerify extends Agent {
     private String performInitialAnalysis() {
         try {
             String prompt = PromptGen.generateBugVerifyInitialAnalysisPrompt(testCode, testOutput, initialAnalysis);
-            String response = llm.messageCompletion(prompt, 0.7, true);
+            String response = llm.messageCompletion(prompt, 0.5, true);
             return filterThinkingChain(response);
         } catch (TemplateException | IOException e) {
             LoggerUtil.logExec(Level.SEVERE, "生成初始分析prompt失败: " + e.getMessage());
@@ -1213,7 +1213,7 @@ public class BugVerify extends Agent {
             }
 
             // Call LLM for review
-            String feedback = llm.messageCompletion(prompt, 0.7, false);
+            String feedback = OpenAI.ThinkingModel.messageCompletion(prompt, 0.3, false);
             logWithTestCase("Review feedback received for iteration " + iteration);
             return feedback;
 
@@ -1292,7 +1292,7 @@ public class BugVerify extends Agent {
             // 保存prompt到文件
             savePromptToFile(prompt, config);
             
-            String reportJson = llm.messageCompletion(prompt, 0.7, true);
+            String reportJson = OpenAI.ThinkingModel.messageCompletion(prompt, 0.3, true);
 
             // 检查并修复JSON
             int maxRetries = 3;

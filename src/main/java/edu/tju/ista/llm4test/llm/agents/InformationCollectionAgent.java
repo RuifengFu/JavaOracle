@@ -614,7 +614,7 @@ public class InformationCollectionAgent extends Agent {
     private AnalysisResult refineAnalysis(AnalysisResult currentAnalysis, String testCode, String testOutput) {
         try {
             String refinePrompt = buildRefinePrompt(currentAnalysis, testCode, testOutput);
-            String response = llm.messageCompletion(refinePrompt, 0.7, false);
+            String response = llm.messageCompletion(refinePrompt, 0.5, false);
             
             // Parse the optimized analysis results
             AnalysisResult refined = parseInitialInsight(response);
