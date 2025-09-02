@@ -35,7 +35,7 @@ public class JavaDocSearchTool implements Tool<String> {
      */
     public JavaDocSearchTool(String javadocBasePath) {
         this.javadocBasePath = javadocBasePath;
-        this.llm = OpenAI.ThinkingModel;
+        this.llm = OpenAI.AgentModel;
         this.docProcessor = new ApiInfoProcessor(javadocBasePath);
         this.contentProcessor = new ContentProcessor(javadocBasePath + "/doc_cache");
     }

@@ -591,7 +591,7 @@ public class BugVerify extends Agent {
                         totalScore += 1;
                         break;
                     case "TESTCASE_ISSUE":
-                        totalScore -= 1;
+                        totalScore -= 2; // more weight to avoid false positive
                         break;
                     case "UNCLEAR":
                         // 0分，不操作
@@ -608,7 +608,7 @@ public class BugVerify extends Agent {
         String finalVerdict;
         if (totalScore >= 2) {
             finalVerdict = "BUG";
-        } else if (totalScore <= -2) {
+        } else if (totalScore <= -2) { // lower threshold for TESTCASE_ISSUE
             finalVerdict = "TESTCASE_ISSUE";
         } else {
             finalVerdict = "UNCLEAR";

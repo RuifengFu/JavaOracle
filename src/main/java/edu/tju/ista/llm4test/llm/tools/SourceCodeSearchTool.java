@@ -31,7 +31,7 @@ public class SourceCodeSearchTool implements Tool<String> {
      */
     public SourceCodeSearchTool(String sourceRootPath) {
         this.sourceRootPath = sourceRootPath;
-        this.llm = OpenAI.ThinkingModel;
+        this.llm = OpenAI.AgentModel;
         this.contentProcessor = new ContentProcessor(sourceRootPath + "/source_cache");
     }
     

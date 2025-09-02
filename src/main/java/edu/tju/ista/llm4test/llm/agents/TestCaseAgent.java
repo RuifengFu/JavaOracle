@@ -31,8 +31,8 @@ public class TestCaseAgent extends Agent {
     private final ToolRegistry toolRegistry;
     private final List<String> history;
     private final List<String> feedbackHistory;
-    private static final int MAX_ITERATIONS = 10; // Safety limit for the reduction loop
-    private static final int MAX_FEEDBACK_CONTEXT = 10;
+    private static final int MAX_ITERATIONS = 20; // Safety limit for the reduction loop
+    private static final int MAX_FEEDBACK_CONTEXT = MAX_ITERATIONS;
     private List<String> lastExecutedTools; // Track executed tools for observe method
 
     private String workspace_testcase_path;

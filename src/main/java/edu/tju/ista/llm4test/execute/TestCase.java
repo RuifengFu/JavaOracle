@@ -423,7 +423,7 @@ public class TestCase {
             dataModel.put("apiDocs", apiDoc);
             dataModel.put("rootCause", verifyMessage);
             String prompt = PromptGen.generatePrompt("FixTestCase", dataModel);
-            String text = OpenAI.ThinkingModel.messageCompletion(prompt);
+            String text = OpenAI.ThinkingModel.messageCompletion(prompt, 0.3, false);
             ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
             if (codeBlocks.isEmpty()) {
                 applyChange(text);
@@ -446,7 +446,7 @@ public class TestCase {
             dataModel.put("testcase", getTestcaseWithLineNumber());
             dataModel.put("apiDocs", apiDoc);
             String prompt = PromptGen.generatePrompt("EnhanceTestCase", dataModel);
-            String text = OpenAI.ThinkingModel.messageCompletion(prompt);
+            String text = OpenAI.ThinkingModel.messageCompletion(prompt, 0.3, false);
             ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
 
             if (codeBlocks.isEmpty()) {

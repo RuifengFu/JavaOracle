@@ -31,7 +31,7 @@ public class ContentProcessor implements Tool<String> {
     private static final double OVERLAP_RATIO = 0.1; // 重叠比例
     
     public ContentProcessor(String cacheDir) {
-        this.llm = OpenAI.ThinkingModel;
+        this.llm = OpenAI.FlashModel;
         this.cacheDir = cacheDir != null ? cacheDir : "content_cache";
         this.objectMapper = new ObjectMapper();
         
