@@ -91,7 +91,8 @@ public class TestCaseAgent extends Agent {
         addToHistory("MinimizationPath: " + testFilePath);
 
         minimizedTestCase = new TestCase(testFilePath.toFile());
-        minimizedTestCase.setOriginFile(testCase.getFile());
+        // 修复：传递真正的原始文件引用，而不是 verify 目录中的文件
+        minimizedTestCase.setOriginFile(testCase.getOriginFile() != null ? testCase.getOriginFile() : testCase.getFile());
         minimizedTestCase.setResult(testCase.getResult());
         minimizedTestCase.setSourceCode(currentCode);
 

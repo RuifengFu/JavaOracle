@@ -160,7 +160,22 @@ public class BugVerify extends Agent {
     private MinimizationPrepResult prepareMinimizationIfNeeded(Path verifyContextPath) {
         try {
             Path testDir = Paths.get(GlobalConfig.getTestDir()).toAbsolutePath();
-            Path originalPath = this.testCase.getFile().toPath().toAbsolutePath();
+            
+            // 修复：优先使用原始文件路径，避免验证目录路径计算问题
+            Path originalPath;
+            if (this.testCase.getOriginFile() != null) {
+                originalPath = this.testCase.getOriginFile().toPath().toAbsolutePath();
+            } else {
+                Path currentPath = this.testCase.getFile().toPath().toAbsolutePath();
+                // 如果当前文件在验证目录中，直接回退到共享目录准备
+                if (currentPath.toString().contains("/verify/")) {
+                    logWithTestCase(Level.INFO, "文件在验证目录中，直接使用共享目录准备");
+                    TestCase verifyTestCase = prepareTestCaseInSharedDir(this.testCase, this.sharedVerifyDir);
+                    return new MinimizationPrepResult(verifyTestCase, false);
+                }
+                originalPath = currentPath;
+            }
+            
             Path relativePath;
             try {
                 relativePath = testDir.relativize(originalPath).normalize();
@@ -173,6 +188,13 @@ public class BugVerify extends Agent {
 
             String normalizedPath = relativePath.toString().replace(java.io.File.separator, "/");
             Path cachedFile = REDUCE_CACHE_DIR.resolve(relativePath);
+            
+            // 安全检查：确保缓存文件路径在REDUCE_CACHE_DIR内
+            if (!cachedFile.normalize().startsWith(REDUCE_CACHE_DIR.toAbsolutePath().normalize())) {
+                logWithTestCase(Level.SEVERE, "缓存文件路径不安全，跳过缓存: " + cachedFile);
+                TestCase verifyTestCase = prepareTestCaseInSharedDir(this.testCase, this.sharedVerifyDir);
+                return new MinimizationPrepResult(verifyTestCase, false);
+            }
 
             // 命中缓存：检查内存Set并且物理文件存在
             if (reducedTestManifest.contains(normalizedPath) && Files.exists(cachedFile)) {
@@ -180,6 +202,13 @@ public class BugVerify extends Agent {
 
                 // 仅拷贝约简后的文件到共享目录
                 Path newTestPath = this.sharedVerifyDir.resolve(relativePath).normalize();
+                
+                // 安全检查：确保新路径在共享验证目录内
+                if (!newTestPath.startsWith(this.sharedVerifyDir)) {
+                    logWithTestCase(Level.SEVERE, "计算的路径不在共享验证目录内，跳过缓存: " + newTestPath);
+                    TestCase verifyTestCase = prepareTestCaseInSharedDir(this.testCase, this.sharedVerifyDir);
+                    return new MinimizationPrepResult(verifyTestCase, false);
+                }
                 Files.createDirectories(newTestPath.getParent());
                 Files.copy(cachedFile, newTestPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
 
@@ -1947,7 +1976,21 @@ public class BugVerify extends Agent {
         try {
             // 计算相对路径：从test目录到具体测试文件
             Path testDir = Paths.get(GlobalConfig.getTestDir()).toAbsolutePath();
-            Path originalPath = originalTestCase.getFile().toPath().toAbsolutePath();
+            
+            // 修复：优先使用原始文件路径，避免验证目录路径计算问题
+            Path originalPath;
+            if (originalTestCase.getOriginFile() != null) {
+                originalPath = originalTestCase.getOriginFile().toPath().toAbsolutePath();
+            } else {
+                Path currentPath = originalTestCase.getFile().toPath().toAbsolutePath();
+                // 如果当前文件在验证目录中，无法计算正确的相对路径，返回null
+                if (currentPath.toString().contains("/verify/")) {
+                    logWithTestCase(Level.SEVERE, "prepareTestCaseInSharedDir: 文件在验证目录中且无原始文件引用，无法准备");
+                    return null;
+                }
+                originalPath = currentPath;
+            }
+            
             Path relativePath;
             try {
                 relativePath = testDir.relativize(originalPath).normalize();
@@ -1958,6 +2001,12 @@ public class BugVerify extends Agent {
 
             // 在verify目录中的新路径并规范化
             Path newTestPath = verifyDir.resolve(relativePath).normalize();
+            
+            // 安全检查：确保新路径在验证目录内
+            if (!newTestPath.startsWith(verifyDir)) {
+                logWithTestCase(Level.SEVERE, "prepareTestCaseInSharedDir: 计算的路径不在验证目录内: " + newTestPath);
+                return null;
+            }
             
             // 关键步骤：用原始文件内容覆盖共享目录中的同名文件，以重置状态
             String originalContent = Files.readString(originalTestCase.getFile().toPath());
@@ -2044,8 +2093,17 @@ public class BugVerify extends Agent {
     private void cacheMinimizedFileAndUpdateManifest() {
         synchronized (REDUCE_CACHE_FS_LOCK) {
             try {
-                Path testDir = Paths.get(GlobalConfig.getTestDir()).toAbsolutePath();
-                Path originalPath = this.testCase.getOriginFile() != null ? this.testCase.getOriginFile().toPath().toAbsolutePath() : this.testCase.getFile().toPath().toAbsolutePath();
+            Path testDir = Paths.get(GlobalConfig.getTestDir()).toAbsolutePath();
+            // 关键修复：始终使用 originFile 的路径来计算缓存位置，而不是当前验证目录中的文件路径
+            Path originalPath = this.testCase.getOriginFile() != null ? 
+                this.testCase.getOriginFile().toPath().toAbsolutePath() : 
+                this.testCase.getFile().toPath().toAbsolutePath();
+            
+            // 如果 originalPath 不在 testDir 下（比如在 verify 目录中），跳过缓存
+            if (this.testCase.getOriginFile() == null && this.testCase.getFile().toPath().toAbsolutePath().toString().contains("/verify/")) {
+                logWithTestCase(Level.SEVERE, "跳过缓存：测试文件在验证目录中，无法确定原始路径");
+                return;
+            }
                 Path relativePath;
                 try {
                     relativePath = testDir.relativize(originalPath).normalize();
@@ -2057,6 +2115,13 @@ public class BugVerify extends Agent {
                 // 仅拷贝约简后的文件
                 Path sourceFile = this.testCase.getFile().toPath();
                 Path destFile = REDUCE_CACHE_DIR.resolve(relativePath);
+                
+                // 安全检查：确保目标文件路径在REDUCE_CACHE_DIR内
+                if (!destFile.normalize().startsWith(REDUCE_CACHE_DIR.toAbsolutePath().normalize())) {
+                    logWithTestCase(Level.SEVERE, "目标缓存文件路径不安全，跳过缓存: " + destFile);
+                    return;
+                }
+                
                 Files.createDirectories(destFile.getParent());
                 Files.copy(sourceFile, destFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
                 logWithTestCase(Level.INFO, "约简结果已缓存: " + destFile);
