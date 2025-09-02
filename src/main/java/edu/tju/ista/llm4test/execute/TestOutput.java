@@ -34,78 +34,77 @@ public class TestOutput {
         StringBuilder testOutput = new StringBuilder();
         StringBuilder testError = new StringBuilder();
 
-        String[] lines = stdout.split("\n");
+        // 使用保留尾部空元素的 split，避免丢失末尾空行
+        String[] lines = stdout.split("\n", -1);
         boolean inStderr = false;
         boolean inStdout = false;
 
-        for (String line : lines) {
-            line = line.trim();
-            if(line.contains("Compilation failed")) {
-                testOutput.append(line).append("\n");
-                continue;
-            }
-            // 跳过空行和分隔线
-            if (line.isEmpty() || line.startsWith("---")) {
-                continue;
-            }
+        for (String rawLine : lines) {
+            String trimmed = rawLine.trim();
 
-            // 提取测试名称和JDK信息
-            if (line.startsWith("TEST:")) {
-                testOutput.append(line).append("\n");
-                continue;
-            }
-
-            if (line.startsWith("TEST JDK:")) {
-                testOutput.append(line).append("\n");
-                continue;
-            }
-
-            // 提取最终测试结果
-            if (line.startsWith("TEST RESULT:")) {
-                testOutput.append(line).append("\n");
-                continue;
-            }
-
-            // 提取测试结果摘要
-            if (line.startsWith("Test results:")) {
-                testOutput.append(line).append("\n");
-                continue;
-            }
-
-            if (line.equals("STDOUT:")) {
+            // 先处理区块切换标记（使用trimmed判断）
+            if ("STDOUT:".equals(trimmed)) {
                 inStdout = true;
+                inStderr = false;
                 continue;
             }
-
-            // 检测STDERR部分开始
-            if (line.equals("STDERR:")) {
+            if ("STDERR:".equals(trimmed)) {
                 inStdout = false;
                 inStderr = true;
                 continue;
             }
 
-            // 提取STDERR中的内容（实际的程序输出错误）
+            // 在 STDOUT/STDERR 区块内保留原始行（含空行与空白）
             if (inStdout) {
-                testOutput.append(line).append("\n");
-            } else if (inStderr) {
-                // 遇到下一个ACTION或其他关键字段时停止STDERR提取
-                if (line.startsWith("ACTION:") || line.startsWith("JavaTest Message:")) {
+                testOutput.append(rawLine).append("\n");
+                continue;
+            }
+            if (inStderr) {
+                // 遇到新的段落标记则结束 STDERR 捕获
+                if (trimmed.startsWith("ACTION:") || trimmed.startsWith("JavaTest Message:")) {
                     inStderr = false;
+                    // 不 return，下面的通用逻辑会正常处理 ACTION 等行
                 } else {
-                    testError.append(line).append("\n");
+                    testError.append(rawLine).append("\n");
                     continue;
                 }
             }
 
-//            // 提取JavaTest Message（测试框架的消息）
-//            if (line.startsWith("JavaTest Message:")) {
-//                testError.append(line).append("\n");
-//                continue;
-//            }
+            // 区块外逻辑：此处可以使用 trimmed 并跳过无意义的空行与分隔线
+            if (trimmed.contains("Compilation failed")) {
+                testOutput.append(trimmed).append("\n");
+                continue;
+            }
+            // 跳过空行和分隔线（仅限区块外）
+            if (trimmed.isEmpty() || trimmed.startsWith("---")) {
+                continue;
+            }
 
+            // 提取测试名称和JDK信息
+            if (trimmed.startsWith("TEST:")) {
+                testOutput.append(trimmed).append("\n");
+                continue;
+            }
 
-            if (line.startsWith("ACTION:")) {
-                testOutput.append(line).append("\n");
+            if (trimmed.startsWith("TEST JDK:")) {
+                testOutput.append(trimmed).append("\n");
+                continue;
+            }
+
+            // 提取最终测试结果
+            if (trimmed.startsWith("TEST RESULT:")) {
+                testOutput.append(trimmed).append("\n");
+                continue;
+            }
+
+            // 提取测试结果摘要
+            if (trimmed.startsWith("Test results:")) {
+                testOutput.append(trimmed).append("\n");
+                continue;
+            }
+
+            if (trimmed.startsWith("ACTION:")) {
+                testOutput.append(trimmed).append("\n");
                 continue;
             }
         }
