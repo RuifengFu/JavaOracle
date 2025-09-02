@@ -226,7 +226,13 @@ public class BugVerify extends Agent {
     /**
      * 执行完整的Bug验证流程
      */
-    public String analyze() {
+    public boolean analyze() {
+
+        boolean isBug = this.enhanceVerify();
+        if (!isBug) {
+            return false;
+        }
+        LoggerUtil.logVerify(Level.INFO, "Test case is a confirmed bug, proceeding to analysis: " + testCaseName);
         // 使用全局结果目录
         logWithTestCase("结果目录: " + GLOBAL_RESULT_DIR);
         logWithTestCase("开始Bug验证流程");
@@ -343,7 +349,9 @@ public class BugVerify extends Agent {
         // 4. 形成结论和报告
         String reportJson = generateReport(hypotheses, verificationResults);
         logWithTestCase("Bug验证报告已生成");
-        
+
+
+        isBug = false; //reset to false
         // 保存最终报告
         if (testCaseName != null) {
             String fileName;
@@ -362,6 +370,7 @@ public class BugVerify extends Agent {
                 switch (bugType) {
                     case "JDK_BUG":
                     case "BOTH":
+                        isBug = true;
                         fileName = "BugReport.md";
                         reportDir = sourceTestCaseDir; // Default to source path in case of any failure
 
@@ -446,7 +455,7 @@ public class BugVerify extends Agent {
             LoggerUtil.logExec(Level.INFO, "BugVerifyAgent: " + testCase.getFile().getAbsolutePath() + " " + result);
         }
         
-        return reportJson;
+        return isBug;
     }
     
     /**
@@ -481,11 +490,11 @@ public class BugVerify extends Agent {
         Path verifyContextPath = this.verifyContextPath;
         
         // ===== 第一步：多重验证确保一致性 (投票机制) =====
-        // 目标：通过三次验证并投票（2/3多数）来确保bug判断的稳定性
+        // 目标：通过三次验证并投票来确保bug判断的稳定性
         List<String> verificationLog = new ArrayList<>();
         List<String> bugArguments = new ArrayList<>();
         int bugVerificationCount = 0;
-        final int TOTAL_VERIFICATIONS = 3;
+        final int TOTAL_VERIFICATIONS = 2;
 
         for (int i = 1; i <= TOTAL_VERIFICATIONS; i++) {
             logWithTestCase("执行第 " + i + " 次额外验证");
@@ -521,8 +530,8 @@ public class BugVerify extends Agent {
             }
         }
         
-        // 检查验证一致性：至少有2次验证认为是bug才能继续
-        boolean isBugConfirmedByMajority = bugVerificationCount >= 2;
+        // 检查验证一致性：至少有3次验证认为是bug才能继续
+        boolean isBugConfirmedByMajority = bugVerificationCount >= TOTAL_VERIFICATIONS;
         
         if (!isBugConfirmedByMajority) {
             logWithTestCase("增强验证失败：多数验证 (" + bugVerificationCount + "/" + TOTAL_VERIFICATIONS + ") 未能确认是bug");
@@ -1657,15 +1666,7 @@ public class BugVerify extends Agent {
                         agent.setTestCase(testcase);
 
 
-                        boolean isBug = agent.enhanceVerify();
-
-                        if (isBug) {
-                            LoggerUtil.logVerify(Level.INFO, "Test case is a confirmed bug, proceeding to analysis: " + testCaseName);
-                            agent.analyze();
-                        } else {
-                            LoggerUtil.logVerify(Level.INFO, "Test case is not a bug: " + testCaseName);
-                            agent.generateNonBugReport(); // Generate report for non-bugs
-                        }
+                        agent.analyze();
 
                         LoggerUtil.logExec(Level.INFO, "Bug verification process finished for: " + testCaseName);
                         
