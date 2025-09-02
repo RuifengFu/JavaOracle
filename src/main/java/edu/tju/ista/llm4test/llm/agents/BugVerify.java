@@ -110,6 +110,16 @@ public class BugVerify extends Agent {
     private Path verifyContextPath = null;
     private Path sharedVerifyDir = null;
     
+    // ReduceResult 缓存目录与名单
+    private static final Path REDUCE_CACHE_DIR = Paths.get("ReduceResult");
+    private static final Path REDUCE_MANIFEST = REDUCE_CACHE_DIR.resolve("reduced_list.txt");
+    
+    // 缓存与名单的线程安全锁与内存缓存
+    private static final Object REDUCE_CACHE_FS_LOCK = new Object();
+    private static final java.util.Set<String> reducedTestManifest = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private static volatile boolean manifestLoaded = false;
+
+    
     // 信息源标记
     private int infoCounter = 0;
     private Map<String, String> infoSourceMap = new HashMap<>();
@@ -118,6 +128,98 @@ public class BugVerify extends Agent {
     
     public void setSharedVerifyDir(Path sharedVerifyDir) {
         this.sharedVerifyDir = sharedVerifyDir;
+    }
+
+    /**
+     * 加载约简名单。此方法不是线程安全的，应在任何并发操作开始前，
+     * 在一个单线程上下文中调用（例如，在 verifyBugsFromLog 的开头）。
+     */
+    private static void loadManifestIfNeeded() {
+        if (manifestLoaded) {
+            return;
+        }
+        if (Files.exists(REDUCE_MANIFEST)) {
+            try (java.util.stream.Stream<String> lines = Files.lines(REDUCE_MANIFEST)) {
+                lines.filter(line -> !line.isBlank())
+                     .map(line -> line.trim().replace('\\', '/'))
+                     .forEach(reducedTestManifest::add);
+            } catch (IOException e) {
+                LoggerUtil.logExec(Level.WARNING, "[BugVerify] 读取 ReduceResult 名单失败: " + e.getMessage());
+            }
+        }
+        manifestLoaded = true;
+    }
+
+    // 简化：将约简准备与缓存复用抽成一个小方法，减少 analyze 体积
+    private static class MinimizationPrepResult {
+        final TestCase verifyTestCase;
+        final boolean skipMinimization;
+        MinimizationPrepResult(TestCase tc, boolean skip) { this.verifyTestCase = tc; this.skipMinimization = skip; }
+    }
+
+    private MinimizationPrepResult prepareMinimizationIfNeeded(Path verifyContextPath) {
+        try {
+            Path testDir = Paths.get(GlobalConfig.getTestDir()).toAbsolutePath();
+            Path originalPath = this.testCase.getFile().toPath().toAbsolutePath();
+            Path relativePath;
+            try {
+                relativePath = testDir.relativize(originalPath).normalize();
+            } catch (IllegalArgumentException iae) {
+                logWithTestCase(Level.SEVERE, "计算缓存相对路径失败: testDir=" + testDir + " original=" + originalPath + " — " + iae.getMessage());
+                // 回退：在共享目录中准备用例并继续最小化流程
+                TestCase verifyTestCase = prepareTestCaseInSharedDir(this.testCase, this.sharedVerifyDir);
+                return new MinimizationPrepResult(verifyTestCase, false);
+            }
+
+            String normalizedPath = relativePath.toString().replace(java.io.File.separator, "/");
+            Path cachedFile = REDUCE_CACHE_DIR.resolve(relativePath);
+
+            // 命中缓存：检查内存Set并且物理文件存在
+            if (reducedTestManifest.contains(normalizedPath) && Files.exists(cachedFile)) {
+                logWithTestCase(Level.INFO, "约简缓存命中，复用结果: " + normalizedPath);
+
+                // 仅拷贝约简后的文件到共享目录
+                Path newTestPath = this.sharedVerifyDir.resolve(relativePath).normalize();
+                Files.createDirectories(newTestPath.getParent());
+                Files.copy(cachedFile, newTestPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+
+                TestCase verifyTestCase = new TestCase(newTestPath.toFile());
+                verifyTestCase.setOriginFile(this.testCase.getFile());
+                verifyTestCase.setResult(this.testCase.getResult());
+                verifyTestCase.setApiDocProcessor(ApiInfoProcessor.fromConfig());
+
+                try {
+                    ToolResponse<TestResult> response = jtregTool.execute(verifyTestCase.getFile().toPath(), verifyTestCase.name);
+                    if (response.isSuccess()) {
+                        verifyTestCase.setResult(response.getResult());
+                    }
+                } catch (Exception ignored) {
+                    logWithTestCase(Level.WARNING, "约简后测试用例执行失败: " + ignored.getMessage());
+                }
+
+                String minimizedCode = verifyTestCase.getSourceCode();
+                try {
+                    Path minimizedFilePath = verifyContextPath.resolve(this.testCase.getFile().getName().replace(".java", "_minimized.java"));
+                    Files.writeString(minimizedFilePath, minimizedCode);
+                    saveToFile(verifyContextPath.resolve("minimized_output.txt").toString(), verifyTestCase.getResult() != null ? verifyTestCase.getResult().getOutput() : "");
+                } catch (Exception ignored) {}
+
+                this.testCode = minimizedCode;
+                this.testOutput = verifyTestCase.getResult() != null ? verifyTestCase.getResult().getOutput() : this.testOutput;
+                this.testCase = verifyTestCase;
+                this.testCase.setApiDocProcessor(ApiInfoProcessor.fromConfig());
+                this.testCase.recalculateApiDocs();
+
+                return new MinimizationPrepResult(verifyTestCase, true);
+            }
+
+            // 未命中缓存：只做共享目录内用例恢复
+            TestCase verifyTestCase = prepareTestCaseInSharedDir(this.testCase, this.sharedVerifyDir);
+            return new MinimizationPrepResult(verifyTestCase, false);
+        } catch (Exception e) {
+            logWithTestCase(Level.WARNING, "prepareMinimizationIfNeeded failed: " + e.getMessage());
+            return null;
+        }
     }
     
     /**
@@ -228,104 +330,63 @@ public class BugVerify extends Agent {
      */
     public boolean analyze() {
 
+        // 使用全局结果目录
+        logWithTestCase("结果目录: " + GLOBAL_RESULT_DIR);
+
+        Path sourceTestCaseDir = Paths.get(bugReportPath, "testcase", testCaseName);
+        Path verifyContextPath = sourceTestCaseDir.resolve(verifyContextFolder);
+
+        // 0. TestCase Reproduce & reduce - 在完整环境中进行约简（精简实现）
+        if (this.testCase != null && this.testCase.getResult() != null && this.testCase.getResult().isFail() && this.sharedVerifyDir != null) {
+            logWithTestCase("Verified failure detected. Preparing shared verify environment for minimization: " + testCase.name);
+            MinimizationPrepResult prep = prepareMinimizationIfNeeded(verifyContextPath);
+
+            if (prep != null && !prep.skipMinimization && prep.verifyTestCase != null) {
+                // 仅在未命中缓存时运行约简
+                logWithTestCase("Starting test case minimization in shared verify environment for: " + prep.verifyTestCase.name);
+                int originalLength = prep.verifyTestCase.getSourceCode().length();
+                try {
+                    TestCase minimizedCase = minimizationAgent.run(prep.verifyTestCase, this.sharedVerifyDir);
+
+                    if (minimizedCase != null && minimizedCase.getSourceCode() != null && !minimizedCase.getSourceCode().equals(testCase.getSourceCode())) {
+                        String minimizedCode = minimizedCase.getSourceCode();
+                        Path minimizedFilePath = verifyContextPath.resolve(this.testCase.getFile().getName());
+                        Files.writeString(minimizedFilePath, minimizedCode);
+
+                        File minimizedFile = minimizedFilePath.toFile();
+                        logWithTestCase("Minimization successful in verify environment. Minimized code saved at: " + minimizedFile.getAbsolutePath());
+
+                        this.testCode = minimizedCode;
+                        this.testOutput = minimizedCase.getResult().getOutput();
+                        this.testCase = minimizedCase;
+                        this.testCase.setApiDocProcessor(ApiInfoProcessor.fromConfig());
+                        this.testCase.recalculateApiDocs();
+
+                        saveToFile(verifyContextPath.resolve("minimized_output.txt").toString(), this.testOutput);
+                        logWithTestCase("BugVerifyAgent will now proceed with the minimized test case from verify environment.");
+                        // 写入缓存与名单
+                        cacheMinimizedFileAndUpdateManifest();
+                        // 约简统计
+                        writeMinimizationStatus(true, originalLength, minimizedCode.length());
+                    } else {
+                        logWithTestCase(Level.WARNING, "Minimization process in verify environment did not reduce the test case. Continuing with the original test case.");
+                        writeMinimizationStatus(false, originalLength, originalLength);
+                    }
+                } catch (Exception e) {
+                    logWithTestCase(Level.SEVERE, "An exception occurred during test case minimization in verify environment. Continuing with the original test case. " + e);
+                }
+            }
+        } else if (this.sharedVerifyDir == null) {
+            logWithTestCase(Level.WARNING, "Shared verify directory not set, skipping minimization.");
+        }
+
+        // 先进行约简，再做增强验证
         boolean isBug = this.enhanceVerify();
         if (!isBug) {
             return false;
         }
         LoggerUtil.logVerify(Level.INFO, "Test case is a confirmed bug, proceeding to analysis: " + testCaseName);
-        // 使用全局结果目录
-        logWithTestCase("结果目录: " + GLOBAL_RESULT_DIR);
         logWithTestCase("开始Bug验证流程");
-
-        Path sourceTestCaseDir = Paths.get(bugReportPath, "testcase", testCaseName);
-        Path verifyContextPath = sourceTestCaseDir.resolve(verifyContextFolder);
-
-        // 0. TestCase Reproduce & reduce - 在完整环境中进行约简
-        if (this.testCase != null && this.testCase.getResult() != null && this.testCase.getResult().isFail() && this.sharedVerifyDir != null) {
-            logWithTestCase("Verified failure detected. Preparing shared verify environment for minimization: " + testCase.name);
-            
-            // 更新测试用例路径到verify目录
-            TestCase verifyTestCase = prepareTestCaseInSharedDir(this.testCase, this.sharedVerifyDir);
-            
-            if (verifyTestCase != null) {
-                logWithTestCase("Starting test case minimization in shared verify environment for: " + verifyTestCase.name);
-                // 新增：记录原始代码长度以便计算统计信息
-                int originalLength = verifyTestCase.getSourceCode().length();
-                try {
-                    TestCase minimizedCase = minimizationAgent.run(verifyTestCase, this.sharedVerifyDir);
-                    Path miniCsv = GLOBAL_RESULT_DIR.resolve("minimization_status.csv");
-                    // 检查约简是否成功
-                    if (minimizedCase != null && minimizedCase.getSourceCode() != null &&
-                        !minimizedCase.getSourceCode().equals(testCase.getSourceCode())) {
-
-                        String minimizedCode = minimizedCase.getSourceCode();
-                        // Save the minimized code to the original context path for record keeping
-                        String originalFileName = this.testCase.getFile().getName();
-                        String minimizedFileName = originalFileName.replace(".java", "_minimized.java");
-                        Path minimizedFilePath = verifyContextPath.resolve(minimizedFileName);
-
-                        Files.writeString(minimizedFilePath, minimizedCode);
-                        File minimizedFile = minimizedFilePath.toFile();
-
-                        logWithTestCase("Minimization successful in verify environment. Minimized code saved at: " + minimizedFile.getAbsolutePath());
-                        
-                        // Update the agent's state to use the minimized test case for subsequent steps
-                        this.testCode = minimizedCode;
-                        this.testOutput = minimizedCase.getResult().getOutput();
-                        saveToFile(verifyContextPath.resolve("minimized_output.txt").toString(), this.testOutput);
-                        this.testCase = minimizedCase;
-                        // 关键修复: 为约简后的测试用例设置ApiDocProcessor, 因为minimizationAgent返回的新TestCase对象可能未设置它
-                        this.testCase.setApiDocProcessor(ApiInfoProcessor.fromConfig());
-                        // Recalculate API docs for the minimized test case
-                        this.testCase.recalculateApiDocs();
-                        logWithTestCase("BugVerifyAgent will now proceed with the minimized test case from verify environment.");
-                        
-                        // 新增：记录约简统计信息
-                        int minimizedLength = minimizedCode.length();
-                        int reduction = originalLength - minimizedLength;
-                        double reductionPercentage = originalLength > 0 ? (double) reduction / originalLength * 100 : 0;
-                        // 保存约简统计到CSV并追加
-                        
-                        try {
-                            boolean existsMini = Files.exists(miniCsv);
-                            if (!existsMini) {
-                                saveToFile(miniCsv.toString(), "TestCase,Success,OriginalLength,MinimizedLength,Reduction,ReductionPercentage,Timestamp\n");
-                            }
-                            String csvLineMini = String.format(
-                                "%s,%b,%d,%d,%d,%.2f%%,%s\n",
-                                getTestCaseIdentifier(), true, originalLength, minimizedLength, reduction, reductionPercentage, GLOBAL_RESULT_TIMESTAMP
-                            );
-                            appendToFile(miniCsv.toString(), csvLineMini);
-                        } catch (Exception e) {
-                            logWithTestCase(Level.WARNING, "写入约简CSV失败: " + e.getMessage());
-                        }
-                    } else {
-                        logWithTestCase(Level.WARNING, "Minimization process in verify environment did not reduce the test case. Continuing with the original test case.");
-                        // 新增：记录未减少情况
-                        // 失败情况也追加CSV
-                        try {
-                            boolean existsMini = Files.exists(miniCsv);
-                            if (!existsMini) {
-                                appendToFile(miniCsv.toString(), "TestCase,Success,OriginalLength,MinimizedLength,Reduction,ReductionPercentage,Timestamp\n");
-                            }
-                            String csvLineFail = String.format(
-                                "%s,%b,%d,%d,%d,%.2f%%,%s\n",
-                                getTestCaseIdentifier(), false, originalLength, originalLength, 0, 0.0, GLOBAL_RESULT_TIMESTAMP
-                            );
-                            appendToFile(miniCsv.toString(), csvLineFail);
-                        } catch (Exception e) {
-                            logWithTestCase(Level.WARNING, "写入约简CSV失败: " + e.getMessage());
-                        }
-                    }
-                } catch (Exception e) {
-                    logWithTestCase(Level.SEVERE, "An exception occurred during test case minimization in verify environment. Continuing with the original test case. " + e);
-                }
-            } else {
-                logWithTestCase(Level.WARNING, "Failed to prepare test case in shared directory, skipping minimization");
-            }
-        } else if (this.sharedVerifyDir == null) {
-            logWithTestCase(Level.WARNING, "Shared verify directory not set, skipping minimization.");
-        }
 
         // 1. 初始分析
         String initialInsight = performInitialAnalysis();
@@ -1013,15 +1074,6 @@ public class BugVerify extends Agent {
         }
     }
     
-
-    
-
-    
-
-    
-
-    
-
     
     /**
      * 构建收集信息的字符串
@@ -1569,6 +1621,9 @@ public class BugVerify extends Agent {
     public static void verifyBugsFromLog(String logPath, String javadocPath, String sourcePath, String bugReportPath) {
         LoggerUtil.logExec(Level.INFO, "开始从日志文件验证bug: " + logPath);
         
+        // 在批处理开始时，一次性加载约简名单
+        loadManifestIfNeeded();
+        
         Path sharedVerifyDir = null;
         try {
             // 1. 在批处理开始前，创建一次共享的验证环境
@@ -1893,7 +1948,13 @@ public class BugVerify extends Agent {
             // 计算相对路径：从test目录到具体测试文件
             Path testDir = Paths.get(GlobalConfig.getTestDir()).toAbsolutePath();
             Path originalPath = originalTestCase.getFile().toPath().toAbsolutePath();
-            Path relativePath = testDir.relativize(originalPath).normalize();
+            Path relativePath;
+            try {
+                relativePath = testDir.relativize(originalPath).normalize();
+            } catch (IllegalArgumentException iae) {
+                logWithTestCase(Level.SEVERE, "prepareTestCaseInSharedDir 相对路径计算失败: testDir=" + testDir + " original=" + originalPath + " — " + iae.getMessage());
+                return null;
+            }
 
             // 在verify目录中的新路径并规范化
             Path newTestPath = verifyDir.resolve(relativePath).normalize();
@@ -1955,6 +2016,61 @@ public class BugVerify extends Agent {
 
         } catch (IOException e) {
             LoggerUtil.logExec(Level.SEVERE, "Failed to generate non-bug report for " + testCaseName + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * 写入约简统计到 minimization_status.csv。
+     */
+    private void writeMinimizationStatus(boolean success, int originalLength, int minimizedLength) {
+        try {
+            Path miniCsv = GLOBAL_RESULT_DIR.resolve("minimization_status.csv");
+            if (!Files.exists(miniCsv)) {
+                saveToFile(miniCsv.toString(), "TestCase,Success,OriginalLength,MinimizedLength,Reduction,ReductionPercentage,Timestamp\n");
+            }
+            int reduction = originalLength - minimizedLength;
+            double reductionPercentage = originalLength > 0 ? (double) reduction / originalLength * 100 : 0;
+            String csvLine = String.format("%s,%b,%d,%d,%d,%.2f%%,%s\n",
+                getTestCaseIdentifier(), success, originalLength, minimizedLength, reduction, reductionPercentage, GLOBAL_RESULT_TIMESTAMP);
+            appendToFile(miniCsv.toString(), csvLine);
+        } catch (Exception e) {
+            logWithTestCase(Level.WARNING, "写入约简CSV失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 将最小化后的当前 testCase 文件缓存到 ReduceResult，并更新 reduced_list.txt 与内存清单。
+     */
+    private void cacheMinimizedFileAndUpdateManifest() {
+        synchronized (REDUCE_CACHE_FS_LOCK) {
+            try {
+                Path testDir = Paths.get(GlobalConfig.getTestDir()).toAbsolutePath();
+                Path originalPath = this.testCase.getOriginFile() != null ? this.testCase.getOriginFile().toPath().toAbsolutePath() : this.testCase.getFile().toPath().toAbsolutePath();
+                Path relativePath;
+                try {
+                    relativePath = testDir.relativize(originalPath).normalize();
+                } catch (IllegalArgumentException iae) {
+                    logWithTestCase(Level.SEVERE, "缓存写入时相对路径计算失败: testDir=" + testDir + " original=" + originalPath + " — " + iae.getMessage());
+                    return;
+                }
+
+                // 仅拷贝约简后的文件
+                Path sourceFile = this.testCase.getFile().toPath();
+                Path destFile = REDUCE_CACHE_DIR.resolve(relativePath);
+                Files.createDirectories(destFile.getParent());
+                Files.copy(sourceFile, destFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                logWithTestCase(Level.INFO, "约简结果已缓存: " + destFile);
+
+                // 名单追加（内存与文件）
+                String normalizedPath = relativePath.toString().replace(java.io.File.separator, "/");
+                if (!reducedTestManifest.contains(normalizedPath)) {
+                    Files.createDirectories(REDUCE_CACHE_DIR);
+                    appendToFile(REDUCE_MANIFEST.toString(), normalizedPath + "\n");
+                    reducedTestManifest.add(normalizedPath);
+                }
+            } catch (Exception cacheEx) {
+                logWithTestCase(Level.WARNING, "缓存 ReduceResult 失败: " + cacheEx.getMessage());
+            }
         }
     }
 
