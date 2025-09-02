@@ -474,19 +474,23 @@ public class OpenAI {
             requestBody.put("tools", ToolFactory.toToolsArray(tools));
 
             if (STREAM) {
-                return executeWithRetryAsync("streamToolCallResponse", () -> streamToolCallResponseAsync(requestBody), 0)
-                        .thenApply(streamedResult -> {
-                            LoggerUtil.logOpenAI(Level.INFO, "OpenAI async tool call response: \n" + streamedResult.thinkingAndContent);
-                            
+                return executeWithRetryAsync(
+                        "streamToolCallResponse",
+                        () -> streamToolCallResponseAsync(requestBody).thenApply(streamedResult -> {
                             if (requirement == ToolCallRequirement.REQUIRED && (streamedResult.toolCalls == null || streamedResult.toolCalls.isEmpty())) {
-                                throw new CompletionException(new NoToolCallException("Response did not contain required tool calls.", streamedResult.content, streamedResult.reasoningContent));
+                                throw new NoToolCallException("Response did not contain required tool calls.", streamedResult.content, streamedResult.reasoningContent);
                             }
-
-                            return new ToolCallResult(streamedResult.toolCalls, streamedResult.content, streamedResult.reasoningContent);
-                        });
+                            return streamedResult;
+                        }),
+                        0
+                ).thenApply(streamedResult -> {
+                    LoggerUtil.logOpenAI(Level.INFO, "OpenAI async tool call response: \n" + streamedResult.thinkingAndContent);
+                    return new ToolCallResult(streamedResult.toolCalls, streamedResult.content, streamedResult.reasoningContent);
+                });
             } else {
-                return executeWithRetryAsync("toolCallWithContent", () -> getResponseBodyAsync(requestBody), 0)
-                        .thenApply(responseBody -> {
+                return executeWithRetryAsync(
+                        "toolCallWithContent",
+                        () -> getResponseBodyAsync(requestBody).thenApply(responseBody -> {
                             @SuppressWarnings("unchecked")
                             List<Map<String, Object>> choices = (List<Map<String, Object>>) responseBody.get("choices");
                             if (choices != null && !choices.isEmpty()) {
@@ -497,16 +501,18 @@ public class OpenAI {
                                 List<ToolCall> calls = parseToolCalls(message.get("tool_calls"));
 
                                 if (requirement == ToolCallRequirement.REQUIRED && (calls == null || calls.isEmpty())) {
-                                    throw new CompletionException(new NoToolCallException("Response did not contain required tool calls.", content, reasoning));
+                                    throw new NoToolCallException("Response did not contain required tool calls.", content, reasoning);
                                 }
 
                                 return new ToolCallResult(calls, content != null ? content : "", reasoning != null ? reasoning : "");
                             }
-                            if(requirement == ToolCallRequirement.REQUIRED) {
-                                throw new CompletionException(new NoToolCallException("Response was empty and did not contain required tool calls.", "", ""));
+                            if (requirement == ToolCallRequirement.REQUIRED) {
+                                throw new NoToolCallException("Response was empty and did not contain required tool calls.", "", "");
                             }
                             return new ToolCallResult(new ArrayList<>(), "", "");
-                        });
+                        }),
+                        0
+                );
             }
         } catch (Exception e) {
             LoggerUtil.logExec(Level.SEVERE, "Failed to start OpenAI function calling async: " + e.getMessage());
