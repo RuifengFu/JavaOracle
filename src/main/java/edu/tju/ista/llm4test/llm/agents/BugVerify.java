@@ -457,7 +457,11 @@ public class BugVerify extends Agent {
         
         return isBug;
     }
-    
+
+    public boolean enhanceVerify() {
+        return enhanceVerify(3);
+    }
+
     /**
      * 增强验证流程 - 当初始验证返回bug时进行额外的验证步骤
      * 
@@ -471,19 +475,17 @@ public class BugVerify extends Agent {
      * 
      * @return 增强验证的结果：true表示确认是bug，false表示不是bug或验证失败
      */
-    public boolean enhanceVerify() {
+    public boolean enhanceVerify(int retries) {
         String header = "Enhance Verification: " + getTestCaseIdentifier();
         LoggerUtil.logVerify(Level.INFO, header, "Verification process started.");
-        // 新增：直接写入CSV状态
-        writeVerifyStatus("Start", "Started", "Enhance verification process initiated.");
         
         // 前置条件检查：确保测试用例存在且被识别为bug
         if (testCase == null || testCase.getResult() == null) {
             logWithTestCase("测试用例未设置，跳过增强验证");
             this.enhanceVerifyFailureReason = "Test case not set.";
             LoggerUtil.logVerify(Level.WARNING, header, "Verification failed: Test case not set.");
-            // 记录状态并保存
-            writeVerifyStatus("Precondition", "Failed", "Test case not set.");
+            // 最终一次性写入结果
+            writeVerifyStatus("Verdict", "TESTCASE_ISSUE", "Precondition failed: Test case not set.");
             return false;
         }
         
@@ -494,7 +496,7 @@ public class BugVerify extends Agent {
         List<String> verificationLog = new ArrayList<>();
         List<String> bugArguments = new ArrayList<>();
         int bugVerificationCount = 0;
-        final int TOTAL_VERIFICATIONS = 2;
+        final int TOTAL_VERIFICATIONS = 3;
 
         for (int i = 1; i <= TOTAL_VERIFICATIONS; i++) {
             logWithTestCase("执行第 " + i + " 次额外验证");
@@ -513,11 +515,9 @@ public class BugVerify extends Agent {
                     verificationLog.add("验证 " + i + ": BUG - " + testCase.verifyMessage);
                     bugArguments.add(testCase.verifyMessage);
                     logWithTestCase("第 " + i + " 次验证确认是bug");
-                    writeVerifyStatus("Verification " + i, "BUG", testCase.verifyMessage);
                 } else {
                     verificationLog.add("验证 " + i + ": NOT_BUG - " + testCase.verifyMessage);
                     logWithTestCase("第 " + i + " 次验证认为不是bug");
-                    writeVerifyStatus("Verification " + i, "NOT_BUG", testCase.verifyMessage);
                 }
 
             } catch (Exception e) {
@@ -534,6 +534,22 @@ public class BugVerify extends Agent {
         boolean isBugConfirmedByMajority = bugVerificationCount >= TOTAL_VERIFICATIONS;
         
         if (!isBugConfirmedByMajority) {
+            if (bugVerificationCount >= TOTAL_VERIFICATIONS - 1 && retries > 0) {
+                // 接近多数票，尝试重试以提升召回
+                LoggerUtil.logVerify(Level.INFO, header,
+                    "Majority not reached (" + bugVerificationCount + "/" + TOTAL_VERIFICATIONS + ") — retrying. Retries remaining: " + retries);
+                return this.enhanceVerify(retries - 1);
+            }
+
+            // 不重试：要么票数差距较大，要么已无剩余重试次数
+            if (retries < 0) {
+                LoggerUtil.logVerify(Level.INFO, header,
+                    "Majority not reached (" + bugVerificationCount + "/" + TOTAL_VERIFICATIONS + ") — no retries left. Finalizing as TESTCASE_ISSUE.");
+            } else {
+                LoggerUtil.logVerify(Level.INFO, header,
+                    "Majority not reached (" + bugVerificationCount + "/" + TOTAL_VERIFICATIONS + ") — not close enough to retry. Finalizing as TESTCASE_ISSUE.");
+            }
+
             logWithTestCase("增强验证失败：多数验证 (" + bugVerificationCount + "/" + TOTAL_VERIFICATIONS + ") 未能确认是bug");
             this.enhanceVerifyFailureReason = "Inconsistent verification results. Only " + bugVerificationCount + " out of " + TOTAL_VERIFICATIONS + " validations identified a bug.";
             
@@ -545,7 +561,8 @@ public class BugVerify extends Agent {
                 failureSummary.append("- ").append(result).append("\n");
             }
             saveToFile(verifyContextPath.resolve("enhance_verify_failed.md").toString(), failureSummary.toString());
-            
+            // 最终一次性写入结果
+            writeVerifyStatus("Verdict", "TESTCASE_ISSUE", "Majority not reached" + " (" + bugVerificationCount + "/" + TOTAL_VERIFICATIONS + ")");
             LoggerUtil.logVerify(Level.INFO, header, "Final Verdict: TESTCASE_ISSUE (Inconsistent results)");
             return false;
         }
@@ -571,6 +588,8 @@ public class BugVerify extends Agent {
             logWithTestCase(Level.SEVERE, "所有测试用例问题解释都生成失败，中止验证");
             this.enhanceVerifyFailureReason = "All attempts to generate test case issue explanations failed.";
             LoggerUtil.logVerify(Level.SEVERE, header, "Final Verdict: UNKNOWN (Explanation generation failed)");
+            // 最终一次性写入结果
+            writeVerifyStatus("Verdict", "UNKNOWN", "Explanation generation failed");
             return false; // 中止流程
         }
         
@@ -585,6 +604,8 @@ public class BugVerify extends Agent {
             logWithTestCase(Level.SEVERE, "无法将论点序列化为JSON: " + e.getMessage());
             this.enhanceVerifyFailureReason = "Failed to serialize arguments to JSON.";
             LoggerUtil.logVerify(Level.SEVERE, header, "Final Verdict: UNKNOWN (JSON serialization failed)");
+            // 最终一次性写入结果
+            writeVerifyStatus("Verdict", "UNKNOWN", "JSON serialization failed");
             return false;
         }
 
@@ -606,6 +627,7 @@ public class BugVerify extends Agent {
                         // 0分，不操作
                         break;
                     default:
+                        totalScore -= 1; // can't not to prove this is a bug
                         logWithTestCase(Level.WARNING, "未知的裁决结果: " + verdict);
                         break;
                 }
