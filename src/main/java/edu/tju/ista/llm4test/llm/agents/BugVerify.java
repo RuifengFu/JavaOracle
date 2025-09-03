@@ -189,12 +189,6 @@ public class BugVerify extends Agent {
             String normalizedPath = relativePath.toString().replace(java.io.File.separator, "/");
             Path cachedFile = REDUCE_CACHE_DIR.resolve(relativePath);
             
-            // 安全检查：确保缓存文件路径在REDUCE_CACHE_DIR内
-            if (!cachedFile.normalize().startsWith(REDUCE_CACHE_DIR.toAbsolutePath().normalize())) {
-                logWithTestCase(Level.SEVERE, "缓存文件路径不安全，跳过缓存: " + cachedFile);
-                TestCase verifyTestCase = prepareTestCaseInSharedDir(this.testCase, this.sharedVerifyDir);
-                return new MinimizationPrepResult(verifyTestCase, false);
-            }
 
             // 命中缓存：检查内存Set并且物理文件存在
             if (reducedTestManifest.contains(normalizedPath) && Files.exists(cachedFile)) {
@@ -233,7 +227,7 @@ public class BugVerify extends Agent {
                     saveToFile(verifyContextPath.resolve("minimized_output.txt").toString(), verifyTestCase.getResult() != null ? verifyTestCase.getResult().getOutput() : "");
                 } catch (Exception ignored) {}
 
-                this.testCode = minimizedCode;
+                this.testCode = TestCaseAgent.codeWithLineNumber(minimizedCode);
                 this.testOutput = verifyTestCase.getResult() != null ? verifyTestCase.getResult().getOutput() : this.testOutput;
                 this.testCase = verifyTestCase;
                 this.testCase.setApiDocProcessor(ApiInfoProcessor.fromConfig());
@@ -385,7 +379,7 @@ public class BugVerify extends Agent {
                         File minimizedFile = minimizedFilePath.toFile();
                         logWithTestCase("Minimization successful in verify environment. Minimized code saved at: " + minimizedFile.getAbsolutePath());
 
-                        this.testCode = minimizedCode;
+                        this.testCode = TestCaseAgent.codeWithLineNumber(minimizedCode);
                         this.testOutput = minimizedCase.getResult().getOutput();
                         this.testCase = minimizedCase;
                         this.testCase.setApiDocProcessor(ApiInfoProcessor.fromConfig());
@@ -765,7 +759,7 @@ public class BugVerify extends Agent {
             return false;
         }
     }
-    
+     
     /**
      * 生成测试用例问题解释
      * 
@@ -787,13 +781,7 @@ public class BugVerify extends Agent {
         
         try {
             // 准备测试用例代码，添加行号以便LLM分析
-            String source = testCase.getSourceWithoutComment();
-            StringBuilder sb = new StringBuilder();
-            var lines = source.split("\n");
-            for (int i = 0; i < lines.length; i++) {
-                sb.append(i).append("\t:").append(lines[i]).append("\n");
-            }
-            var testcase = sb.toString();
+            var testcase = this.testCode;
             
             // 生成专门的测试用例问题分析prompt
             // 避免 apiDoc 为 null 导致模板渲染失败
@@ -846,13 +834,7 @@ public class BugVerify extends Agent {
         
         try {
             // 准备测试用例代码，添加行号以便LLM分析
-            String source = testCase.getSourceWithoutComment();
-            StringBuilder sb = new StringBuilder();
-            var lines = source.split("\n");
-            for (int i = 0; i < lines.length; i++) {
-                sb.append(i).append("\t:").append(lines[i]).append("\n");
-            }
-            var testcase = sb.toString();
+            var testcase = this.testCode;
             
             // 生成裁决分析prompt，包含双方论证
             // 避免 apiDoc 为 null
@@ -1290,10 +1272,10 @@ public class BugVerify extends Agent {
             String reportContent = rootNode.path("report").asText("");
 
             // Build the same information that was used to generate the report
-            StringBuilder hypothesesBuilder = new StringBuilder(); // Empty hypotheses as per current config
+            // StringBuilder hypothesesBuilder = new StringBuilder(); // Empty hypotheses as per current config
             
             // Build verification results (empty for current implementation)
-            StringBuilder resultsBuilder = new StringBuilder();
+            // StringBuilder resultsBuilder = new StringBuilder();
             
             // Build information source content
             StringBuilder infoSourceBuilder = new StringBuilder();
@@ -2115,12 +2097,6 @@ public class BugVerify extends Agent {
                 // 仅拷贝约简后的文件
                 Path sourceFile = this.testCase.getFile().toPath();
                 Path destFile = REDUCE_CACHE_DIR.resolve(relativePath);
-                
-                // 安全检查：确保目标文件路径在REDUCE_CACHE_DIR内
-                if (!destFile.normalize().startsWith(REDUCE_CACHE_DIR.toAbsolutePath().normalize())) {
-                    logWithTestCase(Level.SEVERE, "目标缓存文件路径不安全，跳过缓存: " + destFile);
-                    return;
-                }
                 
                 Files.createDirectories(destFile.getParent());
                 Files.copy(sourceFile, destFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING);

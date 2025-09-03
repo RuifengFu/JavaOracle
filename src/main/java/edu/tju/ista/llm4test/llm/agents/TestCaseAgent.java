@@ -59,7 +59,10 @@ public class TestCaseAgent extends Agent {
         toolRegistry.register(new JtregExecuteTool());
     }
 
-    private static String codeWithLineNumber(String s) {
+    public static String codeWithLineNumber(String s) {
+        if (s == null) {
+            return "";
+        }
         var sb = new StringBuilder();
         var lines = s.split("\n");
         for (int i = 0; i < lines.length; i++) {
@@ -156,6 +159,11 @@ public class TestCaseAgent extends Agent {
 
         addToHistory("=== Minimization Complete ===");
         logFinalResult(originalCode);
+        
+        // NEW STEP: Remove comments from the final minimized code and write back to file
+        String finalMinimizedCode = minimizedTestCase.getSourceCode();
+        String commentFreeCode = removeComments(finalMinimizedCode);
+        minimizedTestCase.setSourceCode(commentFreeCode);
         return minimizedTestCase;
     }
 
@@ -376,6 +384,13 @@ public class TestCaseAgent extends Agent {
         }
     }
     
+    private static String removeComments(String code) {
+        if (code == null) return "";
+        return Arrays.stream(code.split("\n"))
+                .map(line -> line.trim().startsWith("//") ? "" : line)
+                .collect(java.util.stream.Collectors.joining("\n"));
+    }
+
     private void addToHistory(String message) {
         addToHistory(Level.INFO, message);
     }
