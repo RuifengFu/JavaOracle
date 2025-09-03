@@ -1307,7 +1307,7 @@ public class BugVerify extends Agent {
             }
 
             // Call LLM for review
-            String feedback = OpenAI.ThinkingModel.messageCompletion(prompt, 0.3, false);
+            String feedback = OpenAI.AgentModel.messageCompletion(prompt, 0.3, false);
             logWithTestCase("Review feedback received for iteration " + iteration);
             return feedback;
 
@@ -1386,7 +1386,7 @@ public class BugVerify extends Agent {
             // 保存prompt到文件
             savePromptToFile(prompt, config);
             
-            String reportJson = OpenAI.ThinkingModel.messageCompletion(prompt, 0.3, true);
+            String reportJson = OpenAI.AgentModel.messageCompletion(prompt, 0.3, true);
 
             // 检查并修复JSON
             int maxRetries = 3;
