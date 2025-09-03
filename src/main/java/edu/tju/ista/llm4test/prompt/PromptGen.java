@@ -11,10 +11,12 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class PromptGen {
     // FreeMarker 配置对象
-    private static final Configuration CONFIGURATION;
+    private static Configuration CONFIGURATION;
 
     // 预定义模板存储
     private static final Map<String, String> TEMPLATE_MAP = new HashMap<>();
@@ -27,8 +29,14 @@ public class PromptGen {
 
     static {
         // 初始化 FreeMarker 配置
-        CONFIGURATION = new Configuration(Configuration.VERSION_2_3_31);
-        CONFIGURATION.setDefaultEncoding("UTF-8");
+        try {
+            CONFIGURATION = new Configuration(Configuration.VERSION_2_3_31);
+            CONFIGURATION.setDefaultEncoding("UTF-8");
+        } catch (Throwable e) {
+            System.err.println("FATAL: FreeMarker initialization failed. Falling back to simple string replacement.");
+            e.printStackTrace();
+            CONFIGURATION = null;
+        }
 
         // 从资源文件加载常量
         try {
@@ -113,6 +121,19 @@ public class PromptGen {
         dataModel.put("THINKING_CLAUDE_PROMPT", THINKING_CLAUDE_PROMPT);
         dataModel.put("THINKING_PROMPT", THINKING_PROMPT);
         dataModel.put("JMLExample", JMLExample);
+
+        // Fallback to simple string replacement if FreeMarker is not available
+        if (CONFIGURATION == null) {
+            String result = templateString;
+            for (Map.Entry<String, Object> entry : dataModel.entrySet()) {
+                String placeholderRegex = "\\$\\{" + Pattern.quote(entry.getKey()) + "(?:![^}]*)?\\}";
+                String value = entry.getValue() != null ? entry.getValue().toString() : "";
+                result = result.replaceAll(placeholderRegex, Matcher.quoteReplacement(value));
+            }
+            // Remove any remaining placeholders
+            result = result.replaceAll("\\$\\{[^}]+}", "");
+            return result;
+        }
 
         // Create the FreeMarker template
         Template template = new Template(templateName, templateString, CONFIGURATION);
