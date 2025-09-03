@@ -142,4 +142,71 @@ public class APIDocTest {
             }
         }
     }
+
+    @Test
+    public void ReadTest() throws Exception {
+        String code = "import java.io.*;\n" +
+                      "\n" +
+                      "public class ReadParams {\n" +
+                      "\n" +
+                      "    // Test closed stream behavior: read operations should throw IOException after close\n" +
+                      "    public static void doTest2(InputStream in) throws Exception {\n" +
+                      "        in.close();\n" +
+                      "        byte[] buffer = new byte[10];\n" +
+                      "        try {\n" +
+                      "            int result = in.read(buffer, 0, 5);\n" +
+                      "            throw new RuntimeException(in.getClass().getName() + \" Failed closed stream test - read() should throw IOException after close. Instead returned: \" + result);\n" +
+                      "        } catch (IOException e) {\n" +
+                      "            System.err.println(\"Successfully completed closed stream test on \" + in.getClass().getName());\n" +
+                      "        } catch (Exception e) {\n" +
+                      "            throw new RuntimeException(in.getClass().getName() + \" Unexpected exception type after close: \" + e.getClass().getName() + \": \" + e.getMessage());\n" +
+                      "        }\n" +
+                      "    }\n" +
+                      "\n" +
+                      "    public static void main(String args[]) throws Exception {\n" +
+                      "        // Create a simple ObjectInputStream with minimal data\n" +
+                      "        File tempFile = File.createTempFile(\"test\", \".obj\");\n" +
+                      "        tempFile.deleteOnExit();\n" +
+                      "        \n" +
+                      "        FileOutputStream fos = new FileOutputStream(tempFile);\n" +
+                      "        ObjectOutputStream oos = new ObjectOutputStream(fos);\n" +
+                      "        oos.writeInt(12345);\n" +
+                      "        oos.close();\n" +
+                      "        \n" +
+                      "        ObjectInputStream ois = new ObjectInputStream(new FileInputStream(tempFile));\n" +
+                      "        doTest2(ois);\n" +
+                      "        ois.close();\n" +
+                      "    }\n" +
+                      "}";
+
+        File tempDir = new File("tmp");
+        if (!tempDir.exists()) {
+            tempDir.mkdirs();
+        }
+        File tempFile = new File(tempDir, "PrintStreamTest.java");
+        try (java.io.FileWriter writer = new java.io.FileWriter(tempFile)) {
+            writer.write(code);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
+        try {
+            ApiInfoProcessor processor = ApiInfoProcessor.fromConfig();
+            var result = processor.getApiDocWithSource(tempFile);
+
+            // 打印结果方便调试
+            result.forEach((key, value) -> System.out.println("Key: " + key + "\nValue:\n" + value));
+
+
+
+        } finally {
+            // 清理临时文件
+            if (tempFile.exists()) {
+                tempFile.delete();
+            }
+            if (tempDir.exists()) {
+                tempDir.delete();
+            }
+        }
+    }
 }
