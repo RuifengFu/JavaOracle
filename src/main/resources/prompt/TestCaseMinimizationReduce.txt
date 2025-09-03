@@ -38,6 +38,7 @@ Once the obvious parts are gone, methodically simplify the remaining code that i
         - **Reduce Collection Size:** If a collection (like a `List` or `Array`) is involved, reduce it to the minimum number of elements required. For instance, if a loop over 100 items fails on the 5th, create a collection with just that one item (or as few as needed).
         - **Replace Complex Types:** If a complex object (e.g., `CustomClass`, `HashMap`) is used, try to replace it with a simpler one (e.g., `Object`, `String`, a primitive type, or a simpler collection like `ArrayList`).
         - **Minimize Object Fields:** If using a custom object, remove any fields and methods that are not read or do not influence the failing behavior.
+        - **Refine Types:** If the failure involves a specific type, ensure that only that type is used. Replace subclasses or interfaces with the exact class that matters(if public).
     - **Simplify Control Flow:**
         - **Loops:** Reduce loops to the single iteration that matters.
         - **Conditionals:** Simplify complex `if` conditions to `true` or `false` if the other path is never taken.

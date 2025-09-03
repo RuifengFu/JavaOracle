@@ -31,6 +31,7 @@ Core Review Dimensions (apply rigorously; quote sources):
 4.  **Precision & Ambiguity**: Replace vague phrasing with specific, falsifiable statements.
 5.  **Completeness**: Ensure the analysis explains all observed symptoms; do not ignore contradictory lines in output.
 6.  **Evidence Traceability**: Every claim must map to Test Case / Test Output / Information Sources. Quote exact lines/snippets.
+7.  **Documentation Specificity**: Ensure the documentation referenced corresponds to the exact method signature (including parameter types and class) being invoked. Be cautious with overloaded or overridden methods, as they may have different specifications.
 
 Stability & Change Control Policy:
 - Do NOT recommend changing `bug_type` unless one of the following holds:
