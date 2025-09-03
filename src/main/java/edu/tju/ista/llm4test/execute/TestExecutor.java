@@ -192,7 +192,7 @@ public class TestExecutor {
         
         // 构建命令，使用临时目录下的子目录
         List<String> command = Arrays.asList(
-            "jtreg", "-avm", "-ea", "-va", 
+            "jtreg", "-ea", "-va",
             "-r:" + jtReportDir,    // 报告目录
             "-w:" + jtWorkDir,      // 工作目录
             "-jdk:" + jdk, 
