@@ -580,7 +580,7 @@ public class BugVerify extends Agent {
         List<String> verificationLog = new ArrayList<>();
         List<String> bugArguments = new ArrayList<>();
         int bugVerificationCount = 0;
-        final int TOTAL_VERIFICATIONS = 3;
+        final int TOTAL_VERIFICATIONS = 2;
 
         for (int i = 1; i <= TOTAL_VERIFICATIONS; i++) {
             logWithTestCase("执行第 " + i + " 次额外验证");
@@ -656,7 +656,7 @@ public class BugVerify extends Agent {
         // ===== 第二步：生成反方论证 (3次) =====
         // 目标：专门寻找测试用例中的问题，提供反方观点
         List<String> testCaseIssueExplanations = new ArrayList<>();
-        for (int i = 1; i <= 3; i++) {
+        for (int i = 1; i <= TOTAL_VERIFICATIONS; i++) {
             logWithTestCase("生成第 " + i + " 次测试用例问题解释");
             String explanation = generateTestCaseIssueExplanation();
             if (explanation != null && !explanation.isEmpty()) {
@@ -711,7 +711,6 @@ public class BugVerify extends Agent {
                         // 0分，不操作
                         break;
                     default:
-                        totalScore -= 1; // can't not to prove this is a bug
                         logWithTestCase(Level.WARNING, "未知的裁决结果: " + verdict);
                         break;
                 }
@@ -1224,10 +1223,10 @@ public class BugVerify extends Agent {
                     ObjectMapper objectMapper = new ObjectMapper();
                     JsonNode rootNode = objectMapper.readTree(reportJson);
                     String bugType = rootNode.path("bug_type").asText("UNKNOWN");
-                    if ("TESTCASE_ERROR".equals(bugType) || "UNCLEAR".equals(bugType)) {
-                        logWithTestCase("在迭代 " + (i + 1) + " 中检测到TESTCASE_ERROR/UNCLEAR，停止迭代优化。");
-                        break;
-                    }
+//                    if ("TESTCASE_ERROR".equals(bugType) || "UNCLEAR".equals(bugType)) {
+//                        logWithTestCase("在迭代 " + (i + 1) + " 中检测到TESTCASE_ERROR/UNCLEAR，停止迭代优化。");
+//                        break;
+//                    }
                 } catch (IOException e) {
                     logWithTestCase(Level.WARNING, "在迭代优化期间解析报告JSON失败: " + e.getMessage());
                 }
