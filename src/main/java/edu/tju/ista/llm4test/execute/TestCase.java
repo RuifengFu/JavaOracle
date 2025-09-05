@@ -310,6 +310,17 @@ public class TestCase {
 
         // --- 开始异步链式调用 ---
 
+        // Fuzz4All 模式下跳过验证步骤
+        if (GlobalConfig.isBaselineFuzz4All()) {
+            LoggerUtil.logExec(Level.INFO, String.format("Fuzz4All mode: skipping analysis for test case: %s", name));
+            // 直接进行修复流程
+            return fixAsync()
+                // 异步重新执行测试 (在CPU线程池中执行)
+                .thenCompose(v -> executeTestAsync(testExecutor))
+                // 将新结果传入，进行下一次循环（递归调用）
+                .thenCompose(newResult -> fixLoopAsync(newResult, testExecutor, attempt + 1, maxAttempts));
+        }
+
         // 步骤 1: 异步验证失败原因 (在I/O线程池中执行)
         return verifyTestFailAsync()
             .thenCompose(v -> {
@@ -333,6 +344,9 @@ public class TestCase {
 
     // 同步方法保持不变，供向后兼容
     public void verifyTestFail() {
+        if (GlobalConfig.isBaselineFuzz4All()) {
+            return ; // Fuzz4All模式下跳过验证
+        }
         if (!result.isFail()) {
             return;
         }
@@ -418,6 +432,13 @@ public class TestCase {
 
     public void fix() {
         try {
+            // Fuzz4All 模式下直接跳过 fix
+            if (GlobalConfig.isBaselineFuzz4All()) {
+                LoggerUtil.logExec(Level.INFO, "Fuzz4All mode: skipping fix for test case: " + file);
+                return;
+            }
+
+            // 正常模式下的处理
             Map<String, Object> dataModel = new HashMap<>();
             dataModel.put("testcase", getTestcaseWithLineNumber());
             dataModel.put("originCase", originTestCase);
@@ -433,10 +454,10 @@ public class TestCase {
                 String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
                 applyChange(generatedCode);
             }
-            
+
             // 修复后重新计算API文档，因为可能引入了新的API调用
             recalculateApiDocs();
-            
+
         } catch (Exception e) {
             LoggerUtil.logExec(Level.WARNING, "Fixing test case failed: " + file + "\n" + e.getMessage());
         }
@@ -445,11 +466,13 @@ public class TestCase {
     public void enhance() {
         try {
             String text;
+            boolean isFuzz4AllMode = false;
 
             // 检查是否启用Fuzz4All baseline模式
             if (GlobalConfig.isBaselineFuzz4All()) {
                 LoggerUtil.logExec(Level.INFO, "Using Fuzz4All baseline for test case: " + file);
                 text = Fuzz4All.processTestCase(this);
+                isFuzz4AllMode = true;
             } else {
                 Map<String, Object> dataModel = new HashMap<>();
                 dataModel.put("testcase", getTestcaseWithLineNumber());
@@ -458,13 +481,30 @@ public class TestCase {
                 text = OpenAI.ThinkingModel.messageCompletion(prompt, 0.3, false);
             }
 
-            ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
+            // Fuzz4All 模式下也使用 CodeExtractor，但跳过 applyChange
+            if (isFuzz4AllMode) {
+                LoggerUtil.logExec(Level.INFO, "Fuzz4All output for test case: " + file + "\n" + text);
+                if (text != null && !text.trim().isEmpty()) {
+                    ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
+                    if (codeBlocks.isEmpty()) {
+                        writeTestCaseToFile(text);
+                    } else {
+                        String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
+                        writeTestCaseToFile(generatedCode);
+                    }
+                    LoggerUtil.logExec(Level.INFO, "Applied Fuzz4All result directly to test case: " + file);
 
-            if (codeBlocks.isEmpty()) {
-                applyChange(text);
+                }
             } else {
-                String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
-                applyChange(generatedCode);
+                // 正常模式下的处理
+                ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
+
+                if (codeBlocks.isEmpty()) {
+                    applyChange(text);
+                } else {
+                    String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
+                    applyChange(generatedCode);
+                }
             }
 
             // 增强后重新计算API文档，因为可能引入了新的API调用

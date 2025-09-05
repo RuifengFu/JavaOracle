@@ -32,6 +32,10 @@ public class TestResult {
         if (jtregResult.exitValue != 0) {
             if (jtregResult.exitValue == 124) {
                 kind = TestResultKind.EXECUTE_TIMEOUT;
+            } else if (jtregResult.exitValue == 3) {
+                kind = TestResultKind.EXECUTE_ERROR;
+            } else if (jtregResult.exitValue == 5) {
+                kind = TestResultKind.WRONG_FORMAT;
             } else {
                 kind = TestResultKind.TEST_FAIL;
             }
@@ -67,7 +71,7 @@ public class TestResult {
      */
     public boolean isFail() {
         return switch (kind) {
-            case COMPILE_FAIL, TEST_FAIL, DIFF, MAYBE_TEST_FAIL, VERIFIED_BUG -> true;
+            case COMPILE_FAIL, TEST_FAIL, DIFF, MAYBE_TEST_FAIL, VERIFIED_BUG, EXECUTE_ERROR, WRONG_FORMAT -> true;
             default -> false;
         };
     }
@@ -82,6 +86,10 @@ public class TestResult {
         if (output.exitValue != 0) {
             if (output.exitValue == 124) {
                 kind = TestResultKind.EXECUTE_TIMEOUT;
+            } else if (output.exitValue == 3) {
+                kind = TestResultKind.EXECUTE_ERROR;
+            } else if (output.exitValue == 5) {
+                kind = TestResultKind.WRONG_FORMAT;
             } else {
                 kind = TestResultKind.TEST_FAIL;
             }
@@ -100,6 +108,10 @@ public class TestResult {
             this.jtregResult = results.values().stream().findFirst().orElse(null);
             if (value == 124) {
                 kind = TestResultKind.EXECUTE_TIMEOUT;
+            } else if (value == 3) {
+                kind = TestResultKind.EXECUTE_ERROR;
+            } else if (value == 5) {
+                kind = TestResultKind.WRONG_FORMAT;
             } else if (value != 0) {
                 kind = TestResultKind.TEST_FAIL;
             } else {
