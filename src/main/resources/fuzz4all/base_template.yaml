@@ -15,7 +15,8 @@ target:
   path_documentation: "{PATH_DOCUMENTATION}"
   path_example_code: "{PATH_EXAMPLE_CODE}"
   trigger_to_generate_input: "write a complex jtreg test case. Using {CLASS_NAME} as class name!
-  Add valid jtreg comments make this testcase can be executed by Jtreg! At least you should add @test
+  MUST Add valid jtreg comments make this testcase can be executed by Jtreg! 
+  At least you should add @test tag at the head of the testcase!
   /*
  * @test
  */\nif you using testng/junit use the correct @run tags!"

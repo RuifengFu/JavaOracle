@@ -225,10 +225,10 @@ public class Fuzz4All {
         // 记录执行结果
         LoggerUtil.logExec(Level.INFO, "Fuzz4All执行完成, exitCode: " + exitCode + ", stamp: " + stamp);
         
-        if (!stdout.isEmpty()) {
-            LoggerUtil.logExec(Level.INFO, "Fuzz4All stdout: " + stdout);
-        }
-        
+//        if (!stdout.isEmpty()) {
+//            LoggerUtil.logExec(Level.INFO, "Fuzz4All stdout: " + stdout);
+//        }
+//
         if (!stderr.isEmpty()) {
             if (exitCode != 0) {
                 LoggerUtil.logExec(Level.WARNING, "Fuzz4All stderr: " + stderr);
