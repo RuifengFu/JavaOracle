@@ -1,6 +1,8 @@
 package edu.tju.ista.llm4test.execute;
 
+import edu.tju.ista.llm4test.baseline.Fuzz4All;
 import edu.tju.ista.llm4test.concurrent.ConcurrentExecutionManager;
+import edu.tju.ista.llm4test.config.GlobalConfig;
 import edu.tju.ista.llm4test.llm.OpenAI;
 import edu.tju.ista.llm4test.llm.tools.RootCauseOutputTool;
 import edu.tju.ista.llm4test.llm.tools.Tool;
@@ -442,11 +444,20 @@ public class TestCase {
 
     public void enhance() {
         try {
-            Map<String, Object> dataModel = new HashMap<>();
-            dataModel.put("testcase", getTestcaseWithLineNumber());
-            dataModel.put("apiDocs", apiDoc);
-            String prompt = PromptGen.generatePrompt("EnhanceTestCase", dataModel);
-            String text = OpenAI.ThinkingModel.messageCompletion(prompt, 0.3, false);
+            String text;
+
+            // 检查是否启用Fuzz4All baseline模式
+            if (GlobalConfig.isBaselineFuzz4All()) {
+                LoggerUtil.logExec(Level.INFO, "Using Fuzz4All baseline for test case: " + file);
+                text = Fuzz4All.processTestCase(this);
+            } else {
+                Map<String, Object> dataModel = new HashMap<>();
+                dataModel.put("testcase", getTestcaseWithLineNumber());
+                dataModel.put("apiDocs", apiDoc);
+                String prompt = PromptGen.generatePrompt("EnhanceTestCase", dataModel);
+                text = OpenAI.ThinkingModel.messageCompletion(prompt, 0.3, false);
+            }
+
             ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
 
             if (codeBlocks.isEmpty()) {
@@ -455,7 +466,7 @@ public class TestCase {
                 String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
                 applyChange(generatedCode);
             }
-            
+
             // 增强后重新计算API文档，因为可能引入了新的API调用
             recalculateApiDocs();
 
@@ -491,7 +502,7 @@ public class TestCase {
      */
     public String createTempDirectory(String jdkName) {
         // 动态生成执行上下文信息
-        long threadId = Thread.currentThread().getId();
+        long threadId = Thread.currentThread().threadId();
         long timestamp = System.nanoTime();
         
         String dirName = String.format("tmp/jtreg_%s_%s_%d_%d", 

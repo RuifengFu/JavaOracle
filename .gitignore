@@ -5,3 +5,4 @@
 !models.json
 !README.md
 !.gitignore
+!fuzz4all/config/base.yaml

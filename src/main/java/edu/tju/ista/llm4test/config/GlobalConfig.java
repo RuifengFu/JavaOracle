@@ -397,6 +397,20 @@ public class GlobalConfig {
     public static boolean isIncludeApiDocs() {
         return ConfigUtil.getBoolean("includeApiDocs", DEFAULT_INCLUDE_API_DOCS);
     }
+
+    /**
+     * 是否启用Fuzz4All baseline模式
+     */
+    public static boolean isBaselineFuzz4All() {
+        return ConfigUtil.getBoolean("baseline_fuzz4all", false);
+    }
+
+    /**
+     * 获取Fuzz4All conda Python路径
+     */
+    public static String getFuzz4AllPythonPath() {
+        return ConfigUtil.getOrDefault("fuzz4all_python_path", "/root/miniconda3/envs/fuzz4all/bin/python");
+    }
     
     // --- API Configuration ---
     

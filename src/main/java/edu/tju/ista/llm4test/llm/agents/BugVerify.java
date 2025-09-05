@@ -359,7 +359,13 @@ public class BugVerify extends Agent {
         Path sourceTestCaseDir = Paths.get(bugReportPath, "testcase", testCaseName);
         Path verifyContextPath = sourceTestCaseDir.resolve(verifyContextFolder);
 
-        // 0. TestCase Reproduce & reduce - 在完整环境中进行约简（精简实现）
+        // 先进行增强验证
+        boolean isBug = this.enhanceVerify();
+        if (!isBug) {
+            return false;
+        }
+
+        // 1. TestCase Reproduce & reduce - 在完整环境中进行约简（精简实现）
         if (this.testCase != null && this.testCase.getResult() != null && this.testCase.getResult().isFail() && this.sharedVerifyDir != null) {
             logWithTestCase("Verified failure detected. Preparing shared verify environment for minimization: " + testCase.name);
             MinimizationPrepResult prep = prepareMinimizationIfNeeded(verifyContextPath);
@@ -403,11 +409,6 @@ public class BugVerify extends Agent {
             logWithTestCase(Level.WARNING, "Shared verify directory not set, skipping minimization.");
         }
 
-        // 先进行约简，再做增强验证
-        boolean isBug = this.enhanceVerify();
-        if (!isBug) {
-            return false;
-        }
         LoggerUtil.logVerify(Level.INFO, "Test case is a confirmed bug, proceeding to analysis: " + testCaseName);
         logWithTestCase("开始Bug验证流程");
 
@@ -497,7 +498,7 @@ public class BugVerify extends Agent {
                         fileName = "WrongFormatReport.md";
                         reportDir = sourceTestCaseDir;
                         if (reportContent != null && !reportContent.isEmpty()) {
-                            if (reportContent.contains("BugReport")) {
+                            if (reportContent.contains("BugReport") || reportContent.contains("BUG REPORT")) {
                                 fileName = "BugReport.md";
                                 if (Files.exists(sourceTestCaseDir)) {
                                     try {
@@ -512,6 +513,8 @@ public class BugVerify extends Agent {
                                 reportDir = targetBugDir;
                             } else if (reportContent.contains("Test Case Issue Analysis") || reportContent.contains("Test Case Error Analysis")) {
                                 fileName = "TestCaseErrorAnalysis.md";
+                            } else {
+                                reportContent += "Report Type: " + bugType + "\n\n";
                             }
                         }
                         LoggerUtil.logExec(Level.WARNING, "Unknown bug_type in report JSON: " + bugType);
@@ -618,7 +621,8 @@ public class BugVerify extends Agent {
         boolean isBugConfirmedByMajority = bugVerificationCount >= TOTAL_VERIFICATIONS;
         
         if (!isBugConfirmedByMajority) {
-            if (bugVerificationCount >= TOTAL_VERIFICATIONS - 1 && retries > 0) {
+//            if (bugVerificationCount >= TOTAL_VERIFICATIONS - 1 && retries > 0) {
+            if (retries > 0) {
                 // 接近多数票，尝试重试以提升召回
                 LoggerUtil.logVerify(Level.INFO, header,
                     "Majority not reached (" + bugVerificationCount + "/" + TOTAL_VERIFICATIONS + ") — retrying. Retries remaining: " + retries);
@@ -626,7 +630,7 @@ public class BugVerify extends Agent {
             }
 
             // 不重试：要么票数差距较大，要么已无剩余重试次数
-            if (retries < 0) {
+            if (retries <= 0) {
                 LoggerUtil.logVerify(Level.INFO, header,
                     "Majority not reached (" + bugVerificationCount + "/" + TOTAL_VERIFICATIONS + ") — no retries left. Finalizing as TESTCASE_ISSUE.");
             } else {
@@ -902,7 +906,7 @@ public class BugVerify extends Agent {
     private String performInitialAnalysis() {
         try {
             String prompt = PromptGen.generateBugVerifyInitialAnalysisPrompt(testCode, testOutput, initialAnalysis);
-            String response = llm.messageCompletion(prompt, 0.5, true);
+            String response = llm.messageCompletion(prompt, 0.6, true);
             return filterThinkingChain(response);
         } catch (TemplateException | IOException e) {
             LoggerUtil.logExec(Level.SEVERE, "生成初始分析prompt失败: " + e.getMessage());
@@ -1213,7 +1217,8 @@ public class BugVerify extends Agent {
             
             String reportJson = "";
             String feedback = "";
-            for (int i = 0; i < 3; i++) {
+            int REVIEW_ITERATIONS = 3;
+            for (int i = 0; i <= REVIEW_ITERATIONS; i++) {
                 logWithTestCase("Generating report, iteration " + (i + 1));
                 
                 reportJson = generateReportWithConfig(hypotheses, verificationResults, config, reportJson, feedback);
@@ -1223,16 +1228,16 @@ public class BugVerify extends Agent {
                     ObjectMapper objectMapper = new ObjectMapper();
                     JsonNode rootNode = objectMapper.readTree(reportJson);
                     String bugType = rootNode.path("bug_type").asText("UNKNOWN");
-//                    if ("TESTCASE_ERROR".equals(bugType) || "UNCLEAR".equals(bugType)) {
-//                        logWithTestCase("在迭代 " + (i + 1) + " 中检测到TESTCASE_ERROR/UNCLEAR，停止迭代优化。");
-//                        break;
-//                    }
+                    if ("TESTCASE_ERROR".equals(bugType) || "UNCLEAR".equals(bugType)) {
+                        logWithTestCase("在迭代 " + (i + 1) + " 中检测到TESTCASE_ERROR/UNCLEAR，停止迭代优化。");
+                        break;
+                    }
                 } catch (IOException e) {
                     logWithTestCase(Level.WARNING, "在迭代优化期间解析报告JSON失败: " + e.getMessage());
                 }
                 
                 // After the last iteration, no need to review.
-                if (i < 2) {
+                if (i < REVIEW_ITERATIONS) {
                     logWithTestCase("Reviewing report, iteration " + (i + 1));
                     feedback = reviewReport(reportJson, i + 1);
                     
@@ -1305,14 +1310,109 @@ public class BugVerify extends Agent {
                 }
             }
 
-            // Call LLM for review
-            String feedback = OpenAI.AgentModel.messageCompletion(prompt, 0.3, false);
+            // Call LLM for review via toolcall, reusing InformationCollectionAgent's tools
+            ArrayList<Tool<?>> tools = new ArrayList<>();
+            if (this.infoCollectionAgent != null) {
+                Tool<String> st = this.infoCollectionAgent.getSourceTool();
+                Tool<String> jt = this.infoCollectionAgent.getJavadocTool();
+                if (st != null) tools.add(st);
+                if (jt != null) tools.add(jt);
+            }
+
+            var reviewResult = llm.toolCallWithContent(prompt, tools);
+            appendToFile(verifyContextPath.resolve("review_toolcall.json").toString(), reviewResult.toolCalls().toString());
+            String feedback = reviewResult.content();
+
+            // Process any tool calls made during review and add results to collectedInfo
+            processReviewToolCalls(reviewResult.toolCalls(), tools);
+            
             logWithTestCase("Review feedback received for iteration " + iteration);
             return feedback;
 
         } catch (TemplateException | IOException e) {
             logWithTestCase(Level.SEVERE, "Error generating review prompt or reviewing report: " + e.getMessage());
             return "Error during review process: " + e.getMessage();
+        }
+    }
+    
+    /**
+     * Process tool calls made during review and add results to collectedInfo
+     */
+    private void processReviewToolCalls(List<ToolCall> toolCalls, List<Tool<?>> tools) {
+        if (toolCalls == null || toolCalls.isEmpty()) return;
+
+        logWithTestCase("Processing " + toolCalls.size() + " tool calls from review");
+        for (ToolCall toolCall : toolCalls) {
+            // Find the corresponding tool and execute it
+            Tool<String> tool = findToolByName(tools, toolCall.toolName);
+            if (tool != null) {
+                try {
+                    ToolResponse<String> response = tool.execute(toolCall.arguments);
+                    if (response.isSuccess()) {
+                        addReviewToolResult(response.getResult(), toolCall);
+                    }
+                } catch (Exception e) {
+                    logWithTestCase(Level.WARNING, "Review tool execution failed: " + e.getMessage());
+                }
+            }
+        }
+    }
+
+    /**
+     * Find tool by name from the tools list
+     */
+    @SuppressWarnings("unchecked")
+    private Tool<String> findToolByName(List<Tool<?>> tools, String toolName) {
+        for (Tool<?> tool : tools) {
+            if (tool.getName().equals(toolName)) {
+                return (Tool<String>) tool;
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * Add review tool call result to collectedInfo (reuse existing format logic)
+     */
+    private void addReviewToolResult(String content, ToolCall toolCall) {
+        if (content == null || content.isEmpty()) return;
+        
+        String searchType = (String) toolCall.arguments.get("search_type");
+        String prefix = toolCall.toolName.contains("SourceCode") ? "SOURCE" : "JAVADOC";
+        String title = generateToolTitle(searchType, toolCall.arguments);
+        String infoId = "REVIEW_" + prefix + "_" + System.currentTimeMillis();
+        
+        infoSourceMap.put(infoId, title);
+        
+        StringBuilder formattedContent = new StringBuilder();
+        formattedContent.append("[").append(infoId).append(" 来源: ").append(title).append("]\n");
+        formattedContent.append("相关性得分: 0.95\n");
+        formattedContent.append("信息类型: ").append(prefix.equals("SOURCE") ? "SOURCE_CODE" : "JAVADOC").append("\n");
+        formattedContent.append("内容大小: ").append(content.length()).append(" 字符\n\n");
+        formattedContent.append("=== 完整内容 ===\n");
+        formattedContent.append(content);
+        formattedContent.append("\n=== 内容结束 ===\n");
+        
+        collectedInfo.put(infoId, formattedContent.toString());
+        logWithTestCase("Added review tool result: " + title + " (size: " + content.length() + ")");
+    }
+    
+    /**
+     * Generate title for tool results (reuse InformationCollectionAgent logic)
+     */
+    private String generateToolTitle(String searchType, Map<String, Object> args) {
+        if (searchType == null) return "Unknown Search";
+        switch (searchType) {
+            case "by_class":
+                return "Class: " + args.get("class_name");
+            case "by_method":
+                return "Method: " + args.get("class_name") + "." + args.get("method_name");
+            case "by_keyword":
+                return "Keyword: " + args.get("keyword");
+            case "by_package":
+                return "Package: " + args.get("package_name");
+            default:
+                return "Search: " + searchType;
         }
     }
     
@@ -1385,7 +1485,7 @@ public class BugVerify extends Agent {
             // 保存prompt到文件
             savePromptToFile(prompt, config);
             
-            String reportJson = OpenAI.AgentModel.messageCompletion(prompt, 0.3, true);
+            String reportJson = OpenAI.ThinkingModel.messageCompletion(prompt, 0.3, true);
 
             // 检查并修复JSON
             int maxRetries = 3;

@@ -22,7 +22,7 @@ ${reportContent}
 
 ---
 Review Task:
-Perform a critical, stability-aware review of the "Current Bug Report Draft" to precisely separate what is correct vs. wrong, attempt to correct errors first, and only consider reversing the conclusion if correction fails under strict change-control.
+Perform a critical, stability-aware review of the "Current Bug Report Draft" to separate correct vs. weak/incorrect parts, surface potential logical issues, and propose precise corrections. 
 
 Core Review Dimensions (apply rigorously; quote sources):
 1.  **Logical Soundness & Flaws**: Check reasoning from evidence to conclusion; flag logical leaps and fallacies. Consider whether simpler explanations exist.
@@ -33,26 +33,19 @@ Core Review Dimensions (apply rigorously; quote sources):
 6.  **Evidence Traceability**: Every claim must map to Test Case / Test Output / Information Sources. Quote exact lines/snippets.
 7.  **Documentation Specificity**: Ensure the documentation referenced corresponds to the exact method signature (including parameter types and class) being invoked. Be cautious with overloaded or overridden methods, as they may have different specifications.
 
-Stability & Change Control Policy:
-- Do NOT recommend changing `bug_type` unless one of the following holds:
-  1) New decisive evidence from the provided sources is surfaced that was not used before; or
-  2) A previously decisive premise is explicitly falsified (quote it and the refutation).
-- If evidence remains insufficient or equivocal after attempted corrections, keep the current `bug_type` or mark the verdict as "Inconclusive" instead of flipping.
-- Default conservatively: without a concrete spec violation or a minimal reproducible case beyond the test harness, avoid concluding `JDK_BUG`.
+Logic Pitfalls Checklist (use proactively; quote sources):
+- Causation vs correlation: observed failures do not by themselves prove a spec violation.
+- Preconditions unmet: missing initialization, wrong encoding/locale/timezone, concurrency or ordering assumptions, determinism, security or file permissions.
+- Overload/override/spec mismatch: cited docs must match the most specific class and method signature.
+- Cherry‑picking output: do not ignore contradictory lines; account for earlier errors and suppressed causes.
+- Assertion vs spec: assertions must reflect what the spec actually guarantees.
+- Missing minimal repro: heavy harness/side effects may confound; isolate the minimal trigger.
+- Environment/tooling interference: JIT/GC/flags/containers/locales/filesystems/clocks/randomness.
+- Nondeterminism/flakiness: timeouts, races, ordering, seeds.
+- Incomplete error reading: misattributed stack frames, suppressed/caused‑by chains.
+- Version/spec drift: referencing a different version/vendor.
 
-Correction‑First Workflow (do this in order):
-1) **Triage – Separate Correct vs Wrong vs Uncertain**
-   - List what is correct in the draft (with quotes and why it’s correct).
-   - List what is wrong (with quotes, why it’s wrong, and the specific violated principle/evidence).
-   - List what is uncertain/underspecified (what is missing to decide).
-2) **Attempt Minimal Corrections (keep current `bug_type`)**
-   - Propose precise edits to fix the wrong parts while preserving the current conclusion when logically possible.
-   - Provide corrected statements or revised reasoning grounded in evidence.
-3) **If Corrections Fail, then Reverse‑Thinking**
-   - Only if the conclusion still cannot be supported after corrections, analyze the alternative hypothesis (switching `bug_type`).
-   - Compare both hypotheses with the checklist and only recommend change if the alternative clearly dominates.
-
-Dual‑Hypothesis Checklist (score 0–5 each; justify briefly):
+Dual‑Hypothesis Diagnostic Checklist (score 0–5 each; justify briefly):
 - TESTCASE_ERROR:
   - Test setup/preconditions or mocks incorrect?
   - Assertions match the specification?
@@ -66,22 +59,30 @@ Dual‑Hypothesis Checklist (score 0–5 each; justify briefly):
   - Competing test/environment factors ruled out?
   - Consistent with full test output (no unexplained lines)?
 
-Decision Rule:
-- Sum scores per hypothesis. If the difference < 1 or decisive evidence is missing, do NOT change `bug_type` (prefer keeping current or mark "Inconclusive").
-- If recommending a change, you MUST identify either new decisive evidence or a falsified prior premise (quote both) and explain why corrections could not salvage the original conclusion.
+Scope & Policy:
+- If evidence remains insufficient or equivocal after attempted corrections, record it under "Uncertain / Missing Information" and specify required evidence.
+- Focus on correcting reasoning and evidence mapping rather than changing the verdict.
+
+Correction‑First Workflow (do this in order):
+1) **Triage – Separate Correct vs Wrong vs Uncertain**
+   - List what is correct in the draft (with quotes and why it’s correct).
+   - List what is wrong (with quotes, why it’s wrong, and the specific violated principle/evidence).
+   - List what is uncertain/underspecified (what is missing to decide).
+2) **Attempt Minimal Corrections (keep current `bug_type`)**
+   - Propose precise edits to fix the wrong parts while preserving the current conclusion when logically possible.
+   - Provide corrected statements or revised reasoning grounded in evidence.
+3) **Logic Pitfalls Sweep**
+   - Run the Logic Pitfalls Checklist; for each triggered item, note the risk and the precise evidence or what is missing.
+
+
 
 Output Format (Markdown):
 
-### Summary
-- Current `bug_type`: <copy from draft>
-- Change recommended: Yes/No
-- If change: New `bug_type`: <JDK_BUG | TESTCASE_ERROR>
-- Confidence: Low / Medium / High
 
 ### Correct Parts
 - Quote each correct statement and cite the supporting evidence.
 
-### Incorrect Parts (with fixes first)
+### Weaknesses & Errors (with fixes first)
 - For each incorrect point: quote it, explain why it’s wrong (with evidence), and provide the corrected wording/reasoning.
 
 ### Uncertain / Missing Information
@@ -90,16 +91,15 @@ Output Format (Markdown):
 ### Attempted Corrections (kept current `bug_type`)
 - Bullet the concrete edits that would fix the draft without changing the conclusion.
 
-### Reverse Analysis (only if corrections fail)
-- Alternative hypothesis: <...>
-- Key evidence supporting it and contradictions to the original.
-
-### Dual‑Hypothesis Evaluation
+### Dual‑Hypothesis Evaluation (diagnostic)
 - TESTCASE_ERROR score (0–5 each, total=X): <bullets with justifications>
 - JDK_BUG score (0–5 each, total=Y): <bullets with justifications>
 
-### Decision and Rationale
-- Decision: Keep current / Change to <...> / Inconclusive
-- Why now: State the NEW decisive evidence or the falsified premise; if none, explicitly say none and keep prior.
+### Logic Risk Flags
+- List triggered items from the Logic Pitfalls Checklist with brief justifications and citations.
 
-Your feedback must be direct and actionable. For every wrong part, state what is wrong, why it is wrong, and provide a concrete correction before considering a reversal. Only recommend flipping `bug_type` if corrections cannot restore validity and the alternative hypothesis clearly outranks under the checklist and decision rule.
+### Summary
+- Current `bug_type`: <copy from draft>
+- Convince: Low / Medium / High
+
+Your feedback must be direct and actionable. For every weak or wrong part, state what is wrong, why (with evidence), and provide a concrete correction. Do not recommend changing the conclusion or `bug_type`; focus on pinpointing issues and fixes.

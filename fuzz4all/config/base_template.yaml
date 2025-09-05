@@ -1,0 +1,27 @@
+fuzzing:
+  output_folder: "{OUTPUT_FOLDER}"
+  num: 1
+  total_time: 1
+  log_level: 3
+  otf: true
+  resume: false
+  evaluate: false
+  use_hand_written_prompt: false
+  no_input_prompt: false
+  prompt_strategy: 2
+
+target:
+  language: java
+  path_documentation: "{PATH_DOCUMENTATION}"
+  path_example_code: "{PATH_EXAMPLE_CODE}"
+  trigger_to_generate_input: "write a complex test case."
+  input_hint: ""
+  path_hand_written_prompt:
+  target_string: ""
+
+llm:
+  model_name: "deepseek-reasoner"
+  temperature: 0.3
+  batch_size: 1
+  device: cuda
+  max_length: 8192

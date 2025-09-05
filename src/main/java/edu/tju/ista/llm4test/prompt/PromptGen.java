@@ -56,7 +56,7 @@ public class PromptGen {
             TEMPLATE_MAP.put("ApiTest", loadResourceAsString("/prompt/ApiTest.txt"));
             TEMPLATE_MAP.put("FixTestCase", loadResourceAsString("/prompt/FixTestCase.txt"));
             TEMPLATE_MAP.put("ApplyChange", loadResourceAsString("/prompt/ApplyChange.txt"));
-            TEMPLATE_MAP.put("RootCause", loadResourceAsString("/prompt/RootCause.txt"));
+            TEMPLATE_MAP.put("RootCause", loadResourceAsString("/prompt/RootCauseV1.txt"));
             TEMPLATE_MAP.put("jdk_doc_conformance_check", loadResourceAsString("/prompt/jdkDocConformanceCheck.txt"));
             
             // BugVerify相关模板

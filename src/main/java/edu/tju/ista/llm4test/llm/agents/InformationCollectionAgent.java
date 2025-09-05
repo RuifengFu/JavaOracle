@@ -70,6 +70,15 @@ public class InformationCollectionAgent extends Agent {
 
         this.objectMapper = new ObjectMapper();
     }
+
+    // Expose internal tools for reuse by other agents (e.g., BugVerify)
+    public Tool<String> getSourceTool() {
+        return this.sourceTool;
+    }
+
+    public Tool<String> getJavadocTool() {
+        return this.javadocTool;
+    }
     
     /**
      * Collect relevant information - main entry method
@@ -279,8 +288,8 @@ public class InformationCollectionAgent extends Agent {
             collectWithTool(javadocTool, buildJavaDocPrompt(analysis, testCode), "JAVADOC");
         }
         
-        // 3. Simple Web search (if there is space)
-        collectWebInfo(analysis, testCode, testOutput);
+        // 3. Simple Web search (if there is space) not really useful
+        //collectWebInfo(analysis, testCode, testOutput);
         
     }
     
