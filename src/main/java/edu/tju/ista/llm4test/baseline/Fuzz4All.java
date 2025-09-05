@@ -84,7 +84,10 @@ public class Fuzz4All {
             // 4. 执行Fuzz4All命令
             String result = executeFuzz4AllCommand(configFilePath, outputFolder, stamp);
             
-            // 5. 清理临时文件
+            // 5. 处理jtreg标签
+            result = processJtregTags(result, testCase);
+            
+            // 6. 清理临时文件
             cleanupTempFiles(docFilePath, configFilePath);
             
             LoggerUtil.logExec(Level.INFO, "Fuzz4All处理完成，stamp: " + stamp);
@@ -219,16 +222,10 @@ public class Fuzz4All {
         int exitCode = process.exitValue();
         
         // 读取stdout和stderr
-        String stdout = readStream(process.getInputStream());
         String stderr = readStream(process.getErrorStream());
         
         // 记录执行结果
         LoggerUtil.logExec(Level.INFO, "Fuzz4All执行完成, exitCode: " + exitCode + ", stamp: " + stamp);
-        
-//        if (!stdout.isEmpty()) {
-//            LoggerUtil.logExec(Level.INFO, "Fuzz4All stdout: " + stdout);
-//        }
-//
         if (!stderr.isEmpty()) {
             if (exitCode != 0) {
                 LoggerUtil.logExec(Level.WARNING, "Fuzz4All stderr: " + stderr);
@@ -308,5 +305,176 @@ public class Fuzz4All {
             LoggerUtil.logExec(Level.SEVERE, "检查Fuzz4All可用性时出错: " + e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * 处理jtreg标签，如果缺少则自动添加
+     *
+     * @param code 测试代码
+     * @param testCase 测试用例对象
+     * @return 处理后的代码
+     */
+    private static String processJtregTags(String code, TestCase testCase) {
+        if (code == null || code.trim().isEmpty()) {
+            return code;
+        }
+        
+        try {
+            // 检查是否已经包含jtreg标签
+            if (hasJtregTags(code)) {
+                LoggerUtil.logExec(Level.FINE, "代码已包含jtreg标签，无需添加");
+                return code;
+            }
+            
+            // 检测使用的测试框架
+            String framework = detectTestFramework(code);
+            
+            // 获取类名
+            String className = extractClassName(code);
+            if (className == null) {
+                className = testCase.name;
+            }
+            
+            // 生成合适的jtreg标签
+            String jtregTags = generateJtregTags(framework, className, code);
+            
+            // 添加标签到代码中
+            String result = addJtregTags(code, jtregTags);
+            
+            LoggerUtil.logExec(Level.INFO, "自动添加jtreg标签: " + framework + " framework, class: " + className);
+            return result;
+            
+        } catch (Exception e) {
+            LoggerUtil.logExec(Level.WARNING, "处理jtreg标签时出错: " + e.getMessage());
+            return code; // 出错时返回原代码
+        }
+    }
+
+    /**
+     * 检查代码是否已包含jtreg标签
+     */
+    private static boolean hasJtregTags(String code) {
+        return code.contains("@test") || code.contains("@run") || code.contains("@summary") || code.contains("@library");
+    }
+
+    /**
+     * 检测使用的测试框架
+     */
+    private static String detectTestFramework(String code) {
+        // 检查import语句和注解
+        if (code.contains("import org.junit.jupiter.api.Test") || 
+            code.contains("import org.junit.jupiter.") ||
+            code.contains("@Test") && (code.contains("jupiter") || code.contains("JUnit5"))) {
+            return "junit5";
+        }
+        
+        if (code.contains("import org.junit.") && 
+            (code.contains("@Test") || code.contains("@Before") || code.contains("@After"))) {
+            return "junit4";
+        }
+        
+        if (code.contains("import org.testng.") || code.contains("@Test") && code.contains("testng")) {
+            return "testng";
+        }
+        
+        // 检查是否有main方法
+        if (code.contains("public static void main(")) {
+            return "main";
+        }
+        
+        // 如果有@Test注解但不确定框架，默认使用junit
+        if (code.contains("@Test")) {
+            return "junit4";
+        }
+        
+        return "main"; // 默认使用main方法运行
+    }
+
+    /**
+     * 从代码中提取类名
+     */
+    private static String extractClassName(String code) {
+        // 使用正则表达式匹配 public class ClassName
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("public\\s+class\\s+([A-Za-z_][A-Za-z0-9_]*)");
+        java.util.regex.Matcher matcher = pattern.matcher(code);
+        
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+        
+        return null;
+    }
+
+    /**
+     * 生成合适的jtreg标签
+     */
+    private static String generateJtregTags(String framework, String className, String code) {
+        StringBuilder tags = new StringBuilder();
+        
+        tags.append("/*\n");
+        tags.append(" * @test\n");
+        tags.append(" * @summary Auto-generated test case\n");
+        
+        switch (framework.toLowerCase()) {
+            case "junit4":
+                tags.append(" * @run junit ").append(className).append("\n");
+                break;
+            case "junit5":
+                tags.append(" * @run junit ").append(className).append("\n");
+                break;
+            case "testng":
+                tags.append(" * @run testng ").append(className).append("\n");
+                break;
+            case "main":
+            default:
+                tags.append(" * @run main ").append(className).append("\n");
+                break;
+        }
+        
+        tags.append(" */\n");
+        
+        return tags.toString();
+    }
+
+    /**
+     * 将jtreg标签添加到代码开头
+     */
+    private static String addJtregTags(String code, String jtregTags) {
+        // 查找package声明或import声明的位置
+        String[] lines = code.split("\n");
+        int insertIndex = 0;
+        
+        // 跳过开头的注释和空行
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i].trim();
+            if (line.isEmpty() || line.startsWith("//") || line.startsWith("/*") || line.startsWith("*") || line.equals("*/")) {
+                insertIndex = i + 1;
+            } else {
+                break;
+            }
+        }
+        
+        // 构建新的代码
+        StringBuilder result = new StringBuilder();
+        
+        // 添加前面的注释和空行
+        for (int i = 0; i < insertIndex; i++) {
+            result.append(lines[i]).append("\n");
+        }
+        
+        // 添加jtreg标签
+        result.append(jtregTags);
+        
+        // 如果有空行分隔，添加一个空行
+        if (insertIndex < lines.length) {
+            result.append("\n");
+        }
+        
+        // 添加剩余的代码
+        for (int i = insertIndex; i < lines.length; i++) {
+            result.append(lines[i]).append("\n");
+        }
+        
+        return result.toString();
     }
 }
