@@ -2,6 +2,7 @@ package edu.tju.ista.llm4test.baseline;
 
 import edu.tju.ista.llm4test.config.GlobalConfig;
 import edu.tju.ista.llm4test.execute.TestCase;
+import edu.tju.ista.llm4test.utils.CodeExtractor;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
 
 import java.io.*;
@@ -84,9 +85,9 @@ public class Fuzz4All {
             // 4. 执行Fuzz4All命令
             String result = executeFuzz4AllCommand(configFilePath, outputFolder, stamp);
             
-            // 5. 处理jtreg标签
-            result = processJtregTags(result, testCase);
-            
+            // 5. 提取和处理代码
+            result = extractAndProcessCode(result, testCase);
+
             // 6. 清理临时文件
             cleanupTempFiles(docFilePath, configFilePath);
             
@@ -304,6 +305,42 @@ public class Fuzz4All {
         } catch (Exception e) {
             LoggerUtil.logExec(Level.SEVERE, "检查Fuzz4All可用性时出错: " + e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * 从Fuzz4All输出中提取代码并处理jtreg标签
+     *
+     * @param fuzz4allOutput Fuzz4All的输出结果
+     * @param testCase 测试用例对象
+     * @return 处理后的代码
+     */
+    private static String extractAndProcessCode(String fuzz4allOutput, TestCase testCase) {
+        if (fuzz4allOutput == null || fuzz4allOutput.trim().isEmpty()) {
+            return "";
+        }
+
+        try {
+            // 提取代码块（类似TestCase.enhance()中的逻辑）
+            ArrayList<String> codeBlocks = CodeExtractor.extractCode(fuzz4allOutput);
+            String extractedCode;
+
+            if (codeBlocks.isEmpty()) {
+                // 如果没有找到代码块，直接使用原始输出
+                extractedCode = fuzz4allOutput;
+                LoggerUtil.logExec(Level.FINE, "未找到代码块，使用原始输出");
+            } else {
+                // 使用最后一个代码块（通常是最好的）
+                extractedCode = codeBlocks.get(codeBlocks.size() - 1);
+                LoggerUtil.logExec(Level.FINE, "提取到 " + codeBlocks.size() + " 个代码块，使用最后一个");
+            }
+
+            // 处理jtreg标签
+            return processJtregTags(extractedCode, testCase);
+
+        } catch (Exception e) {
+            LoggerUtil.logExec(Level.WARNING, "提取和处理代码时出错: " + e.getMessage());
+            return fuzz4allOutput; // 出错时返回原始输出
         }
     }
 

@@ -228,7 +228,7 @@ public class OpenAI {
         final long REQUEST_TIMEOUT_SECONDS = 1800;
 
         return HttpRequest.newBuilder()
-                .uri(URI.create(BASE_URL + "v1/chat/completions"))
+                .uri(URI.create(BASE_URL + "chat/completions"))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer " + API_KEY)
                 .timeout(Duration.ofSeconds(REQUEST_TIMEOUT_SECONDS)) // **关键修复：设置请求超时**

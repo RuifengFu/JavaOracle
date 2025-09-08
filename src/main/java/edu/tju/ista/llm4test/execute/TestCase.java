@@ -292,6 +292,9 @@ public class TestCase {
      * @return CompletableFuture<Void>，代表修复流程的完成
      */
     private CompletableFuture<Void> fixLoopAsync(TestResult currentResult, TestExecutor testExecutor, int attempt, int maxAttempts) {
+        // 更新当前测试用例的状态
+        this.setResult(currentResult);
+        LoggerUtil.logExec(Level.INFO, file + " is fixing: " + currentResult.getKind());
         // 终止条件 1: 测试不再失败，流程成功结束。
         if (!currentResult.isFail()) {
             LoggerUtil.logExec(Level.INFO, String.format("测试用例通过，停止修复流程 (TestCase: %s)", name));
@@ -304,21 +307,15 @@ public class TestCase {
             return verifyTestFailAsync();
         }
         
-        // 更新当前测试用例的状态
-        this.setResult(currentResult);
-        LoggerUtil.logExec(Level.INFO, file + " is fixing: " + currentResult.getKind());
+
 
         // --- 开始异步链式调用 ---
 
-        // Fuzz4All 模式下跳过验证步骤
+        // Fuzz4All 模式下跳过整个修复循环，直接返回当前结果
         if (GlobalConfig.isBaselineFuzz4All()) {
-            LoggerUtil.logExec(Level.INFO, String.format("Fuzz4All mode: skipping analysis for test case: %s", name));
-            // 直接进行修复流程
-            return fixAsync()
-                // 异步重新执行测试 (在CPU线程池中执行)
-                .thenCompose(v -> executeTestAsync(testExecutor))
-                // 将新结果传入，进行下一次循环（递归调用）
-                .thenCompose(newResult -> fixLoopAsync(newResult, testExecutor, attempt + 1, maxAttempts));
+            LoggerUtil.logExec(Level.INFO, String.format("Fuzz4All mode: skipping fix loop for test case: %s", name));
+            // 更新测试用例状态，但不进行修复循环
+            return CompletableFuture.completedFuture(null);
         }
 
         // 步骤 1: 异步验证失败原因 (在I/O线程池中执行)
@@ -481,30 +478,18 @@ public class TestCase {
                 text = OpenAI.ThinkingModel.messageCompletion(prompt, 0.3, false);
             }
 
-            // Fuzz4All 模式下也使用 CodeExtractor，但跳过 applyChange
-            if (isFuzz4AllMode) {
-                LoggerUtil.logExec(Level.INFO, "Fuzz4All output for test case: " + file + "\n" + text);
-                if (text != null && !text.trim().isEmpty()) {
-                    ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
-                    if (codeBlocks.isEmpty()) {
-                        writeTestCaseToFile(text);
-                    } else {
-                        String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
-                        writeTestCaseToFile(generatedCode);
-                    }
-                    LoggerUtil.logExec(Level.INFO, "Applied Fuzz4All result directly to test case: " + file);
+            // 统一处理所有模式的输出
+            ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
 
-                }
+            if (codeBlocks.isEmpty()) {
+                writeTestCaseToFile(text);
             } else {
-                // 正常模式下的处理
-                ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
+                String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
+                writeTestCaseToFile(generatedCode);
+            }
 
-                if (codeBlocks.isEmpty()) {
-                    applyChange(text);
-                } else {
-                    String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
-                    applyChange(generatedCode);
-                }
+            if (isFuzz4AllMode) {
+                LoggerUtil.logExec(Level.INFO, "Applied Fuzz4All result directly to test case: " + file);
             }
 
             // 增强后重新计算API文档，因为可能引入了新的API调用

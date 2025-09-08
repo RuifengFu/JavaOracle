@@ -34,7 +34,7 @@ public class TestStatistics {
                         "\nVerified Test Fail: " + counter.get(TestResultKind.VERIFIED_BUG) +
                         "\nUnverified Test Fail " + counter.get(TestResultKind.MAYBE_TEST_FAIL) +
                         "\nCompile Failed: " + compilationFailed.get() +
-                        "\nExecute Failed: " + (counter.get(TestResultKind.VERIFIED_BUG) + counter.get(TestResultKind.MAYBE_TEST_FAIL) - compilationFailed.get()) +
+                        "\nExecute Failed: " + (counter.get(TestResultKind.VERIFIED_BUG) + counter.get(TestResultKind.MAYBE_TEST_FAIL) + counter.get(TestResultKind.TEST_FAIL) + counter.get(TestResultKind.WRONG_FORMAT) + counter.get(TestResultKind.EXECUTE_ERROR) - compilationFailed.get()) +
                         "\nExecute Error: " + counter.get(TestResultKind.EXECUTE_ERROR) +
                         "\nWrong Format: " + counter.get(TestResultKind.WRONG_FORMAT) +
                         "\nDiff: " + counter.get(TestResultKind.DIFF) +
