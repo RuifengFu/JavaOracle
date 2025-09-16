@@ -99,6 +99,7 @@ public class BugVerify extends Agent {
     private String testOutput;
     private String initialAnalysis;
     private Map<String, Object> collectedInfo = new HashMap<>();
+    private Boolean enhancePassed = null;
 
     private String enhanceVerifyFailureReason = "Unknown";
     
@@ -359,13 +360,17 @@ public class BugVerify extends Agent {
         Path sourceTestCaseDir = Paths.get(bugReportPath, "testcase", testCaseName);
         Path verifyContextPath = sourceTestCaseDir.resolve(verifyContextFolder);
 
-        // 先进行增强验证
-        boolean isBug = this.enhanceVerify();
-        if (!isBug) {
+        // 先进行增强验证（在消融模式下也执行，但不拦截后续步骤）
+        boolean ablationMode = edu.tju.ista.llm4test.config.GlobalConfig.isEnableAblationTest();
+        boolean isBug;
+        boolean enhanced = this.enhanceVerify();
+        this.enhancePassed = enhanced;
+        if (!ablationMode && !enhanced) {
             return false;
         }
+        isBug = true;
 
-        // 1. TestCase Reproduce & reduce - 在完整环境中进行约简（精简实现）
+        // 1. TestCase Reproduce & reduce - 在完整环境中进行约简（必要时执行一次，供需要使用约简结果的配置复用）
         if (this.testCase != null && this.testCase.getResult() != null && this.testCase.getResult().isFail() && this.sharedVerifyDir != null) {
             logWithTestCase("Verified failure detected. Preparing shared verify environment for minimization: " + testCase.name);
             MinimizationPrepResult prep = prepareMinimizationIfNeeded(verifyContextPath);
@@ -422,10 +427,9 @@ public class BugVerify extends Agent {
 
 
         
-        // 2. 收集信息
+        // 2. 收集信息（执行一次，供配置选择是否使用）
         collectRelevantInformation(initialInsight);
         logWithTestCase("信息收集完成，共 " + collectedInfo.size() + " 项");
-        
         // 保存收集到的信息
         saveCollectedInfo();
         List<String> hypotheses = new ArrayList<>();
@@ -1138,16 +1142,12 @@ public class BugVerify extends Agent {
         boolean enableAblationTest = edu.tju.ista.llm4test.config.GlobalConfig.isEnableAblationTest();
         
         if (enableAblationTest) {
-            LoggerUtil.logExec(Level.INFO, "开始消融实验：生成3个配置组合");
+            LoggerUtil.logExec(Level.INFO, "开始消融实验：使用用户指定的无约简/无信息/跳过增强/无审阅配置");
             
-            // 定义消融实验配置：移除Hypothesis选项，仅保留信息源、约简及API文档切换
-            List<AblationConfig> configs = Arrays.asList(
-                new AblationConfig(true, true, true, 1),   // 完整配置 (信息源+约简+API)
-                new AblationConfig(false, true, true, 2),  // 无信息源
-                new AblationConfig(true, false, true, 3)  // 无约简
-            );
+            // 构建配置集合（并行执行）
+            List<AblationConfig> configs = buildAblationConfigs();
             
-            // 并行执行3个配置
+            // 并行执行多配置（包含基准+若干单因素消融）
             var manager = ConcurrentExecutionManager.getInstance();
             List<CompletableFuture<AblationResult>> futures = new ArrayList<>();
             
@@ -1155,12 +1155,12 @@ public class BugVerify extends Agent {
                 CompletableFuture<AblationResult> future = manager.submitLLMTask(() -> {
                     try {
                         String result = generateReportWithConfig(hypotheses, verificationResults, config);
-                        LoggerUtil.logExec(Level.INFO, "消融实验配置 " + config.id + " 完成");
+                        LoggerUtil.logExec(Level.INFO, "消融实验配置 " + config.id + " 完成: " + config.name);
                         return new AblationResult(config, result);
                     } catch (Exception e) {
                         LoggerUtil.logExec(Level.WARNING, "消融实验配置 " + config.id + " 失败: " + e.getMessage());
                         return new AblationResult(config, 
-                            "{\"bug_type\": \"ABLATION_ERROR\", \"report\": \"配置 " + config.id + " 执行失败\"}");
+                            "{\"bug_type\": \"ABLATION_ERROR\", \"report\": \"配置 " + config.id + " (" + config.name + ") 执行失败\"}");
                     }
                 });
                 futures.add(future);
@@ -1176,40 +1176,47 @@ public class BugVerify extends Agent {
             
             saveAblationResults(results);
             
-            // 新增：保存消融实验状态到单独文件
-            StringBuilder ablationStatus = new StringBuilder();
-            for (AblationResult r : results) {
-                try {
-                    JsonNode node = new ObjectMapper().readTree(r.result);
-                    String bugType = node.path("bug_type").asText("UNKNOWN");
-                    ablationStatus.append("Config ").append(r.config.id).append(": ").append(bugType).append("\n");
-                } catch (Exception e) {
-                    ablationStatus.append("Config ").append(r.config.id).append(": 解析错误\n");
-                }
-            }
-            // 保存消融实验状态为CSV并追加
-            Path ablationCsv = GLOBAL_RESULT_DIR.resolve("ablation_status.csv");
+            // 输出统一 CSV 到 result 目录：ablation_results.csv
+            Path ablationResultsCsv = GLOBAL_RESULT_DIR.resolve("ablation_results.csv");
             try {
-                boolean exists = Files.exists(ablationCsv);
+                boolean exists = Files.exists(ablationResultsCsv);
                 if (!exists) {
-                    appendToFile(ablationCsv.toString(), "TestCase,ConfigId,BugType,Timestamp\n");
+                    String header = "TestCase,ConfigId,ConfigName,BugType,SkipEnhance,SkipReview,UseMinimized,IncludeInfoSource,IncludeApiDocs,Timestamp\n";
+                    appendToFile(ablationResultsCsv.toString(), header);
                 }
                 String identifier = getTestCaseIdentifier();
                 String timestamp = GLOBAL_RESULT_TIMESTAMP;
-                for (String line : ablationStatus.toString().split("\n")) {
-                    // line format: Config <id>: <bugType>
-                    String[] parts = line.replace("Config ","").split(": ");
-                    String id = parts[0].trim();
-                    String bugType = parts.length>1?parts[1].trim():"UNKNOWN";
-                    String csvLine = String.format("%s,%s,%s,%s\n", identifier, id, bugType, timestamp);
-                    appendToFile(ablationCsv.toString(), csvLine);
+                ObjectMapper objectMapper = new ObjectMapper();
+                for (AblationResult r : results) {
+                    String bugType = "UNKNOWN";
+                    try {
+                        JsonNode node = objectMapper.readTree(r.result);
+                        bugType = node.path("bug_type").asText("UNKNOWN");
+                    } catch (Exception ignore) {}
+                    String csvLine = String.format("\"%s\",%d,\"%s\",%s,%b,%b,%b,%b,%b,%s\n",
+                        identifier,
+                        r.config.id,
+                        r.config.name,
+                        bugType,
+                        r.config.skipEnhanceVerify,
+                        r.config.skipReview,
+                        r.config.useMinimizedTestcase,
+                        r.config.includeInfoSource,
+                        r.config.includeApiDocs,
+                        timestamp);
+                    appendToFile(ablationResultsCsv.toString(), csvLine);
                 }
             } catch (Exception e) {
-                logWithTestCase(Level.WARNING, "写入消融实验CSV失败: " + e.getMessage());
+                logWithTestCase(Level.WARNING, "写入 ablation_results.csv 失败: " + e.getMessage());
             }
             
-            // 返回第一个配置的结果
-            return results.get(0).result;
+            // 返回基线配置的结果
+            String baseline = results.stream()
+                .filter(r -> r.config.id == 0)
+                .map(r -> r.result)
+                .findFirst()
+                .orElse(results.get(0).result);
+            return baseline;
         } else {
             // 非消融实验，使用原有配置
             boolean includeInfoSource = edu.tju.ista.llm4test.config.GlobalConfig.isIncludeInfoSource();
@@ -1217,7 +1224,7 @@ public class BugVerify extends Agent {
             boolean includeApiDocs = edu.tju.ista.llm4test.config.GlobalConfig.isIncludeApiDocs();
             
             AblationConfig config = new AblationConfig(includeInfoSource, 
-                useMinimizedTestcase, includeApiDocs, 0);
+                useMinimizedTestcase, includeApiDocs, false, false, "BASELINE_FULL", 0);
             
             String reportJson = "";
             String feedback = "";
@@ -1264,6 +1271,7 @@ public class BugVerify extends Agent {
      */
     private String reviewReport(String reportJson, int iteration) {
         logWithTestCase("Starting report review for iteration " + iteration);
+        // 注意：review 的跳过由 generateReportWithConfig 的配置层面控制
         if (reportJson == null || reportJson.trim().isEmpty()) {
             logWithTestCase(Level.WARNING, "Report for review is empty or null.");
             return "The previous report was empty. Please generate a complete bug report.";
@@ -1449,6 +1457,16 @@ public class BugVerify extends Agent {
         if (!config.useMinimizedTestcase && originalTestOutput != null) {
             actualTestOutput = originalTestOutput;
         }
+
+        // 根据配置跳过增强门槛（如果跳过增强且之前增强失败，也继续）
+        if (config.skipEnhanceVerify) {
+            writeVerifyStatus("EnhanceVerify", "SKIPPED_CONFIG", config.name);
+        } else {
+            if (Boolean.FALSE.equals(this.enhancePassed)) {
+                // 非跳过增强且增强失败，则直接返回“测试问题”报告
+                return "{\"bug_type\": \"TESTCASE_ERROR\", \"report\": \"Enhance verify failed; config requires enhance.\"}";
+            }
+        }
         
         // 构建验证结果
         StringBuilder resultsBuilder = new StringBuilder();
@@ -1463,9 +1481,9 @@ public class BugVerify extends Agent {
         // 构建假设信息：已移除Hypothesis选项，始终不输出hypotheses
         StringBuilder hypothesesBuilder = new StringBuilder(); // Hypotheses disabled
         
-        // 构建信息源内容
+        // 构建信息源内容（禁用信息收集时为空字符串）
         StringBuilder infoSourceBuilder = new StringBuilder();
-        if (config.includeInfoSource || config.includeApiDocs) {
+        if ((config.includeInfoSource || config.includeApiDocs)) {
             infoSourceBuilder.append("# 信息收集和分析过程\n\n");
             
             if (config.includeInfoSource) {
@@ -1484,7 +1502,10 @@ public class BugVerify extends Agent {
         try {
             String prompt = PromptGen.generateBugVerifyBugReportPrompt(
                 actualTestCode, actualTestOutput, hypothesesBuilder.toString(),
-                resultsBuilder.toString(), infoSourceBuilder.toString(), previousReport, feedback);
+                resultsBuilder.toString(), infoSourceBuilder.toString(),
+                // 跳过review时传入空 previousReport/feedback，使其只跑一次
+                config.skipReview ? "" : previousReport,
+                config.skipReview ? "" : feedback);
             
             // 保存prompt到文件
             savePromptToFile(prompt, config);
@@ -1542,13 +1563,21 @@ public class BugVerify extends Agent {
         final boolean includeInfoSource;
         final boolean useMinimizedTestcase;
         final boolean includeApiDocs;
+        final boolean skipEnhanceVerify;
+        final boolean skipReview;
+        final String name;
         final int id;
         
         AblationConfig(boolean includeInfoSource, 
-                      boolean useMinimizedTestcase, boolean includeApiDocs, int id) {
+                      boolean useMinimizedTestcase, boolean includeApiDocs,
+                      boolean skipEnhanceVerify, boolean skipReview,
+                      String name, int id) {
             this.includeInfoSource = includeInfoSource;
             this.useMinimizedTestcase = useMinimizedTestcase;
             this.includeApiDocs = includeApiDocs;
+            this.skipEnhanceVerify = skipEnhanceVerify;
+            this.skipReview = skipReview;
+            this.name = name;
             this.id = id;
         }
     }
@@ -1567,6 +1596,69 @@ public class BugVerify extends Agent {
     }
     
     /**
+     * 构建消融实验配置：
+     * - 不约简（useMinimizedTestcase=false）
+     * - 不信息收集（includeInfoSource=false）
+     * - 跳过增强验证（skipEnhanceVerify=true）
+     * - 不审阅（skipReview=true）
+     * 额外区分：是否包含API文档（includeApiDocs=true/false）
+     */
+    private List<AblationConfig> buildAblationConfigs() {
+        List<AblationConfig> list = new ArrayList<>();
+        // 0. 基线配置：不跳过任何步骤，使用默认全量流程
+        list.add(new AblationConfig(
+            true,  /* includeInfoSource */
+            true,  /* useMinimizedTestcase */
+            true,  /* includeApiDocs */
+            false, /* skipEnhanceVerify */
+            false, /* skipReview */
+            "BASELINE_FULL",
+            0
+        ));
+        // 1. 跳过增强验证
+        list.add(new AblationConfig(
+            true,
+            true,
+            true,
+            true,  /* skipEnhanceVerify */
+            false,
+            "SKIP_ENHANCE",
+            1
+        ));
+        // 2. 跳过约简（使用原始code/output）
+        list.add(new AblationConfig(
+            true,
+            false, /* useMinimizedTestcase */
+            true,
+            false,
+            false,
+            "NO_MINIMIZATION",
+            2
+        ));
+        // 3. 跳过信息收集（空信息源）
+        list.add(new AblationConfig(
+            false, /* includeInfoSource */
+            true,
+            true,
+            false,
+            false,
+            "NO_INFO",
+            3
+        ));
+        // 4. 跳过review：单次生成，不做迭代
+        list.add(new AblationConfig(
+            true,
+            true,
+            true,
+            false,
+            true,  /* skipReview */
+            "SKIP_REVIEW",
+            4
+        ));
+        return list;
+    }
+    
+    /**
      * 保存消融实验结果
      */
     private void saveAblationResults(List<AblationResult> results) {
@@ -1578,7 +1670,7 @@ public class BugVerify extends Agent {
             
             // 保存每个配置的结果
             for (AblationResult result : results) {
-                String fileName = "ablation_config_" + result.config.id + ".json";
+                String fileName = "ablation_config_" + result.config.id + "_" + sanitizeFilePart(result.config.name) + ".json";
                 saveToFile(ablationDir.resolve(fileName).toString(), result.result);
             }
             
@@ -1588,10 +1680,12 @@ public class BugVerify extends Agent {
             summary.append("共执行了 ").append(results.size()).append(" 个配置组合\n\n");
             
             for (AblationResult result : results) {
-                summary.append("## 配置 ").append(result.config.id).append("\n");
+                summary.append("## 配置 ").append(result.config.id).append(" - ").append(result.config.name).append("\n");
                 summary.append("- 包含信息源: ").append(result.config.includeInfoSource).append("\n");
                 summary.append("- 使用最小化测试用例: ").append(result.config.useMinimizedTestcase).append("\n");
                 summary.append("- 包含API文档: ").append(result.config.includeApiDocs).append("\n\n");
+                summary.append("- 跳过增强验证: ").append(result.config.skipEnhanceVerify).append("\n");
+                summary.append("- 跳过报告审阅: ").append(result.config.skipReview).append("\n\n");
             }
             
             saveToFile(ablationDir.resolve("ablation_summary.md").toString(), summary.toString());
@@ -1604,6 +1698,11 @@ public class BugVerify extends Agent {
         } catch (IOException e) {
             LoggerUtil.logExec(Level.WARNING, "保存消融实验结果失败: " + e.getMessage());
         }
+    }
+
+    private static String sanitizeFilePart(String name) {
+        if (name == null) return "noname";
+        return name.replaceAll("[^a-zA-Z0-9-_]", "_");
     }
     
     /**
@@ -1930,7 +2029,14 @@ public class BugVerify extends Agent {
             }
             this.setTestCase(testcase);
 
-            boolean isBug = this.enhanceVerify();
+            boolean isBug;
+            if (edu.tju.ista.llm4test.config.GlobalConfig.isEnableAblationTest()) {
+                logWithTestCase("Ablation mode: skipping enhanceVerify in verifyBugFromFile.");
+                writeVerifyStatus("EnhanceVerify", "SKIPPED", "Ablation mode (verifyBugFromFile)");
+                isBug = true;
+            } else {
+                isBug = this.enhanceVerify();
+            }
             if (isBug) {
                 LoggerUtil.logVerify(Level.INFO, "Test case is a confirmed bug, proceeding to analysis: " + testCaseName);
                 this.analyze();
