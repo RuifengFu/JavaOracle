@@ -494,6 +494,10 @@ public class BugVerify extends Agent {
                         fileName = "TestCaseErrorAnalysis.md";
                         reportDir = sourceTestCaseDir;
                         break;
+                    case "UNCLEAR":
+                        fileName = "UNCLEAR.md";
+                        reportDir = sourceTestCaseDir;
+                        break;
                     default:
                         fileName = "WrongFormatReport.md";
                         reportDir = sourceTestCaseDir;
@@ -546,7 +550,7 @@ public class BugVerify extends Agent {
     }
 
     public boolean enhanceVerify() {
-        return enhanceVerify(3);
+        return enhanceVerify(1);
     }
 
     /**
@@ -1228,8 +1232,8 @@ public class BugVerify extends Agent {
                     ObjectMapper objectMapper = new ObjectMapper();
                     JsonNode rootNode = objectMapper.readTree(reportJson);
                     String bugType = rootNode.path("bug_type").asText("UNKNOWN");
-                    if ("TESTCASE_ERROR".equals(bugType) || "UNCLEAR".equals(bugType)) {
-                        logWithTestCase("在迭代 " + (i + 1) + " 中检测到TESTCASE_ERROR/UNCLEAR，停止迭代优化。");
+                    if ("TESTCASE_ERROR".equals(bugType)) {
+                        logWithTestCase("在迭代 " + (i + 1) + " 中检测到TESTCASE_ERROR，停止迭代优化。");
                         break;
                     }
                 } catch (IOException e) {
