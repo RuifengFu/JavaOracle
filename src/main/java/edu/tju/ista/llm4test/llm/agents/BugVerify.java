@@ -1144,19 +1144,66 @@ public class BugVerify extends Agent {
         if (enableAblationTest) {
             LoggerUtil.logExec(Level.INFO, "开始消融实验：使用用户指定的无约简/无信息/跳过增强/无审阅配置");
             
-            // 构建配置集合（并行执行）
+            // 构建配置集合
             List<AblationConfig> configs = buildAblationConfigs();
+            AblationConfig baselineCfg = configs.stream().filter(c -> c.id == 0).findFirst().orElse(null);
+            AblationConfig skipReviewCfg = configs.stream().filter(c -> c.id == 4).findFirst().orElse(null);
             
-            // 并行执行多配置（包含基准+若干单因素消融）
+            // 先单独跑基线：执行完整审阅循环，并记录首轮与最终结果
+            String baselineFirst = "";
+            String baselineFinal = "";
+            if (baselineCfg != null) {
+                String reportJson = "";
+                String feedback = "";
+                int REVIEW_ITERATIONS = 3;
+                for (int i = 0; i <= REVIEW_ITERATIONS; i++) {
+                    logWithTestCase("[Ablation-Baseline] Generating report, iteration " + (i + 1));
+                    reportJson = generateReportWithConfig(hypotheses, verificationResults, baselineCfg, reportJson, feedback);
+                    if (i == 0) baselineFirst = reportJson;
+                    try {
+                        ObjectMapper objectMapper = new ObjectMapper();
+                        JsonNode rootNode = objectMapper.readTree(reportJson);
+                        String bugType = rootNode.path("bug_type").asText("UNKNOWN");
+                        if ("TESTCASE_ERROR".equals(bugType)) {
+                            logWithTestCase("[Ablation-Baseline] TESTCASE_ERROR detected at iteration " + (i + 1) + ", stop reviewing.");
+                            break;
+                        }
+                    } catch (IOException e) {
+                        logWithTestCase(Level.WARNING, "[Ablation-Baseline] Parse report JSON failed during review: " + e.getMessage());
+                    }
+                    if (i < REVIEW_ITERATIONS) {
+                        logWithTestCase("[Ablation-Baseline] Reviewing report, iteration " + (i + 1));
+                        feedback = reviewReport(reportJson, i + 1);
+                    }
+                }
+                baselineFinal = reportJson;
+            }
+            
+            // 并行执行其余配置（不包含基线与 SKIP_REVIEW）
             var manager = ConcurrentExecutionManager.getInstance();
             List<CompletableFuture<AblationResult>> futures = new ArrayList<>();
-            
             for (AblationConfig config : configs) {
+                if (config.id == 0 || config.id == 4) continue; // 跳过基线与 SKIP_REVIEW（后者由基线首轮结果替代）
                 CompletableFuture<AblationResult> future = manager.submitLLMTask(() -> {
                     try {
-                        String result = generateReportWithConfig(hypotheses, verificationResults, config);
+                        String reportJson = "";
+                        String feedback = "";
+                        int REVIEW_ITERATIONS = 3;
+                        for (int i = 0; i <= REVIEW_ITERATIONS; i++) {
+                            reportJson = generateReportWithConfig(hypotheses, verificationResults, config, reportJson, feedback);
+                            // 对于需要增强门槛的配置，如果增强失败，首轮已返回 TESTCASE_ERROR，可直接停止
+                            if (!config.skipEnhanceVerify && Boolean.FALSE.equals(this.enhancePassed)) {
+                                break;
+                            }
+                            if (config.skipReview) {
+                                break;
+                            }
+                            if (i < REVIEW_ITERATIONS) {
+                                feedback = reviewReport(reportJson, i + 1, config.includeInfoSource);
+                            }
+                        }
                         LoggerUtil.logExec(Level.INFO, "消融实验配置 " + config.id + " 完成: " + config.name);
-                        return new AblationResult(config, result);
+                        return new AblationResult(config, reportJson);
                     } catch (Exception e) {
                         LoggerUtil.logExec(Level.WARNING, "消融实验配置 " + config.id + " 失败: " + e.getMessage());
                         return new AblationResult(config, 
@@ -1165,14 +1212,16 @@ public class BugVerify extends Agent {
                 });
                 futures.add(future);
             }
-            
-            // 等待所有实验完成
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
             
-            // 保存所有结果
-            List<AblationResult> results = futures.stream()
-                .map(CompletableFuture::join)
-                .collect(Collectors.toList());
+            // 汇总结果：其余配置 + 基线最终 + SKIP_REVIEW(基线首轮)
+            List<AblationResult> results = futures.stream().map(CompletableFuture::join).collect(Collectors.toList());
+            if (baselineCfg != null) {
+                results.add(new AblationResult(baselineCfg, baselineFinal));
+            }
+            if (skipReviewCfg != null && baselineFirst != null && !baselineFirst.isEmpty()) {
+                results.add(new AblationResult(skipReviewCfg, baselineFirst));
+            }
             
             saveAblationResults(results);
             
@@ -1210,13 +1259,8 @@ public class BugVerify extends Agent {
                 logWithTestCase(Level.WARNING, "写入 ablation_results.csv 失败: " + e.getMessage());
             }
             
-            // 返回基线配置的结果
-            String baseline = results.stream()
-                .filter(r -> r.config.id == 0)
-                .map(r -> r.result)
-                .findFirst()
-                .orElse(results.get(0).result);
-            return baseline;
+            // 返回基线配置的最终结果
+            return baselineFinal != null && !baselineFinal.isEmpty() ? baselineFinal : results.get(0).result;
         } else {
             // 非消融实验，使用原有配置
             boolean includeInfoSource = edu.tju.ista.llm4test.config.GlobalConfig.isIncludeInfoSource();
@@ -1339,6 +1383,75 @@ public class BugVerify extends Agent {
             processReviewToolCalls(reviewResult.toolCalls(), tools);
             
             logWithTestCase("Review feedback received for iteration " + iteration);
+            return feedback;
+
+        } catch (TemplateException | IOException e) {
+            logWithTestCase(Level.SEVERE, "Error generating review prompt or reviewing report: " + e.getMessage());
+            return "Error during review process: " + e.getMessage();
+        }
+    }
+
+    // 重载：允许控制是否在审阅阶段将新信息源写入 collectedInfo（NO_INFO 时为 false）
+    private String reviewReport(String reportJson, int iteration, boolean allowInfoUpdate) {
+        logWithTestCase("Starting report review for iteration " + iteration + (allowInfoUpdate ? " [info-update:on]" : " [info-update:off]"));
+        if (reportJson == null || reportJson.trim().isEmpty()) {
+            logWithTestCase(Level.WARNING, "Report for review is empty or null.");
+            return "The previous report was empty. Please generate a complete bug report.";
+        }
+
+        if (!isValidJson(reportJson)) {
+            logWithTestCase(Level.WARNING, "Invalid JSON report submitted for review.");
+            return "The previous report was not valid JSON. Please generate a report in valid JSON format with 'bug_type' and 'report' fields.";
+        }
+
+        try {
+            ObjectMapper objectMapper = new ObjectMapper();
+            JsonNode rootNode = objectMapper.readTree(reportJson);
+            String reportContent = rootNode.path("report").asText("");
+
+            StringBuilder infoSourceBuilder = new StringBuilder();
+            if (testCase != null && allowInfoUpdate) {
+                buildInfoSourceContent(infoSourceBuilder);
+                String apiInfoWithSource = testCase.getApiInfoWithSource();
+                if (apiInfoWithSource != null && !apiInfoWithSource.isEmpty()) {
+                    infoSourceBuilder.append("\n# 测试用例API信息和源码\n\n").append(apiInfoWithSource).append("\n");
+                }
+            }
+
+            String prompt = PromptGen.generateBugReportReviewPrompt(
+                testCode, 
+                testOutput,
+                infoSourceBuilder.toString(),
+                reportContent
+            );
+            if (verifyContextPath != null) {
+                try {
+                    Path promptsDir = verifyContextPath.resolve("prompts");
+                    Files.createDirectories(promptsDir);
+                    saveToFile(promptsDir.resolve("review_prompt_iteration_" + iteration + ".txt").toString(), prompt);
+                } catch (IOException e) {
+                    logWithTestCase(Level.WARNING, "Failed to save review prompt: " + e.getMessage());
+                }
+            }
+
+            ArrayList<Tool<?>> tools = new ArrayList<>();
+            if (this.infoCollectionAgent != null) {
+                Tool<String> st = this.infoCollectionAgent.getSourceTool();
+                Tool<String> jt = this.infoCollectionAgent.getJavadocTool();
+                if (st != null) tools.add(st);
+                if (jt != null) tools.add(jt);
+            }
+
+            var reviewResult = llm.toolCallWithContent(prompt, tools);
+            appendToFile(verifyContextPath.resolve("review_toolcall.json").toString(), reviewResult.toolCalls().toString());
+            String feedback = reviewResult.content();
+
+            // 仅当允许时，才将新信息源写入 collectedInfo
+            if (allowInfoUpdate) {
+                processReviewToolCalls(reviewResult.toolCalls(), tools);
+            }
+            
+            logWithTestCase("Review feedback received for iteration " + iteration + (allowInfoUpdate ? " [info-update:on]" : " [info-update:off]"));
             return feedback;
 
         } catch (TemplateException | IOException e) {
