@@ -98,7 +98,7 @@ public class BugVerify extends Agent {
     private String testCode;
     private String testOutput;
     private String initialAnalysis;
-    private Map<String, Object> collectedInfo = new HashMap<>();
+    private final Map<String, Object> collectedInfo = Collections.synchronizedMap(new HashMap<>());
     private Boolean enhancePassed = null;
 
     private String enhanceVerifyFailureReason = "Unknown";
@@ -123,7 +123,7 @@ public class BugVerify extends Agent {
     
     // 信息源标记
     private int infoCounter = 0;
-    private Map<String, String> infoSourceMap = new HashMap<>();
+    private final Map<String, String> infoSourceMap = Collections.synchronizedMap(new HashMap<>());
 
     // 使用全局结果目录，无需实例字段
     
@@ -1183,7 +1183,7 @@ public class BugVerify extends Agent {
             var manager = ConcurrentExecutionManager.getInstance();
             List<CompletableFuture<AblationResult>> futures = new ArrayList<>();
             for (AblationConfig config : configs) {
-                if (config.id == 0 || config.id == 4) continue; // 跳过基线与 SKIP_REVIEW（后者由基线首轮结果替代）
+                if (config.id == 0 || config.id == 4) continue; // 跳过基线与 SKIP_REVIEW
                 CompletableFuture<AblationResult> future = manager.submitLLMTask(() -> {
                     try {
                         String reportJson = "";
@@ -1191,13 +1191,19 @@ public class BugVerify extends Agent {
                         int REVIEW_ITERATIONS = 3;
                         for (int i = 0; i <= REVIEW_ITERATIONS; i++) {
                             reportJson = generateReportWithConfig(hypotheses, verificationResults, config, reportJson, feedback);
-                            // 对于需要增强门槛的配置，如果增强失败，首轮已返回 TESTCASE_ERROR，可直接停止
-                            if (!config.skipEnhanceVerify && Boolean.FALSE.equals(this.enhancePassed)) {
-                                break;
+                            
+                            try {
+                                ObjectMapper objectMapper = new ObjectMapper();
+                                JsonNode rootNode = objectMapper.readTree(reportJson);
+                                String bugType = rootNode.path("bug_type").asText("UNKNOWN");
+                                if ("TESTCASE_ERROR".equals(bugType)) {
+                                    logWithTestCase("[Ablation-" + config.name + "] TESTCASE_ERROR detected at iteration " + (i + 1) + ", stop reviewing.");
+                                    break;
+                                }
+                            } catch (IOException e) {
+                                logWithTestCase(Level.WARNING, "[Ablation-" + config.name + "] Parse report JSON failed during review: " + e.getMessage());
                             }
-                            if (config.skipReview) {
-                                break;
-                            }
+
                             if (i < REVIEW_ITERATIONS) {
                                 feedback = reviewReport(reportJson, i + 1, config.includeInfoSource);
                             }
@@ -1576,7 +1582,7 @@ public class BugVerify extends Agent {
             writeVerifyStatus("EnhanceVerify", "SKIPPED_CONFIG", config.name);
         } else {
             if (Boolean.FALSE.equals(this.enhancePassed)) {
-                // 非跳过增强且增强失败，则直接返回“测试问题”报告
+                // 非跳过增强且增强失败，则直接返回"测试问题"报告
                 return "{\"bug_type\": \"TESTCASE_ERROR\", \"report\": \"Enhance verify failed; config requires enhance.\"}";
             }
         }
