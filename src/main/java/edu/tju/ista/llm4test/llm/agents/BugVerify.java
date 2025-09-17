@@ -554,7 +554,7 @@ public class BugVerify extends Agent {
     }
 
     public boolean enhanceVerify() {
-        return enhanceVerify(1);
+        return enhanceVerify(2);
     }
 
     /**
@@ -980,30 +980,6 @@ public class BugVerify extends Agent {
                 
                 LoggerUtil.logExec(Level.INFO, String.format("收集信息: %s (相关性: %.2f, 大小: %d)", 
                     info.source, info.relevanceScore, info.content.length()));
-            }
-            
-            // 添加API信息和源码到收集的信息中（如果有的话）
-            if (apiInfoWithSource != null && !apiInfoWithSource.isEmpty()) {
-                String infoId = "INFO_" + (++infoCounter);
-                infoSourceMap.put(infoId, "测试用例API信息和源码");
-                
-                StringBuilder formattedApiInfo = new StringBuilder();
-                formattedApiInfo.append("[").append(infoId).append(" 来源: 测试用例API信息和源码]\n");
-                formattedApiInfo.append("信息类型: API_INFO_WITH_SOURCE\n");
-                formattedApiInfo.append("内容大小: ").append(apiInfoWithSource.length()).append(" 字符\n\n");
-                formattedApiInfo.append("=== 完整API信息 ===\n");
-                
-                // 截断过长的API信息
-                if (apiInfoWithSource.length() > 8000) {
-                    formattedApiInfo.append(apiInfoWithSource.substring(0, 8000)).append("...(API信息已截断)");
-                } else {
-                    formattedApiInfo.append(apiInfoWithSource);
-                }
-                formattedApiInfo.append("\n=== API信息结束 ===\n");
-                
-                collectedInfo.put("api_info_with_source", formattedApiInfo.toString());
-                
-                LoggerUtil.logExec(Level.INFO, String.format("添加API信息: 大小 %d 字符", apiInfoWithSource.length()));
             }
             
             // 计算总的信息大小
@@ -1609,7 +1585,8 @@ public class BugVerify extends Agent {
                 buildInfoSourceContent(infoSourceBuilder);
             }
             
-            if (testCase != null && config.includeApiDocs) {
+            // 修复：仅当不包含完整信息源，但又显式要求包含API文档时，才独立添加API信息
+            if (testCase != null && config.includeApiDocs && !config.includeInfoSource) {
                 String apiInfoWithSource = testCase.getApiInfoWithSource();
                 if (apiInfoWithSource != null && !apiInfoWithSource.isEmpty()) {
                     infoSourceBuilder.append("\n# 测试用例API信息和源码\n\n").append(apiInfoWithSource).append("\n");
