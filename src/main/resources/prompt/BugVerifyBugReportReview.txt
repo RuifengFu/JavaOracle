@@ -24,6 +24,8 @@ ${reportContent}
 Review Task:
 Perform a critical, stability-aware review of the "Current Bug Report Draft" to separate correct vs. weak/incorrect parts, surface potential logical issues, and propose precise corrections. 
 
+**Tool Usage**: You have access to `source_code_search` and `javadoc_search` tools. If the provided "Information Sources" are insufficient to verify a claim or if the report's reasoning seems UNCLEAR, you MUST use these tools to find the necessary evidence. Your goal is to resolve ambiguity, not just point it out.
+
 Core Review Dimensions (apply rigorously; quote sources):
 1.  **Logical Soundness & Flaws**: Check reasoning from evidence to conclusion; flag logical leaps and fallacies. Consider whether simpler explanations exist.
 2.  **Evidence Interpretation**: Verify deep, correct reading of test output and docs; identify misreads and overlooked contradicting details.
@@ -86,7 +88,8 @@ Output Format (Markdown):
 - For each incorrect point: quote it, explain why it’s wrong (with evidence), and provide the corrected wording/reasoning.
 
 ### Uncertain / Missing Information
-- List what is ambiguous or missing and what evidence would resolve it.
+- If you identify any ambiguous or missing information, **do not just state it**. Use the `source_code_search` and `javadoc_search` tools to actively find the evidence that would resolve the uncertainty.
+- After using the tools, the missing information will provided in the next loop.
 
 ### Attempted Corrections (kept current `bug_type`)
 - Bullet the concrete edits that would fix the draft without changing the conclusion.

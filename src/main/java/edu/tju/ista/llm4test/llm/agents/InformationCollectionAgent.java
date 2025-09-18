@@ -102,7 +102,7 @@ public class InformationCollectionAgent extends Agent {
         
         // Add API information once at the beginning
         if (apiInfoWithSource != null && !apiInfoWithSource.isEmpty()) {
-            addApiInfo(apiInfoWithSource, analysis);
+            addApiInfo(apiInfoWithSource, analysis, testCode, testOutput);
         }
         
         // Observation loop - max 3 iterations
@@ -351,21 +351,22 @@ public class InformationCollectionAgent extends Agent {
     /**
      * Add API information with extraction similar to web content
      */
-    private void addApiInfo(String apiInfoWithSource, AnalysisResult analysis) {
+    private void addApiInfo(String apiInfoWithSource, AnalysisResult analysis, String testCode, String testOutput) {
         if (apiInfoWithSource == null || apiInfoWithSource.isEmpty()) return;
         
         try {
             String processedContent;
+            final int API_MAX_BUDGET = 10000; // Cap API info to avoid starving later searches
             
             if (apiInfoWithSource.length() > 4096) {
                 LoggerUtil.logExec(Level.INFO, "API info content too long, extracting relevant parts");
                 // Use the same extraction method as web content
-                int maxSize = 8000;
-                processedContent = extractRelevantText(analysis, "", "", apiInfoWithSource, maxSize);
+                int maxSize = Math.min(API_MAX_BUDGET, MAX_TOTAL_SIZE - currentSize);
+                processedContent = extractRelevantText(analysis, testCode, testOutput, apiInfoWithSource, maxSize);
                 if (processedContent == null || processedContent.trim().isEmpty()) {
                     LoggerUtil.logExec(Level.WARNING, "API info extraction failed, using original with slicing");
                     if (currentSize < MAX_TOTAL_SIZE) {
-                        int maxLength = 30000;
+                        int maxLength = Math.min(API_MAX_BUDGET, MAX_TOTAL_SIZE - currentSize);
                         if (apiInfoWithSource.length() > maxLength) {
                             int middleKeep = 200;
                             int sideLength = (maxLength - middleKeep) / 2;
@@ -375,14 +376,15 @@ public class InformationCollectionAgent extends Agent {
                             String middle = apiInfoWithSource.substring(midPoint - (middleKeep / 2), midPoint + (middleKeep / 2));
                             processedContent = head + "\n\n... (content truncated, middle part follows) ...\n\n" + middle + "\n\n... (content truncated, showing tail) ...\n\n" + tail;
                         } else {
-                            processedContent = apiInfoWithSource.substring(0, Math.min(apiInfoWithSource.length(), MAX_TOTAL_SIZE - currentSize));
+                            processedContent = apiInfoWithSource.substring(0, Math.min(apiInfoWithSource.length(), maxLength));
                         }
                     } else {
                         processedContent = "";
                     }
                 }
             } else {
-                processedContent = apiInfoWithSource;
+                int maxLength = Math.min(API_MAX_BUDGET, MAX_TOTAL_SIZE - currentSize);
+                processedContent = apiInfoWithSource.substring(0, Math.min(apiInfoWithSource.length(), maxLength));
             }
             
             if (!processedContent.isEmpty()) {
@@ -396,7 +398,8 @@ public class InformationCollectionAgent extends Agent {
             LoggerUtil.logExec(Level.WARNING, "API info extraction failed: " + e.getMessage() + ", using original content");
             // Fallback to original content if extraction fails
             if (currentSize < MAX_TOTAL_SIZE) {
-                String content = apiInfoWithSource.substring(0, Math.min(apiInfoWithSource.length(), MAX_TOTAL_SIZE - currentSize));
+                int maxLength = Math.min(8000, MAX_TOTAL_SIZE - currentSize);
+                String content = apiInfoWithSource.substring(0, Math.min(apiInfoWithSource.length(), maxLength));
                 CollectedInfo info = new CollectedInfo("API_INFO", "API information and source code", content, InfoType.SOURCE_CODE, 0.9);
                 collectedInfos.add(info);
                 collectedInfoSources.add(info.source);
@@ -652,7 +655,8 @@ public class InformationCollectionAgent extends Agent {
         prompt.append("Symptom: ").append(analysis.symptoms).append("\n");
         prompt.append("Relevant classes: ").append(String.join(", ", analysis.relevantClasses)).append("\n\n");
         prompt.append("Test code:\n```java\n").append(testCode).append("\n```\n\n");
-        prompt.append("Please select the most important source code search strategy, prioritizing the most relevant classes and methods.");
+        prompt.append("Please select the most important source code search strategy, prioritizing the most relevant classes and methods.\n");
+        prompt.append("You MUST respond by issuing exactly ONE tool call to the provided source code search tool with appropriate arguments (e.g., by_class/by_method/by_keyword). Do NOT output free-form text.");
         return prompt.toString();
     }
     
@@ -665,7 +669,8 @@ public class InformationCollectionAgent extends Agent {
         prompt.append("Symptom: ").append(analysis.symptoms).append("\n");
         prompt.append("Relevant classes: ").append(String.join(", ", analysis.relevantClasses)).append("\n\n");
         prompt.append("Test code:\n```java\n").append(testCode).append("\n```\n\n");
-        prompt.append("Please select the most important API documentation search strategy.");
+        prompt.append("Please select the most important API documentation search strategy.\n");
+        prompt.append("You MUST respond by issuing exactly ONE tool call to the provided javadoc search tool with appropriate arguments (e.g., by_class/by_method/by_keyword). Do NOT output free-form text.");
         return prompt.toString();
     }
     
