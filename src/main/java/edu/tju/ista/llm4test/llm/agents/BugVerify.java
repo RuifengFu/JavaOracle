@@ -1587,9 +1587,9 @@ public class BugVerify extends Agent {
             
             // 修复：仅当不包含完整信息源，但又显式要求包含API文档时，才独立添加API信息
             if (testCase != null && config.includeApiDocs && !config.includeInfoSource) {
-                String apiInfoWithSource = testCase.getApiInfoWithSource();
-                if (apiInfoWithSource != null && !apiInfoWithSource.isEmpty()) {
-                    infoSourceBuilder.append("\n# 测试用例API信息和源码\n\n").append(apiInfoWithSource).append("\n");
+                String apiInfo = testCase.getApiDoc();
+                if (apiInfo != null && !apiInfo.isEmpty()) {
+                    infoSourceBuilder.append("\n# 测试用例API信息和源码\n\n").append(apiInfo).append("\n");
                 }
             }
         }
