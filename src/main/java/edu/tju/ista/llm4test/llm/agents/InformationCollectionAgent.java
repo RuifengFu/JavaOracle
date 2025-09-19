@@ -100,10 +100,10 @@ public class InformationCollectionAgent extends Agent {
         // Parse initial insight
         AnalysisResult analysis = parseInitialInsight(initialInsight);
         
-        // Add API information once at the beginning
-        if (apiInfoWithSource != null && !apiInfoWithSource.isEmpty()) {
-            addApiInfo(apiInfoWithSource, analysis, testCode, testOutput);
-        }
+//        // Add API information once at the beginning
+//        if (apiInfoWithSource != null && !apiInfoWithSource.isEmpty()) {
+//            addApiInfo(apiInfoWithSource, analysis, testCode, testOutput);
+//        }
         
         // Observation loop - max 3 iterations
         for (int iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {

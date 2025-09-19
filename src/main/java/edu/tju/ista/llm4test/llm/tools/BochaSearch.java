@@ -15,7 +15,7 @@ public class BochaSearch implements Tool<String> {
     public BochaSearch() {
         String apiKey = System.getenv("BOCHA_API_KEY");
         if (apiKey == null || apiKey.isEmpty()) {
-            throw new IllegalStateException("BOCHA_API_KEY environment variable not set.");
+//            throw new IllegalStateException("BOCHA_API_KEY environment variable not set.");
         }
         SearchConfig config = new SearchConfig().setApiKey(apiKey).setSummary(true);
         this.webSearch = new WebSearch(config);
