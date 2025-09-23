@@ -427,11 +427,9 @@ public class BugVerify extends Agent {
 
 
         
-        // 2. 收集信息（执行一次，供配置选择是否使用）
-        collectRelevantInformation(initialInsight);
-        logWithTestCase("信息收集完成，共 " + collectedInfo.size() + " 项");
-        // 保存收集到的信息
-        saveCollectedInfo();
+        // 2. 收集信息（全局策略：统一跳过 InformationCollection）
+        logWithTestCase("全局策略：跳过信息收集阶段（InformationCollection）");
+        writeVerifyStatus("InfoCollection", "SKIPPED_ALL_CONFIGS", "Skip information collection for all configs.");
         List<String> hypotheses = new ArrayList<>();
         Map<String, TestResult> verificationResults = new HashMap<>();
 
@@ -554,7 +552,7 @@ public class BugVerify extends Agent {
     }
 
     public boolean enhanceVerify() {
-        return enhanceVerify(2);
+        return enhanceVerify(3);
     }
 
     /**
@@ -1245,12 +1243,13 @@ public class BugVerify extends Agent {
             return baselineFinal != null && !baselineFinal.isEmpty() ? baselineFinal : results.get(0).result;
         } else {
             // 非消融实验，使用原有配置
-            boolean includeInfoSource = edu.tju.ista.llm4test.config.GlobalConfig.isIncludeInfoSource();
+            // 基线：统一跳过信息收集，固定启用 API 文档+源码
+            boolean includeInfoSource = false;
             boolean useMinimizedTestcase = edu.tju.ista.llm4test.config.GlobalConfig.isUseMinimizedTestcase();
-            boolean includeApiDocs = edu.tju.ista.llm4test.config.GlobalConfig.isIncludeApiDocs();
-            
-            AblationConfig config = new AblationConfig(includeInfoSource, 
-                useMinimizedTestcase, includeApiDocs, false, false, "BASELINE_FULL", 0);
+            boolean includeApiDocs = true; // 强制启用 API 文档+源码
+
+            AblationConfig config = new AblationConfig(includeInfoSource,
+                useMinimizedTestcase, includeApiDocs, false, false, "BASELINE", 0);
             
             String reportJson = "";
             String feedback = "";
@@ -1585,11 +1584,11 @@ public class BugVerify extends Agent {
                 buildInfoSourceContent(infoSourceBuilder);
             }
             
-            // 修复：仅当不包含完整信息源，但又显式要求包含API文档时，才独立添加API信息
-            if (testCase != null && config.includeApiDocs && !config.includeInfoSource) {
-                String apiInfo = testCase.getApiDoc();
-                if (apiInfo != null && !apiInfo.isEmpty()) {
-                    infoSourceBuilder.append("\n# 测试用例API信息和源码\n\n").append(apiInfo).append("\n");
+            // 统一策略：所有配置均使用 API 文档 + 源码
+            if (testCase != null && config.includeApiDocs) {
+                String apiInfoWithSource = testCase.getApiInfoWithSource();
+                if (apiInfoWithSource != null && !apiInfoWithSource.isEmpty()) {
+                    infoSourceBuilder.append("\n# 测试用例API信息和源码\n\n").append(apiInfoWithSource).append("\n");
                 }
             }
         }
@@ -1701,19 +1700,19 @@ public class BugVerify extends Agent {
      */
     private List<AblationConfig> buildAblationConfigs() {
         List<AblationConfig> list = new ArrayList<>();
-        // 0. 基线配置：不跳过任何步骤，使用默认全量流程
+        // 0. 基线配置：统一跳过信息收集，保留最小化与API文档、增强验证与审阅
         list.add(new AblationConfig(
-            true,  /* includeInfoSource */
+            false, /* includeInfoSource */
             true,  /* useMinimizedTestcase */
             true,  /* includeApiDocs */
             false, /* skipEnhanceVerify */
             false, /* skipReview */
-            "BASELINE_FULL",
+            "BASELINE",
             0
         ));
-        // 1. 跳过增强验证
+        // 1. 跳过增强验证（仍统一跳过信息收集）
         list.add(new AblationConfig(
-            true,
+            false,
             true,
             true,
             true,  /* skipEnhanceVerify */
@@ -1721,9 +1720,9 @@ public class BugVerify extends Agent {
             "SKIP_ENHANCE",
             1
         ));
-        // 2. 跳过约简（使用原始code/output）
+        // 2. 跳过约简（仍统一跳过信息收集，使用原始code/output）
         list.add(new AblationConfig(
-            true,
+            false,
             false, /* useMinimizedTestcase */
             true,
             false,
@@ -1731,19 +1730,10 @@ public class BugVerify extends Agent {
             "NO_MINIMIZATION",
             2
         ));
-        // 3. 跳过信息收集（空信息源）
+        // 3. 取消 NO_INFO 配置（已统一跳过信息收集），保留占位可选（如需可添加其他变体）
+        // 4. 跳过review：单次生成，不做迭代（仍统一跳过信息收集）
         list.add(new AblationConfig(
-            false, /* includeInfoSource */
-            true,
-            true,
             false,
-            false,
-            "NO_INFO",
-            3
-        ));
-        // 4. 跳过review：单次生成，不做迭代
-        list.add(new AblationConfig(
-            true,
             true,
             true,
             false,
