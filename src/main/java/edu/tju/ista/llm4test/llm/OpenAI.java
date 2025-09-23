@@ -40,7 +40,7 @@ public class OpenAI {
 
     private String MODEL;
 
-    private final double TEMPERATURE = 0.7;
+    private double TEMPERATURE = 0.7;
 
     private int MAX_TOKENS = 8192;
     private boolean STREAM = true;
@@ -67,7 +67,7 @@ public class OpenAI {
 
 
     public String messageCompletion(String prompt) {
-        return messageCompletion(prompt, 0.7);
+        return messageCompletion(prompt, this.TEMPERATURE);
     }
 
 
@@ -75,6 +75,9 @@ public class OpenAI {
         API_KEY = GlobalConfig.getOpenaiApiKey();
         BASE_URL = GlobalConfig.getOpenaiBaseUrl();
         MODEL = GlobalConfig.getOpenaiModel();
+        if (GlobalConfig.isEnableAblationTest()) {
+            this.TEMPERATURE = 0.0;
+        }
     }
 
     public OpenAI(String modelName) {
@@ -96,6 +99,9 @@ public class OpenAI {
             this.API_KEY = GlobalConfig.getOpenaiApiKey();
             this.BASE_URL = GlobalConfig.getOpenaiBaseUrl();
             this.MODEL = modelName;
+        }
+        if (GlobalConfig.isEnableAblationTest()) {
+            this.TEMPERATURE = 0.0;
         }
         System.out.println("BASE_URL: " + BASE_URL);
         System.out.println("API_KEY: " + API_KEY);
@@ -121,6 +127,12 @@ public class OpenAI {
         this.MAX_TOKENS = config.getMaxTokens();
         this.STREAM = config.isStream();
         this.JSON_OUTPUT = config.isJsonOutput();
+        if (GlobalConfig.isEnableAblationTest()) {
+            this.TEMPERATURE = 0.0;
+        } else {
+            // Only set temperature from config if not in ablation test mode
+            this.TEMPERATURE = config.getTemperature();
+        }
         System.out.println("BASE_URL: " + BASE_URL);
         System.out.println("API_KEY: " + API_KEY);
         System.out.println("MODEL: " + MODEL);
@@ -187,7 +199,7 @@ public class OpenAI {
     }
 
 
-    private Map<String, Object> getBaseRequestMap(String prompt) {
+    private Map<String, Object> getBaseRequestMap(String prompt, double requestTemperature) {
         // Create request body
         Map<String, Object> requestBody = new HashMap<>();
         if (this.JSON_OUTPUT) {
@@ -203,7 +215,11 @@ public class OpenAI {
         ));
 
         requestBody.put("max_tokens", MAX_TOKENS); // Limit the response length
-        requestBody.put("temperature", TEMPERATURE); // Set the randomness of the output
+
+        // 根据消融实验模式设置温度
+        double finalTemperature = GlobalConfig.isEnableAblationTest() ? 0.0 : requestTemperature;
+        requestBody.put("temperature", finalTemperature);
+
         requestBody.put("stream", STREAM);
         return requestBody;
     }
@@ -373,11 +389,10 @@ public class OpenAI {
             if (jsonOutput && !prompt.contains(" json ")) {
                 prompt += "\nPlease return the response in json format.";
             }
-            Map<String, Object> requestBody = getBaseRequestMap(prompt);
+            Map<String, Object> requestBody = getBaseRequestMap(prompt, temperature);
             if (jsonOutput) {
                 requestBody.put("response_format", Map.of("type", "json_object"));
             }
-            requestBody.put("temperature", temperature);
 
             if (STREAM) {
                 return executeWithRetryAsync("streamResponse", () -> streamResponseAsync(requestBody), 0)
@@ -470,7 +485,7 @@ public class OpenAI {
 
     public CompletableFuture<ToolCallResult> toolCallWithContentAsync(String prompt, List<Tool<?>> tools, ToolCallRequirement requirement) {
         try {
-            Map<String, Object> requestBody = getBaseRequestMap(prompt);
+            Map<String, Object> requestBody = getBaseRequestMap(prompt, this.TEMPERATURE); // Pass the instance's temperature
             requestBody.put("tools", ToolFactory.toToolsArray(tools));
 
             if (STREAM) {
