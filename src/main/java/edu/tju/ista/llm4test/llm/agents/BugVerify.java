@@ -120,6 +120,13 @@ public class BugVerify extends Agent {
     private static final java.util.Set<String> reducedTestManifest = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private static volatile boolean manifestLoaded = false;
 
+    // 裁决结果缓存（enhanceVerify 最终结果缓存）
+    private static final Path VERIFY_CACHE_DIR = Paths.get("VerifyCache");
+    private static final Path VERIFY_MANIFEST = VERIFY_CACHE_DIR.resolve("verdict_cache.csv");
+    private static final Object VERIFY_CACHE_FS_LOCK = new Object();
+    private static final java.util.Map<String, String> verifyVerdictCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private static volatile boolean verifyCacheLoaded = false;
+
     
     // 信息源标记
     private int infoCounter = 0;
@@ -572,13 +579,29 @@ public class BugVerify extends Agent {
         String header = "Enhance Verification: " + getTestCaseIdentifier();
         LoggerUtil.logVerify(Level.INFO, header, "Verification process started.");
         
+        // 裁决结果缓存：加载并尝试命中
+        loadVerifyCacheIfNeeded();
+        String cacheKey = getTestCaseIdentifier();
+        String cachedVerdict = verifyVerdictCache.get(cacheKey);
+        if (cachedVerdict != null) {
+            LoggerUtil.logVerify(Level.INFO, header, "Cached verdict hit: " + cachedVerdict);
+            writeVerifyStatus("EnhanceVerify", "CACHED", cachedVerdict);
+            if ("TESTCASE_ISSUE".equals(cachedVerdict)) {
+                this.enhanceVerifyFailureReason = "Cached verdict: TESTCASE_ISSUE";
+                return false;
+            }
+            // 对于 BUG 与 UNCLEAR，都继续后续流程（UNCLEAR 也按继续处理）
+            return true;
+        }
+        
         // 前置条件检查：确保测试用例存在且被识别为bug
         if (testCase == null || testCase.getResult() == null) {
             logWithTestCase("测试用例未设置，跳过增强验证");
             this.enhanceVerifyFailureReason = "Test case not set.";
             LoggerUtil.logVerify(Level.WARNING, header, "Verification failed: Test case not set.");
-            // 最终一次性写入结果
+            // 最终一次性写入结果并缓存
             writeVerifyStatus("Verdict", "TESTCASE_ISSUE", "Precondition failed: Test case not set.");
+            cacheEnhanceVerdict(cacheKey, "TESTCASE_ISSUE");
             return false;
         }
         
@@ -655,8 +678,9 @@ public class BugVerify extends Agent {
                 failureSummary.append("- ").append(result).append("\n");
             }
             saveToFile(verifyContextPath.resolve("enhance_verify_failed.md").toString(), failureSummary.toString());
-            // 最终一次性写入结果
+            // 最终一次性写入结果并缓存
             writeVerifyStatus("Verdict", "TESTCASE_ISSUE", "Majority not reached" + " (" + bugVerificationCount + "/" + TOTAL_VERIFICATIONS + ")");
+            cacheEnhanceVerdict(cacheKey, "TESTCASE_ISSUE");
             LoggerUtil.logVerify(Level.INFO, header, "Final Verdict: TESTCASE_ISSUE (Inconsistent results)");
             return false;
         }
@@ -682,8 +706,9 @@ public class BugVerify extends Agent {
             logWithTestCase(Level.SEVERE, "所有测试用例问题解释都生成失败，中止验证");
             this.enhanceVerifyFailureReason = "All attempts to generate test case issue explanations failed.";
             LoggerUtil.logVerify(Level.SEVERE, header, "Final Verdict: UNKNOWN (Explanation generation failed)");
-            // 最终一次性写入结果
+            // 最终一次性写入结果并缓存
             writeVerifyStatus("Verdict", "UNKNOWN", "Explanation generation failed");
+            cacheEnhanceVerdict(cacheKey, "UNKNOWN");
             return false; // 中止流程
         }
         
@@ -698,8 +723,9 @@ public class BugVerify extends Agent {
             logWithTestCase(Level.SEVERE, "无法将论点序列化为JSON: " + e.getMessage());
             this.enhanceVerifyFailureReason = "Failed to serialize arguments to JSON.";
             LoggerUtil.logVerify(Level.SEVERE, header, "Final Verdict: UNKNOWN (JSON serialization failed)");
-            // 最终一次性写入结果
+            // 最终一次性写入结果并缓存
             writeVerifyStatus("Verdict", "UNKNOWN", "JSON serialization failed");
+            cacheEnhanceVerdict(cacheKey, "UNKNOWN");
             return false;
         }
 
@@ -756,15 +782,18 @@ public class BugVerify extends Agent {
         // ===== 第四步：基于裁决结果决定后续流程 =====
         LoggerUtil.logVerify(Level.INFO, header, "Final Verdict: " + finalVerdict + " (Score: " + totalScore + ")");
         if ("BUG".equals(finalVerdict)) {
+            cacheEnhanceVerdict(cacheKey, finalVerdict);
             logWithTestCase("裁决确认是bug，继续进行分析");
             return true;
         } else if("UNCLEAR".equals(finalVerdict)) {
+            cacheEnhanceVerdict(cacheKey, finalVerdict);
             logWithTestCase("裁决结果不明确，按BUG处理以进行深入分析");
             this.enhanceVerifyFailureReason = "Verdict is UNCLEAR (Score: " + totalScore + "). Proceeding with analysis for safety.";
             return true;
         } else { // TESTCASE_ISSUE
             logWithTestCase("裁决认为是测试用例问题");
             this.enhanceVerifyFailureReason = "Verdict: TESTCASE_ISSUE (Score: " + totalScore + "). The adjudicator determined the issue is with the test case.";
+            cacheEnhanceVerdict(cacheKey, finalVerdict);
             return false;
         }
     }
@@ -1202,6 +1231,8 @@ public class BugVerify extends Agent {
             if (skipReviewCfg != null && baselineFirst != null && !baselineFirst.isEmpty()) {
                 results.add(new AblationResult(skipReviewCfg, baselineFirst));
             }
+            // 统一排序：按配置 id 升序（确保输出顺序为 0,1,2,3,4）
+            results.sort(java.util.Comparator.comparingInt(r -> r.config.id));
             
             saveAblationResults(results);
             
@@ -1739,7 +1770,7 @@ public class BugVerify extends Agent {
             false,
             true,  /* skipReview */
             "SKIP_REVIEW",
-            4
+            3
         ));
         return list;
     }
@@ -2433,6 +2464,78 @@ public class BugVerify extends Agent {
             appendToFile(statusCsv.toString(), line);
         } catch (Exception e) {
             logWithTestCase(Level.WARNING, "Failed to write to verify_status.csv: " + e.getMessage());
+        }
+    }
+
+    // =================== Enhance Verdict Cache Helpers ===================
+    private static void loadVerifyCacheIfNeeded() {
+        if (verifyCacheLoaded) return;
+        synchronized (VERIFY_CACHE_FS_LOCK) {
+            if (verifyCacheLoaded) return;
+            try {
+                Files.createDirectories(VERIFY_CACHE_DIR);
+                if (Files.exists(VERIFY_MANIFEST)) {
+                    List<String> lines = Files.readAllLines(VERIFY_MANIFEST);
+                    for (String line : lines) {
+                        if (line == null || line.isBlank() || line.startsWith("TestCase,")) continue;
+                        // CSV: TestCase,Timestamp,Verdict
+                        String[] parts = splitCsvLine(line);
+                        if (parts.length >= 3) {
+                            String testCasePath = parts[0].replace("\"", "").trim();
+                            String verdict = parts[2].replace("\"", "").trim();
+                            if (!testCasePath.isEmpty() && !verdict.isEmpty()) {
+                                verifyVerdictCache.put(testCasePath, verdict);
+                            }
+                        }
+                    }
+                } else {
+                    appendToFile(VERIFY_MANIFEST.toString(), "TestCase,Timestamp,Verdict\n");
+                }
+            } catch (Exception e) {
+                LoggerUtil.logExec(Level.WARNING, "Failed to load verify cache: " + e.getMessage());
+            } finally {
+                verifyCacheLoaded = true;
+            }
+        }
+    }
+
+    private static String[] splitCsvLine(String line) {
+        // simple CSV split handling quoted fields without commas inside Details (not needed here)
+        List<String> fields = new ArrayList<>();
+        StringBuilder sb = new StringBuilder();
+        boolean inQuotes = false;
+        for (int i = 0; i < line.length(); i++) {
+            char c = line.charAt(i);
+            if (c == '"') {
+                inQuotes = !inQuotes;
+                continue;
+            }
+            if (c == ',' && !inQuotes) {
+                fields.add(sb.toString());
+                sb.setLength(0);
+            } else {
+                sb.append(c);
+            }
+        }
+        fields.add(sb.toString());
+        return fields.toArray(new String[0]);
+    }
+
+    private static void cacheEnhanceVerdict(String cacheKey, String verdict) {
+        try {
+            loadVerifyCacheIfNeeded();
+            synchronized (VERIFY_CACHE_FS_LOCK) {
+                Files.createDirectories(VERIFY_CACHE_DIR);
+                String line = String.format("\"%s\",\"%s\",\"%s\"\n",
+                    cacheKey.replace("\"", "'"),
+                    GLOBAL_RESULT_TIMESTAMP,
+                    verdict.replace("\"", "'")
+                );
+                appendToFile(VERIFY_MANIFEST.toString(), line);
+                verifyVerdictCache.put(cacheKey, verdict);
+            }
+        } catch (Exception e) {
+            LoggerUtil.logExec(Level.WARNING, "Failed to cache enhance verdict: " + e.getMessage());
         }
     }
 }
