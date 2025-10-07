@@ -71,7 +71,7 @@ public class TestExecutionManager {
      * 并行执行测试套件（执行模式）
      * 使用测试线程池进行测试执行（CPU密集型）
      */
-    public void runTestSuiteParallelExecution(Path rootPath) {
+    public void runTestSuiteParallelExecution() {
         System.out.println("开始执行模式");
         
         // 创建并执行所有测试用例

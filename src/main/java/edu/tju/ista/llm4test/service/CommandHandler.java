@@ -2,9 +2,15 @@ package edu.tju.ista.llm4test.service;
 
 import edu.tju.ista.llm4test.config.GlobalConfig;
 import edu.tju.ista.llm4test.execute.TestExecutor;
+import edu.tju.ista.llm4test.execute.TestSuite;
+import edu.tju.ista.llm4test.utils.JavaBaseClassCollector;
 
 import java.io.File;
 import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 命令处理器
@@ -30,7 +36,7 @@ public class CommandHandler {
         );
         
         try {
-            manager.runTestSuiteParallelExecution(Path.of("jdk/java/util/ArrayList"));
+            manager.runTestSuiteParallelExecution();
         } finally {
             manager.shutdown();
         }
@@ -79,5 +85,27 @@ public class CommandHandler {
      */
     public static void handleVerifyCommand() {
         BugVerificationService.verifyBugs();
+    }
+
+    /**
+     * 处理getClass命令
+     */
+    public static void handleGetClassCommand(String testPath) {
+        String suitePath = GlobalConfig.getSuiteBasePath() + testPath;
+        TestSuite suite = new TestSuite(suitePath);
+        JavaBaseClassCollector collector = new JavaBaseClassCollector();
+
+        List<File> files = suite.getTestFiles().stream()
+                .filter(suite::isValidTestFile)
+                .collect(Collectors.toList());
+
+        Set<String> classNames = collector.collectClasses(files);
+        Path output = Paths.get("class.txt").toAbsolutePath();
+        try {
+            collector.writeToFile(classNames, output);
+            System.out.println("已收集 " + classNames.size() + " 个 java.base 类，输出文件: " + output);
+        } catch (Exception e) {
+            throw new RuntimeException("写入class.txt失败", e);
+        }
     }
 } 

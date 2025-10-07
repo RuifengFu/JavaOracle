@@ -16,10 +16,10 @@ import org.junit.Assert;
 public class APIDocTest {
     @Test
     public void getApiDocs() throws IOException {
-        File file = new File("JavaTest/jdk/javax/security/auth/callback/Mutability.java");
+        File file = new File("jdk17u-dev/test/jdk/java/net/CookieHandler/B6277794.java");
         List<JavaMethod> methods = JavaParser.fileToMethods(file);
 
-        ApiInfoProcessor processor = new ApiInfoProcessor("JavaDoc/docs/api/java.base");
+        ApiInfoProcessor processor = ApiInfoProcessor.fromConfig();
         var docs = processor.processApiDocs(file);
         System.out.println(docs);
     }
@@ -146,37 +146,29 @@ public class APIDocTest {
 
     @Test
     public void ReadTest() throws Exception {
-        String code = "import java.io.*;\n" +
+        String code = "public class B6277794 {\n" +
+                      "    public static void main(String[] args) throws Exception {\n" +
+                      "        testCookieStore();\n" +
+                      "    }\n" +
                       "\n" +
-                      "public class ReadParams {\n" +
+                      "    private static void testCookieStore() throws Exception {\n" +
+                      "        CookieManager cm = new CookieManager();\n" +
+                      "        CookieStore cs = cm.getCookieStore();\n" +
                       "\n" +
-                      "    // Test closed stream behavior: read operations should throw IOException after close\n" +
-                      "    public static void doTest2(InputStream in) throws Exception {\n" +
-                      "        in.close();\n" +
-                      "        byte[] buffer = new byte[10];\n" +
-                      "        try {\n" +
-                      "            int result = in.read(buffer, 0, 5);\n" +
-                      "            throw new RuntimeException(in.getClass().getName() + \" Failed closed stream test - read() should throw IOException after close. Instead returned: \" + result);\n" +
-                      "        } catch (IOException e) {\n" +
-                      "            System.err.println(\"Successfully completed closed stream test on \" + in.getClass().getName());\n" +
-                      "        } catch (Exception e) {\n" +
-                      "            throw new RuntimeException(in.getClass().getName() + \" Unexpected exception type after close: \" + e.getClass().getName() + \": \" + e.getMessage());\n" +
+                      "        HttpCookie c1 = new HttpCookie(\"COOKIE1\", \"COOKIE1\");\n" +
+                      "        HttpCookie c2 = new HttpCookie(\"COOKIE2\", \"COOKIE2\");\n" +
+                      "        cs.add(new URI(\"http://www.sun.com/solaris\"), c1);\n" +
+                      "        cs.add(new URI(\"http://www.sun.com/java\"), c2);\n" +
+                      "\n" +
+                      "        List<URI> uris = cs.getURIs();\n" +
+                      "        if (uris.size() != 1 ||\n" +
+                      "            !uris.get(0).equals(new URI(\"http://www.sun.com\"))) {\n" +
+                      "            fail(\"CookieStore.getURIs() fail.\");\n" +
                       "        }\n" +
                       "    }\n" +
                       "\n" +
-                      "    public static void main(String args[]) throws Exception {\n" +
-                      "        // Create a simple ObjectInputStream with minimal data\n" +
-                      "        File tempFile = File.createTempFile(\"test\", \".obj\");\n" +
-                      "        tempFile.deleteOnExit();\n" +
-                      "        \n" +
-                      "        FileOutputStream fos = new FileOutputStream(tempFile);\n" +
-                      "        ObjectOutputStream oos = new ObjectOutputStream(fos);\n" +
-                      "        oos.writeInt(12345);\n" +
-                      "        oos.close();\n" +
-                      "        \n" +
-                      "        ObjectInputStream ois = new ObjectInputStream(new FileInputStream(tempFile));\n" +
-                      "        doTest2(ois);\n" +
-                      "        ois.close();\n" +
+                      "    private static void fail(String msg) throws Exception {\n" +
+                      "        throw new RuntimeException(msg);\n" +
                       "    }\n" +
                       "}";
 

@@ -48,6 +48,10 @@ public class Main {
                 case "verify":
                     CommandHandler.handleVerifyCommand();
                     break;
+                case "getClass":
+                    validateArgumentCount(args, 2, "getClass命令需要指定测试路径");
+                    CommandHandler.handleGetClassCommand(args[1]);
+                    break;
                     
                 default:
                     System.err.println("未知命令: " + command);
@@ -92,6 +96,7 @@ public class Main {
         System.out.println("  java -jar app.jar generate <测试路径>  - 生成指定路径的测试用例");
         System.out.println("  java -jar app.jar env                  - 测试JDK环境");
         System.out.println("  java -jar app.jar verify               - 验证已识别的Bug");
+        System.out.println("  java -jar app.jar getClass <测试路径>   - 收集测试用例使用到的java.base类");
         System.out.println();
         System.out.println("示例:");
         System.out.println("  java -jar app.jar execute java/util/ArrayList");
