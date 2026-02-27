@@ -6,3 +6,6 @@
 !README.md
 !.gitignore
 !fuzz4all/config/base.yaml
+!.github/
+!.github/workflows/
+!.github/workflows/*.yml
