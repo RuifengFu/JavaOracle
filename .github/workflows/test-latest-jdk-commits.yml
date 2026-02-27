@@ -40,7 +40,8 @@ jobs:
       - name: Clone jdk17u-dev
         run: |
           set -euo pipefail
-          git clone --depth 1 https://github.com/openjdk/jdk17u-dev
+          # keep full history: changed-test discovery relies on git log --since over the last 24h
+          git clone https://github.com/openjdk/jdk17u-dev
       - name: Configure JavaOracle runtime paths
         run: |
           set -euo pipefail

@@ -154,6 +154,7 @@ git clone https://github.com/openjdk/jdk17u-dev
 ```
 
 这对持续集成是推荐默认方案（维护成本低、无需额外管理子模块）。
+另外，当前 workflow 使用完整历史 clone（非 shallow clone），以保证“过去 24 小时变更检测”准确。
 仅当你需要“固定到某个 commit 做严格可复现”时，再考虑 submodule 或在 workflow 中 pin 到指定 SHA。
 
 ### 8.3 配置优先级说明
