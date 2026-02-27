@@ -4,6 +4,8 @@ import edu.tju.ista.llm4test.baseline.Fuzz4All;
 import edu.tju.ista.llm4test.concurrent.ConcurrentExecutionManager;
 import edu.tju.ista.llm4test.config.GlobalConfig;
 import edu.tju.ista.llm4test.llm.OpenAI;
+import edu.tju.ista.llm4test.llm.TokenUsagePhase;
+import edu.tju.ista.llm4test.llm.TokenUsageTracker;
 import edu.tju.ista.llm4test.llm.tools.RootCauseOutputTool;
 import edu.tju.ista.llm4test.llm.tools.Tool;
 import edu.tju.ista.llm4test.prompt.PromptGen;
@@ -259,6 +261,15 @@ public class TestCase {
         });
     }
 
+    private <T> T executeWithTokenContext(TokenUsagePhase phase, java.util.function.Supplier<T> action) {
+        TokenUsageTracker.getInstance().setContext(this.name, phase);
+        try {
+            return action.get();
+        } finally {
+            TokenUsageTracker.getInstance().clearContext();
+        }
+    }
+
     /**
      * 异步处理增强工作流程：enhance → test → verify → fix
      * 专门用于处理成功的测试用例
@@ -373,7 +384,7 @@ public class TestCase {
             String prompt = PromptGen.generatePrompt("RootCause", dataModel);
             ArrayList<Tool<?>> tools = new ArrayList<>();
             tools.add(new RootCauseOutputTool());
-            var result = OpenAI.AgentModel.toolCallWithContent(prompt, tools);
+            var result = executeWithTokenContext(TokenUsagePhase.VERIFICATION, () -> OpenAI.AgentModel.toolCallWithContent(prompt, tools));
             var callList = result.toolCalls();
             var content = result.content();
             if (callList.isEmpty()) {
@@ -452,7 +463,7 @@ public class TestCase {
             dataModel.put("apiDocs", apiDoc);
             dataModel.put("rootCause", verifyMessage);
             String prompt = PromptGen.generatePrompt("FixTestCase", dataModel);
-            String text = OpenAI.ThinkingModel.messageCompletion(prompt, 0.3, false);
+            String text = executeWithTokenContext(TokenUsagePhase.GENERATION, () -> OpenAI.ThinkingModel.messageCompletion(prompt, 0.3, false));
             ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
             if (codeBlocks.isEmpty()) {
                 applyChange(text);
@@ -484,7 +495,7 @@ public class TestCase {
                 dataModel.put("testcase", getTestcaseWithLineNumber());
                 dataModel.put("apiDocs", apiDoc);
                 String prompt = PromptGen.generatePrompt("EnhanceTestCase", dataModel);
-                text = OpenAI.ThinkingModel.messageCompletion(prompt, 0.3, false);
+                text = executeWithTokenContext(TokenUsagePhase.GENERATION, () -> OpenAI.ThinkingModel.messageCompletion(prompt, 0.3, false));
             }
 
             // 统一处理所有模式的输出
@@ -516,7 +527,7 @@ public class TestCase {
             dataModel.put("originTestcase", testcase);
             dataModel.put("modified", change);
             String prompt = PromptGen.generatePrompt("ApplyChange", dataModel);
-            String text = OpenAI.FlashModel.messageCompletion(prompt);
+            String text = executeWithTokenContext(TokenUsagePhase.GENERATION, () -> OpenAI.FlashModel.messageCompletion(prompt));
             ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
             if (codeBlocks.isEmpty() && !text.contains("```")) {
                 writeTestCaseToFile(text);

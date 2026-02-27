@@ -2,6 +2,7 @@ package edu.tju.ista.llm4test.service;
 
 import edu.tju.ista.llm4test.config.GlobalConfig;
 import edu.tju.ista.llm4test.execute.*;
+import edu.tju.ista.llm4test.llm.TokenUsageTracker;
 import edu.tju.ista.llm4test.utils.*;
 
 import java.io.File;
@@ -46,6 +47,7 @@ public class TestExecutionManager {
      * 2. 对成功的测试用例进行enhance、verify和fix（默认流水线模式）
      */
     public void runTestSuiteParallel() {
+        TokenUsageTracker.getInstance().reset();
         System.out.println("开始生成模式，缓存模式: " + (GlobalConfig.isUseCacheMode() ? "开启" : "关闭"));
         
         // 第一阶段：筛选成功的测试用例
@@ -54,6 +56,7 @@ public class TestExecutionManager {
         
         if (successfulTestCases.isEmpty()) {
             System.out.println("没有成功的测试用例，生成模式结束");
+            TokenUsageTracker.getInstance().logSummary(0);
             return;
         }
 
@@ -64,6 +67,7 @@ public class TestExecutionManager {
         
         System.out.println("生成模式完成");
         statistics.logStatistics();
+        TokenUsageTracker.getInstance().logSummary(successfulTestCases.size());
         testExecutor.clearTempDirectories();
     }
 
@@ -72,6 +76,7 @@ public class TestExecutionManager {
      * 使用测试线程池进行测试执行（CPU密集型）
      */
     public void runTestSuiteParallelExecution() {
+        TokenUsageTracker.getInstance().reset();
         System.out.println("开始执行模式");
         
         // 创建并执行所有测试用例
@@ -90,6 +95,7 @@ public class TestExecutionManager {
         }
         
         statistics.logStatistics();
+        TokenUsageTracker.getInstance().logSummary(testCases.size());
     }
 
     /**
