@@ -17,6 +17,8 @@ import edu.tju.ista.llm4test.llm.tools.*;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.logging.Level;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -100,6 +102,10 @@ public class BugVerify extends Agent {
     private String initialAnalysis;
     private final Map<String, Object> collectedInfo = Collections.synchronizedMap(new HashMap<>());
     private Boolean enhancePassed = null;
+    private int enhanceVerdictScore = 0;
+    private String testcaseIssueStage = "NONE";
+    private double reviewConfidenceTotal = 0.0;
+    private int reviewConfidenceCount = 0;
 
     private String enhanceVerifyFailureReason = "Unknown";
     
@@ -123,6 +129,7 @@ public class BugVerify extends Agent {
     // 裁决结果缓存（enhanceVerify 最终结果缓存）
     private static final Path VERIFY_CACHE_DIR = Paths.get("VerifyCache");
     private static final Path VERIFY_MANIFEST = VERIFY_CACHE_DIR.resolve("verdict_cache.csv");
+    private static final Path POTENTIAL_BUG_RANKING_CSV = Paths.get("potential_bug_ranking.csv");
     private static final Object VERIFY_CACHE_FS_LOCK = new Object();
     private static final java.util.Map<String, String> verifyVerdictCache = new java.util.concurrent.ConcurrentHashMap<>();
     private static volatile boolean verifyCacheLoaded = false;
@@ -456,6 +463,7 @@ public class BugVerify extends Agent {
                 JsonNode rootNode = objectMapper.readTree(reportJson);
                 String bugType = rootNode.path("bug_type").asText("UNKNOWN");
                 reportContent = rootNode.path("report").asText();
+                String originalCaseName = testCaseName;
 
                 Path targetBugDir = Paths.get(bugReportPath, "bug", testCaseName);
 
@@ -500,6 +508,9 @@ public class BugVerify extends Agent {
                         }
                         break;
                     case "TESTCASE_ERROR":
+                        if (!"DEBATE".equals(this.testcaseIssueStage)) {
+                            this.testcaseIssueStage = "BUG_REPORT_REVIEW";
+                        }
                         fileName = "TestCaseErrorAnalysis.md";
                         reportDir = sourceTestCaseDir;
                         break;
@@ -525,6 +536,9 @@ public class BugVerify extends Agent {
                                 }
                                 reportDir = targetBugDir;
                             } else if (reportContent.contains("Test Case Issue Analysis") || reportContent.contains("Test Case Error Analysis")) {
+                                if (!"DEBATE".equals(this.testcaseIssueStage)) {
+                                    this.testcaseIssueStage = "BUG_REPORT_REVIEW";
+                                }
                                 fileName = "TestCaseErrorAnalysis.md";
                             } else {
                                 reportContent += "Report Type: " + bugType + "\n\n";
@@ -535,6 +549,13 @@ public class BugVerify extends Agent {
                 }
                 Files.createDirectories(reportDir);
                 saveToFile(reportDir.resolve(fileName).toString(), reportContent);
+
+                String priority = resolvePriorityLevel(bugType);
+                int score = calculatePotentialBugScore(bugType);
+                String sortableName = buildSortableCaseName(priority, score, originalCaseName);
+                Path sortedDir = moveCaseDirectoryToSortableName(reportDir, reportDir.getParent(), sortableName);
+                this.testCaseName = sortedDir.getFileName().toString();
+                appendPotentialBugRanking(originalCaseName, this.testCaseName, bugType, priority, score);
             } catch (IOException e) {
                 LoggerUtil.logExec(Level.WARNING, "Failed to parse report JSON or create report directory. Saving raw output. Error: " + e.getMessage());
                 fileName = "WrongFormatReport.md";
@@ -587,6 +608,7 @@ public class BugVerify extends Agent {
             LoggerUtil.logVerify(Level.INFO, header, "Cached verdict hit: " + cachedVerdict);
             writeVerifyStatus("EnhanceVerify", "CACHED", cachedVerdict);
             if ("TESTCASE_ISSUE".equals(cachedVerdict)) {
+                this.testcaseIssueStage = "DEBATE";
                 this.enhanceVerifyFailureReason = "Cached verdict: TESTCASE_ISSUE";
                 return false;
             }
@@ -597,6 +619,7 @@ public class BugVerify extends Agent {
         // 前置条件检查：确保测试用例存在且被识别为bug
         if (testCase == null || testCase.getResult() == null) {
             logWithTestCase("测试用例未设置，跳过增强验证");
+            this.testcaseIssueStage = "PRECHECK";
             this.enhanceVerifyFailureReason = "Test case not set.";
             LoggerUtil.logVerify(Level.WARNING, header, "Verification failed: Test case not set.");
             // 最终一次性写入结果并缓存
@@ -668,6 +691,7 @@ public class BugVerify extends Agent {
             }
 
             logWithTestCase("增强验证失败：多数验证 (" + bugVerificationCount + "/" + TOTAL_VERIFICATIONS + ") 未能确认是bug");
+            this.testcaseIssueStage = "DEBATE";
             this.enhanceVerifyFailureReason = "Inconsistent verification results. Only " + bugVerificationCount + " out of " + TOTAL_VERIFICATIONS + " validations identified a bug.";
             
             // 保存验证失败结果
@@ -765,6 +789,7 @@ public class BugVerify extends Agent {
         }
         
         logWithTestCase("裁决投票完成. 总分: " + totalScore + ". 最终裁决: " + finalVerdict);
+        this.enhanceVerdictScore = totalScore;
         // 新增：记录最终裁决并保存状态
         writeVerifyStatus("Verdict", finalVerdict, "Total score: " + totalScore);
 
@@ -792,6 +817,7 @@ public class BugVerify extends Agent {
             return true;
         } else { // TESTCASE_ISSUE
             logWithTestCase("裁决认为是测试用例问题");
+            this.testcaseIssueStage = "DEBATE";
             this.enhanceVerifyFailureReason = "Verdict: TESTCASE_ISSUE (Score: " + totalScore + "). The adjudicator determined the issue is with the test case.";
             cacheEnhanceVerdict(cacheKey, finalVerdict);
             return false;
@@ -1390,6 +1416,7 @@ public class BugVerify extends Agent {
             var reviewResult = llm.toolCallWithContent(prompt, tools);
             appendToFile(verifyContextPath.resolve("review_toolcall.json").toString(), reviewResult.toolCalls().toString());
             String feedback = reviewResult.content();
+            updateReviewConfidence(feedback);
 
             // Process any tool calls made during review and add results to collectedInfo
             processReviewToolCalls(reviewResult.toolCalls(), tools);
@@ -1457,6 +1484,7 @@ public class BugVerify extends Agent {
             var reviewResult = llm.toolCallWithContent(prompt, tools);
             appendToFile(verifyContextPath.resolve("review_toolcall.json").toString(), reviewResult.toolCalls().toString());
             String feedback = reviewResult.content();
+            updateReviewConfidence(feedback);
 
             // 仅当允许时，才将新信息源写入 collectedInfo
             if (allowInfoUpdate) {
@@ -1820,6 +1848,114 @@ public class BugVerify extends Agent {
     private static String sanitizeFilePart(String name) {
         if (name == null) return "noname";
         return name.replaceAll("[^a-zA-Z0-9-_]", "_");
+    }
+
+    private void updateReviewConfidence(String feedback) {
+        double score = extractConfidenceScore(feedback);
+        if (score >= 0) {
+            this.reviewConfidenceTotal += score;
+            this.reviewConfidenceCount++;
+        }
+    }
+
+    private double extractConfidenceScore(String text) {
+        if (text == null || text.isBlank()) {
+            return -1;
+        }
+        Pattern pattern = Pattern.compile("(\\d{1,2})\\s*/\\s*10");
+        Matcher matcher = pattern.matcher(text);
+        if (matcher.find()) {
+            try {
+                int value = Integer.parseInt(matcher.group(1));
+                return Math.max(0, Math.min(10, value));
+            } catch (NumberFormatException ignore) {
+                return -1;
+            }
+        }
+        return -1;
+    }
+
+    private double getAverageReviewConfidence() {
+        return reviewConfidenceCount == 0 ? 0.0 : reviewConfidenceTotal / reviewConfidenceCount;
+    }
+
+    private int calculatePotentialBugScore(String bugType) {
+        int score = switch (bugType) {
+            case "JDK_BUG" -> 70;
+            case "BOTH" -> 65;
+            case "UNCLEAR" -> 45;
+            case "TESTCASE_ERROR" -> 25;
+            default -> 30;
+        };
+        score += Math.max(-6, Math.min(6, enhanceVerdictScore)) * 4;
+        score += (int) Math.round(getAverageReviewConfidence() * 3);
+        if ("DEBATE".equals(testcaseIssueStage)) {
+            score -= 15;
+        } else if ("BUG_REPORT_REVIEW".equals(testcaseIssueStage)) {
+            score -= 10;
+        }
+        return Math.max(0, Math.min(199, score));
+    }
+
+    private String resolvePriorityLevel(String bugType) {
+        if ("JDK_BUG".equals(bugType) || "BOTH".equals(bugType)) {
+            return "P1";
+        }
+        if ("TESTCASE_ERROR".equals(bugType) && "DEBATE".equals(testcaseIssueStage)) {
+            return "P2";
+        }
+        return "P3";
+    }
+
+    private String buildSortableCaseName(String priority, int score, String baseName) {
+        String safeName = sanitizeFilePart(baseName);
+        int orderKey = 199 - Math.max(0, Math.min(199, score));
+        return String.format("%s_%03d_%s", priority, orderKey, safeName);
+    }
+
+    private Path moveCaseDirectoryToSortableName(Path currentDir, Path targetRoot, String sortableName) {
+        if (currentDir == null || targetRoot == null || sortableName == null || sortableName.isBlank()) {
+            return currentDir;
+        }
+        Path desiredDir = targetRoot.resolve(sortableName);
+        if (currentDir.equals(desiredDir)) {
+            return currentDir;
+        }
+        Path finalDir = desiredDir;
+        int suffix = 1;
+        while (Files.exists(finalDir)) {
+            finalDir = targetRoot.resolve(sortableName + "_" + String.format("%03d", suffix++));
+        }
+        try {
+            Files.createDirectories(targetRoot);
+            Files.move(currentDir, finalDir);
+            return finalDir;
+        } catch (IOException moveEx) {
+            logWithTestCase(Level.WARNING, "重命名测试用例目录失败: " + moveEx.getMessage());
+            return currentDir;
+        }
+    }
+
+    private void appendPotentialBugRanking(String originalName, String sortableName, String bugType, String priority, int score) {
+        try {
+            Path rankingCsv = Paths.get(bugReportPath).resolve(POTENTIAL_BUG_RANKING_CSV);
+            if (!Files.exists(rankingCsv)) {
+                appendToFile(rankingCsv.toString(), "OriginalTestCase,SortableName,BugType,Priority,PotentialScore,VerdictScore,ReviewConfidence,IssueStage,Timestamp\n");
+            }
+            String line = String.format("\"%s\",\"%s\",%s,%s,%d,%d,%.2f,%s,%s\n",
+                sanitizeFilePart(originalName),
+                sanitizeFilePart(sortableName),
+                bugType,
+                priority,
+                score,
+                enhanceVerdictScore,
+                getAverageReviewConfidence(),
+                testcaseIssueStage,
+                GLOBAL_RESULT_TIMESTAMP);
+            appendToFile(rankingCsv.toString(), line);
+        } catch (Exception e) {
+            logWithTestCase(Level.WARNING, "写入 potential bug 排序结果失败: " + e.getMessage());
+        }
     }
     
     /**
@@ -2352,6 +2488,7 @@ public class BugVerify extends Agent {
             // 报告应保存在 testcase 目录下的特定测试文件夹中
             Path testcaseReportDir = Paths.get(bugReportPath, "testcase", testCaseName);
             Files.createDirectories(testcaseReportDir);
+            String originalCaseName = testCaseName;
 
             // 创建报告内容
             String reportContent = String.format(
@@ -2368,8 +2505,16 @@ public class BugVerify extends Agent {
             // 保存报告文件
             String reportFileName = "NotABugAnalysis.md";
             saveToFile(testcaseReportDir.resolve(reportFileName).toString(), reportContent);
+
+            String bugType = "TESTCASE_ERROR";
+            String priority = resolvePriorityLevel(bugType);
+            int score = calculatePotentialBugScore(bugType);
+            String sortableName = buildSortableCaseName(priority, score, originalCaseName);
+            Path sortedDir = moveCaseDirectoryToSortableName(testcaseReportDir, testcaseReportDir.getParent(), sortableName);
+            this.testCaseName = sortedDir.getFileName().toString();
+            appendPotentialBugRanking(originalCaseName, this.testCaseName, bugType, priority, score);
             
-            LoggerUtil.logExec(Level.INFO, "Non-bug report generated for " + testCaseName + " at " + testcaseReportDir.resolve(reportFileName));
+            LoggerUtil.logExec(Level.INFO, "Non-bug report generated for " + testCaseName + " at " + sortedDir.resolve(reportFileName));
 
         } catch (IOException e) {
             LoggerUtil.logExec(Level.SEVERE, "Failed to generate non-bug report for " + testCaseName + ": " + e.getMessage());
