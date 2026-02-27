@@ -137,12 +137,13 @@ mvn -B -q exec:java -Dexec.mainClass=edu.tju.ista.llm4test.Main -Dexec.args="exe
 - 必需（至少配置一组）
   - `OPENAI_API_KEY` 或 `ARK_API_KEY` 或 `MOONSHOT_API_KEY`
 - 可选（按 provider 配置）
-  - `OPENAI_BASE_URL`, `OPENAI_MODEL`
-  - `ARK_BASE_URL`, `ARK_MODEL`
-  - `MOONSHOT_BASE_URL`
+  - `OPENAI_BASE_URL`, `OPENAI_MODEL`（建议放在 Repository Variables，不建议放 Secrets）
+  - `ARK_BASE_URL`, `ARK_MODEL`（建议放在 Repository Variables）
+  - `MOONSHOT_BASE_URL`（建议放在 Repository Variables）
   - `BOCHA_API_KEY`（启用外部检索时）
 
 工作流会在执行前进行 fail-fast 检查：若三组主 LLM Key 全部缺失，任务会直接失败并提示。
+此外，workflow 已为常见 Base URL / Model 提供默认值，你只配置 API Key 也可以跑通。
 
 ### 8.2 JDK 源码准备建议
 
