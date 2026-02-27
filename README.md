@@ -1,6 +1,9 @@
-# JavaOracle
+# Java Oracle
+
+Java Oracle is a framework for generating test oracles and verifying potential JDK bugs with LLM-assisted workflows.
 
 一个面向 JDK 测试场景的 Oracle 生成与 Bug 验证框架。项目支持从已有测试中提取信息、生成/增强测试，并在多阶段流程中进行失败分析与 Bug 验证。
+> This README is currently Chinese-first. A fuller English version is targeted for Q2 2026.
 
 ## 1. 环境配置
 
