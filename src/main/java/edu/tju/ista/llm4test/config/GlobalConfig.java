@@ -60,6 +60,7 @@ public class GlobalConfig {
     // 缓存相关默认配置
     private static final String DEFAULT_VALID_TEST_CASES_DIR = "ValidTestCases";
     private static final boolean DEFAULT_USE_CACHE_MODE = false;
+    private static final boolean DEFAULT_LEGACY_ENHANCE_THEN_VERIFY_WORKFLOW = false;
     
     /**
      * 辅助方法：优先从配置文件获取，其次从环境变量获取
@@ -312,6 +313,13 @@ public class GlobalConfig {
      */
     public static boolean isUseCacheMode() {
         return ConfigUtil.getBoolean("useCacheMode", DEFAULT_USE_CACHE_MODE);
+    }
+
+    /**
+     * 是否使用旧工作流（先增强全部用例，再统一验证/修复）
+     */
+    public static boolean isLegacyEnhanceThenVerifyWorkflow() {
+        return ConfigUtil.getBoolean("legacyEnhanceThenVerifyWorkflow", DEFAULT_LEGACY_ENHANCE_THEN_VERIFY_WORKFLOW);
     }
     
     /**

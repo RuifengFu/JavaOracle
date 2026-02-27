@@ -43,7 +43,7 @@ public class TestExecutionManager {
      * 并行执行测试套件（生成模式）
      * 两阶段处理：
      * 1. 执行所有测试，筛选出成功的测试用例（支持缓存模式）
-     * 2. 对成功的测试用例进行enhance、verify和fix
+     * 2. 对成功的测试用例进行enhance、verify和fix（默认流水线模式）
      */
     public void runTestSuiteParallel() {
         System.out.println("开始生成模式，缓存模式: " + (GlobalConfig.isUseCacheMode() ? "开启" : "关闭"));
@@ -178,6 +178,10 @@ public class TestExecutionManager {
      */
     private void processTestCases(List<TestCase> testCases) {
         try {
+            if (GlobalConfig.isLegacyEnhanceThenVerifyWorkflow()) {
+                processTestCasesLegacyTwoStage(testCases);
+                return;
+            }
             CompletableFuture<?>[] tasks = testCases.stream()
                     .map(testCase -> testCase.processEnhancementWorkflowAsync(testExecutor)
                             .handle((result, throwable) -> {
@@ -191,6 +195,30 @@ public class TestExecutionManager {
             LoggerUtil.logExec(Level.SEVERE, "处理过程中发生错误: " + e.getMessage());
             e.printStackTrace();
         }
+    }
+
+    private void processTestCasesLegacyTwoStage(List<TestCase> testCases) {
+        LoggerUtil.logExec(Level.INFO, "使用旧工作流：先增强全部测试，再统一验证/修复");
+
+        CompletableFuture<?>[] enhanceTasks = testCases.stream()
+                .map(testCase -> testCase.enhanceAsync()
+                        .handle((result, throwable) -> {
+                            if (throwable != null) {
+                                LoggerUtil.logExec(Level.WARNING, "增强测试用例失败: " + testCase.getFile() + " - " + throwable.getMessage());
+                            }
+                            return null;
+                        }))
+                .toArray(CompletableFuture[]::new);
+        CompletableFuture.allOf(enhanceTasks).join();
+
+        CompletableFuture<?>[] verifyTasks = testCases.stream()
+                .map(testCase -> testCase.processPostEnhancementWorkflowAsync(testExecutor)
+                        .handle((result, throwable) -> {
+                            handleTestCaseResult(testCase, throwable);
+                            return null;
+                        }))
+                .toArray(CompletableFuture[]::new);
+        CompletableFuture.allOf(verifyTasks).join();
     }
     
     /**

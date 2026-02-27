@@ -270,6 +270,15 @@ public class TestCase {
                 .thenCompose(v -> executeTestAsync(testExecutor))
                 .thenCompose(result -> processTestResultAndFixAsync(result, testExecutor));
     }
+
+    /**
+     * 异步处理后增强工作流程：test → verify → fix
+     * 用于兼容旧模式（先增强全部用例，再统一执行后续流程）
+     */
+    public CompletableFuture<Void> processPostEnhancementWorkflowAsync(TestExecutor testExecutor) {
+        return executeTestAsync(testExecutor)
+                .thenCompose(result -> processTestResultAndFixAsync(result, testExecutor));
+    }
     
     /**
      * 最佳实践版本：完全异步地处理测试结果和修复流程，避免在任何线程池中引入阻塞操作。
