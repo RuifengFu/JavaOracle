@@ -16,6 +16,7 @@ import edu.tju.ista.llm4test.config.GlobalConfig;
 import edu.tju.ista.llm4test.llm.tools.Tool;
 import edu.tju.ista.llm4test.llm.tools.ToolFactory;
 import edu.tju.ista.llm4test.llm.tools.ToolCall;
+import edu.tju.ista.llm4test.llm.tools.ToolRegistry;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
 
 import java.util.*;
@@ -34,7 +35,7 @@ import edu.tju.ista.llm4test.config.ModelConfig;
  *  OpenAI style LLM api calling.
  */
 public class OpenAI {
-    private final String API_KEY; // Replace with your API key
+    private final String API_KEY;
 
     private String BASE_URL;
 
@@ -49,6 +50,10 @@ public class OpenAI {
 
     private static final int MAX_RETRIES = 3;
     private static final long RETRY_DELAY_MS = 60000;
+    private static final int MAX_TOOL_CALL_ROUNDS = 10;
+
+    /** Shared HttpClient instance, lazily initialized per OpenAI instance. */
+    private volatile HttpClient sharedHttpClient;
 
     public enum ToolCallRequirement {
         REQUIRED, // Must contain tool call, or retry (up to 3 times)
@@ -103,9 +108,7 @@ public class OpenAI {
         if (GlobalConfig.isEnableAblationTest()) {
             this.TEMPERATURE = 0.0;
         }
-        System.out.println("BASE_URL: " + BASE_URL);
-        System.out.println("API_KEY: " + API_KEY);
-        System.out.println("MODEL: " + MODEL);
+        LoggerUtil.logExec(Level.INFO, "OpenAI client initialized - Model: " + MODEL + ", BaseURL: " + BASE_URL);
     }
 
     public OpenAI(String API_KEY, String BASE_URL, String modelName) {
@@ -133,10 +136,7 @@ public class OpenAI {
             // Only set temperature from config if not in ablation test mode
             this.TEMPERATURE = config.getTemperature();
         }
-        System.out.println("BASE_URL: " + BASE_URL);
-        System.out.println("API_KEY: " + API_KEY);
-        System.out.println("MODEL: " + MODEL);
-
+        LoggerUtil.logExec(Level.INFO, "OpenAI client initialized - Model: " + MODEL + ", BaseURL: " + BASE_URL);
     }
 
     public static OpenAI ThinkingModel;
@@ -200,54 +200,86 @@ public class OpenAI {
 
 
     private Map<String, Object> getBaseRequestMap(String prompt, double requestTemperature) {
-        // Create request body
+        return getBaseRequestMapWithMessages(
+                List.of(Map.of("role", "user", "content", prompt)),
+                requestTemperature
+        );
+    }
+
+    /**
+     * Build a request body with a full message list (supports multi-turn conversations).
+     */
+    private Map<String, Object> getBaseRequestMapWithMessages(List<Map<String, Object>> messages, double requestTemperature) {
         Map<String, Object> requestBody = new HashMap<>();
         if (this.JSON_OUTPUT) {
             requestBody.put("response_format", Map.of("type", "json_object"));
-            if (!prompt.contains("json")) {
-                prompt += "\nPlease return the response in json format.";
+            // Check last user message for json hint
+            String lastContent = messages.stream()
+                    .filter(m -> "user".equals(m.get("role")))
+                    .reduce((first, second) -> second)
+                    .map(m -> (String) m.get("content"))
+                    .orElse("");
+            if (!lastContent.contains("json")) {
+                List<Map<String, Object>> updatedMessages = new ArrayList<>(messages);
+                updatedMessages.add(Map.of("role", "user", "content", "Please return the response in json format."));
+                messages = updatedMessages;
             }
         }
         requestBody.put("model", MODEL);
-        requestBody.put("messages", List.of(
-//                Map.of("role", "system", "content", systemPrompt),
-                Map.of("role", "user", "content", prompt)
-        ));
+        requestBody.put("messages", messages);
+        requestBody.put("max_tokens", MAX_TOKENS);
 
-        requestBody.put("max_tokens", MAX_TOKENS); // Limit the response length
-
-        // 根据消融实验模式设置温度
         double finalTemperature = GlobalConfig.isEnableAblationTest() ? 0.0 : requestTemperature;
         requestBody.put("temperature", finalTemperature);
-
         requestBody.put("stream", STREAM);
         return requestBody;
     }
 
     protected HttpClient buildHttpClient() {
-        if (GlobalConfig.isProxyEnabled()) {
-            String proxyHost = GlobalConfig.getProxyHost();
-            int proxyPort = GlobalConfig.getProxyPort();
-
-            if (!proxyHost.isEmpty() && proxyPort > 0) {
-                return HttpClient.newBuilder()
-                        .proxy(ProxySelector.of(new InetSocketAddress(proxyHost, proxyPort)))
-                        .build();
-            }
+        if (sharedHttpClient != null) {
+            return sharedHttpClient;
         }
-        return HttpClient.newHttpClient();
+        synchronized (this) {
+            if (sharedHttpClient != null) {
+                return sharedHttpClient;
+            }
+            if (GlobalConfig.isProxyEnabled()) {
+                String proxyHost = GlobalConfig.getProxyHost();
+                int proxyPort = GlobalConfig.getProxyPort();
+
+                if (!proxyHost.isEmpty() && proxyPort > 0) {
+                    sharedHttpClient = HttpClient.newBuilder()
+                            .proxy(ProxySelector.of(new InetSocketAddress(proxyHost, proxyPort)))
+                            .build();
+                    return sharedHttpClient;
+                }
+            }
+            sharedHttpClient = HttpClient.newHttpClient();
+            return sharedHttpClient;
+        }
+    }
+
+    /**
+     * Resolve the full API endpoint URL from BASE_URL.
+     * If BASE_URL already ends with a complete path (e.g., /chat/completions), use it directly.
+     * Otherwise, append /chat/completions.
+     */
+    private String getEndpointUrl() {
+        if (BASE_URL.endsWith("/chat/completions")) {
+            return BASE_URL;
+        }
+        String base = BASE_URL.endsWith("/") ? BASE_URL : BASE_URL + "/";
+        return base + "chat/completions";
     }
 
     private HttpRequest buildRequest(String requestBodyJson) {
-        // 最佳实践：为所有网络请求设置一个合理的超时，以防止无限期等待。
-        // 这个值理想情况下应该来自 GlobalConfig，此处设置为60秒作为一个安全的默认值。
         final long REQUEST_TIMEOUT_SECONDS = 1800;
 
         return HttpRequest.newBuilder()
-                .uri(URI.create(BASE_URL + "chat/completions"))
+                .uri(URI.create(getEndpointUrl()))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer " + API_KEY)
-                .timeout(Duration.ofSeconds(REQUEST_TIMEOUT_SECONDS)) // **关键修复：设置请求超时**
+                .timeout(Duration.ofSeconds(REQUEST_TIMEOUT_SECONDS))
                 .POST(HttpRequest.BodyPublishers.ofString(requestBodyJson))
                 .build();
     }
@@ -768,6 +800,160 @@ public class OpenAI {
         }
         // Remove <thinking> tags and their content
         return content.replaceAll("<thinking>[\\s\\S]*?</thinking>", "").trim();
+    }
+
+    /**
+     * Result of a tool call feedback loop, containing the final LLM response
+     * after all tool calls have been executed and their results fed back.
+     */
+    public record ToolCallFeedbackResult(String content, String reasoningContent, List<ToolCallRoundInfo> rounds) {}
+
+    /**
+     * Information about a single round in the tool call feedback loop.
+     */
+    public record ToolCallRoundInfo(int round, List<ToolCall> toolCalls, Map<String, String> toolResults) {}
+
+    /**
+     * Execute a full tool call feedback loop:
+     * 1. Send prompt with tool definitions to the LLM
+     * 2. If the LLM returns tool calls, execute them
+     * 3. Feed tool results back to the LLM
+     * 4. Repeat until the LLM returns a final text response (no more tool calls)
+     *
+     * @param prompt     the user prompt
+     * @param tools      the available tools
+     * @param registry   the tool registry for executing tool calls
+     * @return ToolCallFeedbackResult with the final response and all round info
+     */
+    public ToolCallFeedbackResult toolCallWithFeedback(String prompt, List<Tool<?>> tools, ToolRegistry registry) {
+        List<Map<String, Object>> messages = new ArrayList<>();
+        messages.add(Map.of("role", "user", "content", prompt));
+
+        List<ToolCallRoundInfo> rounds = new ArrayList<>();
+
+        for (int round = 0; round < MAX_TOOL_CALL_ROUNDS; round++) {
+            Map<String, Object> requestBody = getBaseRequestMapWithMessages(messages, this.TEMPERATURE);
+            requestBody.put("tools", ToolFactory.toToolsArray(tools));
+
+            // Make the LLM call
+            ToolCallResult result;
+            try {
+                if (STREAM) {
+                    StreamedToolCallResponse streamed = executeWithRetryAsync(
+                            "streamToolCallFeedback",
+                            () -> streamToolCallResponseAsync(requestBody),
+                            0
+                    ).join();
+                    result = new ToolCallResult(streamed.toolCalls, streamed.content, streamed.reasoningContent);
+                } else {
+                    result = executeWithRetryAsync(
+                            "toolCallFeedback",
+                            () -> getResponseBodyAsync(requestBody).thenApply(responseBody -> {
+                                @SuppressWarnings("unchecked")
+                                List<Map<String, Object>> choices = (List<Map<String, Object>>) responseBody.get("choices");
+                                if (choices != null && !choices.isEmpty()) {
+                                    @SuppressWarnings("unchecked")
+                                    Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
+                                    String content = (String) message.get("content");
+                                    String reasoning = (String) message.get("reasoning_content");
+                                    List<ToolCall> calls = parseToolCalls(message.get("tool_calls"));
+                                    return new ToolCallResult(calls, content != null ? content : "", reasoning != null ? reasoning : "");
+                                }
+                                return new ToolCallResult(new ArrayList<>(), "", "");
+                            }),
+                            0
+                    ).join();
+                }
+            } catch (Exception e) {
+                Throwable cause = (e instanceof CompletionException) ? e.getCause() : e;
+                LoggerUtil.logExec(Level.SEVERE, "Tool call feedback loop failed at round " + (round + 1) + ": " + cause.getMessage());
+                return new ToolCallFeedbackResult("", "", rounds);
+            }
+
+            // If no tool calls, we have the final response
+            if (result.toolCalls() == null || result.toolCalls().isEmpty()) {
+                LoggerUtil.logOpenAI(Level.INFO, "Tool call feedback completed after " + (round + 1) + " round(s). Final response received.");
+                return new ToolCallFeedbackResult(result.content(), result.reasoningContent(), rounds);
+            }
+
+            // Execute tool calls and collect results
+            Map<String, String> toolResults = new LinkedHashMap<>();
+            // Build assistant message with tool_calls
+            List<Map<String, Object>> assistantToolCalls = new ArrayList<>();
+            for (int i = 0; i < result.toolCalls().size(); i++) {
+                ToolCall tc = result.toolCalls().get(i);
+                String toolCallId = "call_" + round + "_" + i;
+                Map<String, Object> tcMap = new HashMap<>();
+                tcMap.put("id", toolCallId);
+                tcMap.put("type", "function");
+                try {
+                    tcMap.put("function", Map.of("name", tc.toolName, "arguments", new ObjectMapper().writeValueAsString(tc.arguments)));
+                } catch (JsonProcessingException e) {
+                    tcMap.put("function", Map.of("name", tc.toolName, "arguments", "{}"));
+                }
+                assistantToolCalls.add(tcMap);
+            }
+
+            // Add assistant message
+            Map<String, Object> assistantMsg = new HashMap<>();
+            assistantMsg.put("role", "assistant");
+            if (result.content() != null && !result.content().isEmpty()) {
+                assistantMsg.put("content", result.content());
+            }
+            assistantMsg.put("tool_calls", assistantToolCalls);
+            messages.add(assistantMsg);
+
+            // Execute each tool and add tool result messages
+            for (int i = 0; i < result.toolCalls().size(); i++) {
+                ToolCall tc = result.toolCalls().get(i);
+                String toolCallId = "call_" + round + "_" + i;
+                String toolResultStr;
+
+                LoggerUtil.logOpenAI(Level.INFO, "Round " + (round + 1) + " - Executing tool: " + tc.toolName + " with args: " + tc.arguments);
+
+                if (registry.has(tc.toolName)) {
+                    Tool<?> tool = registry.get(tc.toolName);
+                    try {
+                        var response = tool.execute(tc.arguments);
+                        toolResultStr = response.isSuccess() ? response.toString() : "Error: " + response.getFailMessage();
+                    } catch (Exception e) {
+                        toolResultStr = "Error executing tool '" + tc.toolName + "': " + e.getMessage();
+                        LoggerUtil.logExec(Level.WARNING, toolResultStr);
+                    }
+                } else {
+                    toolResultStr = "Error: Tool '" + tc.toolName + "' not found in registry.";
+                    LoggerUtil.logExec(Level.WARNING, toolResultStr);
+                }
+
+                toolResults.put(tc.toolName, toolResultStr);
+                LoggerUtil.logOpenAI(Level.INFO, "Round " + (round + 1) + " - Tool result for " + tc.toolName + ": " + toolResultStr.substring(0, Math.min(200, toolResultStr.length())));
+
+                // Add tool result message
+                Map<String, Object> toolMsg = new HashMap<>();
+                toolMsg.put("role", "tool");
+                toolMsg.put("tool_call_id", toolCallId);
+                toolMsg.put("content", toolResultStr);
+                messages.add(toolMsg);
+            }
+
+            rounds.add(new ToolCallRoundInfo(round + 1, result.toolCalls(), toolResults));
+            LoggerUtil.logOpenAI(Level.INFO, "Tool call feedback round " + (round + 1) + " completed. " + result.toolCalls().size() + " tool(s) executed.");
+        }
+
+        LoggerUtil.logExec(Level.WARNING, "Tool call feedback loop reached max rounds (" + MAX_TOOL_CALL_ROUNDS + "). Returning last available content.");
+        return new ToolCallFeedbackResult("", "", rounds);
+    }
+
+    /**
+     * Convenience method: execute a tool call feedback loop with a simple tool list.
+     * Tools are registered automatically from the provided list.
+     */
+    public ToolCallFeedbackResult toolCallWithFeedback(String prompt, List<Tool<?>> tools) {
+        ToolRegistry registry = new ToolRegistry();
+        for (Tool<?> tool : tools) {
+            registry.register(tool);
+        }
+        return toolCallWithFeedback(prompt, tools, registry);
     }
 
 }
