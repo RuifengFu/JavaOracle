@@ -1,7 +1,15 @@
 package edu.tju.ista.llm4test.llm;
 
+import edu.tju.ista.llm4test.config.ConfigUtil;
+import edu.tju.ista.llm4test.config.GlobalConfig;
 import edu.tju.ista.llm4test.llm.agents.BugVerify;
 import org.junit.Test;
+
+import java.lang.reflect.Field;
+import java.util.Properties;
+
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class AgentTest {
 
@@ -36,6 +44,34 @@ public class AgentTest {
         var result = BugVerify.extractJsonObjectArrayFromField(json, "hypotheses");
         for (String str: result) {
             System.out.println(str);
+        }
+    }
+
+    @Test
+    public void defaultWorkflowIsPipeline() {
+        assertFalse(GlobalConfig.isLegacyEnhanceThenVerifyWorkflow());
+    }
+
+    @Test
+    public void legacyWorkflowFlagCanBeSwitched() throws Exception {
+        Field field = ConfigUtil.class.getDeclaredField("properties");
+        field.setAccessible(true);
+        Properties properties = (Properties) field.get(null);
+
+        String key = "legacyEnhanceThenVerifyWorkflow";
+        String oldValue = properties.getProperty(key);
+        try {
+            properties.setProperty(key, "true");
+            assertTrue(GlobalConfig.isLegacyEnhanceThenVerifyWorkflow());
+
+            properties.setProperty(key, "false");
+            assertFalse(GlobalConfig.isLegacyEnhanceThenVerifyWorkflow());
+        } finally {
+            if (oldValue == null) {
+                properties.remove(key);
+            } else {
+                properties.setProperty(key, oldValue);
+            }
         }
     }
 }
