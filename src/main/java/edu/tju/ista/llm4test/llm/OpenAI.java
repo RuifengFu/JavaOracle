@@ -174,10 +174,12 @@ public class OpenAI {
     private static class StreamedResponse {
         final String content;
         final String thinkingAndContent;
+        final RequestTokenUsage tokenUsage;
 
-        StreamedResponse(String content, String thinkingAndContent) {
+        StreamedResponse(String content, String thinkingAndContent, RequestTokenUsage tokenUsage) {
             this.content = content;
             this.thinkingAndContent = thinkingAndContent;
+            this.tokenUsage = tokenUsage;
         }
     }
 
@@ -189,12 +191,14 @@ public class OpenAI {
         final String content;
         final String reasoningContent;
         final String thinkingAndContent;
+        final RequestTokenUsage tokenUsage;
 
-        StreamedToolCallResponse(List<ToolCall> toolCalls, String content, String reasoningContent, String thinkingAndContent) {
+        StreamedToolCallResponse(List<ToolCall> toolCalls, String content, String reasoningContent, String thinkingAndContent, RequestTokenUsage tokenUsage) {
             this.toolCalls = toolCalls;
             this.content = content;
             this.reasoningContent = reasoningContent;
             this.thinkingAndContent = thinkingAndContent;
+            this.tokenUsage = tokenUsage;
         }
     }
 
@@ -232,6 +236,9 @@ public class OpenAI {
         double finalTemperature = GlobalConfig.isEnableAblationTest() ? 0.0 : requestTemperature;
         requestBody.put("temperature", finalTemperature);
         requestBody.put("stream", STREAM);
+        if (STREAM) {
+            requestBody.put("stream_options", Map.of("include_usage", true));
+        }
         return requestBody;
     }
 
@@ -430,11 +437,13 @@ public class OpenAI {
                 return executeWithRetryAsync("streamResponse", () -> streamResponseAsync(requestBody), 0)
                         .thenApply(streamedResponse -> {
                             LoggerUtil.logOpenAI(Level.INFO, "OpenAI async response: \n" + streamedResponse.thinkingAndContent);
+                            TokenUsageTracker.getInstance().record(MODEL, streamedResponse.tokenUsage);
                             return streamedResponse.content;
                         });
             } else {
                 return executeWithRetryAsync("getResponseBody", () -> getResponseBodyAsync(requestBody), 0)
                         .thenApply(responseBody -> {
+                            TokenUsageTracker.getInstance().record(MODEL, RequestTokenUsage.fromUsageObject(responseBody.get("usage")));
                             @SuppressWarnings("unchecked")
                             List<Map<String, Object>> choices = (List<Map<String, Object>>) responseBody.get("choices");
                             if (choices != null && !choices.isEmpty()) {
@@ -532,12 +541,14 @@ public class OpenAI {
                         0
                 ).thenApply(streamedResult -> {
                     LoggerUtil.logOpenAI(Level.INFO, "OpenAI async tool call response: \n" + streamedResult.thinkingAndContent);
+                    TokenUsageTracker.getInstance().record(MODEL, streamedResult.tokenUsage);
                     return new ToolCallResult(streamedResult.toolCalls, streamedResult.content, streamedResult.reasoningContent);
                 });
             } else {
                 return executeWithRetryAsync(
                         "toolCallWithContent",
                         () -> getResponseBodyAsync(requestBody).thenApply(responseBody -> {
+                            TokenUsageTracker.getInstance().record(MODEL, RequestTokenUsage.fromUsageObject(responseBody.get("usage")));
                             @SuppressWarnings("unchecked")
                             List<Map<String, Object>> choices = (List<Map<String, Object>>) responseBody.get("choices");
                             if (choices != null && !choices.isEmpty()) {
@@ -661,6 +672,7 @@ public class OpenAI {
                         StringBuilder reasonSb = new StringBuilder();
                         StringBuilder contentSb = new StringBuilder();
                         boolean[] hasValidData = {false};
+                        final RequestTokenUsage[] tokenUsage = {RequestTokenUsage.empty()};
 
                         response.body().forEach(line -> {
                             if (isValidDataLine(line)) {
@@ -670,6 +682,7 @@ public class OpenAI {
                                     String jsonContent = extractJsonContent(line);
                                     Map<String, Object> chunk = mapper.readValue(jsonContent, Map.class);
 
+                                    tokenUsage[0] = RequestTokenUsage.fromUsageObject(chunk.get("usage"));
                                     List<Map<String, Object>> choices = (List<Map<String, Object>>) chunk.get("choices");
                                     if (choices != null && !choices.isEmpty()) {
                                         Map<String, Object> choice = choices.get(0);
@@ -694,7 +707,7 @@ public class OpenAI {
                         }
 
                         String fullLog = "<thinking>\n" + reasonSb + "\n</thinking>\n\n" + contentSb;
-                        return new StreamedResponse(contentSb.toString(), fullLog);
+                        return new StreamedResponse(contentSb.toString(), fullLog, tokenUsage[0]);
                     });
         } catch (JsonProcessingException e) {
             return CompletableFuture.failedFuture(e);
@@ -722,6 +735,7 @@ public class OpenAI {
                         StringBuilder reasonSb = new StringBuilder();
                         StringBuilder contentSb = new StringBuilder();
                         boolean[] hasValidData = {false};
+                        final RequestTokenUsage[] tokenUsage = {RequestTokenUsage.empty()};
 
                         // 用于聚合流式工具调用的数据结构
                         Map<Integer, String> toolCallNames = new HashMap<>();
@@ -735,6 +749,7 @@ public class OpenAI {
                                     String jsonContent = extractJsonContent(line);
                                     Map<String, Object> chunk = mapper.readValue(jsonContent, Map.class);
 
+                                    tokenUsage[0] = RequestTokenUsage.fromUsageObject(chunk.get("usage"));
                                     List<Map<String, Object>> choices = (List<Map<String, Object>>) chunk.get("choices");
                                     if (choices != null && !choices.isEmpty()) {
                                         Map<String, Object> choice = choices.get(0);
@@ -787,7 +802,7 @@ public class OpenAI {
                         }
 
                         String fullLog = "<thinking>\n" + reasonSb + "\n</thinking>\n\n" + contentSb;
-                        return new StreamedToolCallResponse(finalToolCalls, contentSb.toString(), reasonSb.toString(), fullLog);
+                        return new StreamedToolCallResponse(finalToolCalls, contentSb.toString(), reasonSb.toString(), fullLog, tokenUsage[0]);
                     });
         } catch (JsonProcessingException e) {
             return CompletableFuture.failedFuture(e);
