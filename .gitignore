@@ -6,3 +6,8 @@
 !README.md
 !.gitignore
 !fuzz4all/config/base.yaml
+!src/**
+!.github/
+!.github/workflows/
+!.github/workflows/*.yml
+!src/main/java/edu/tju/ista/llm4test/utils/JavaBaseClassCollector.java

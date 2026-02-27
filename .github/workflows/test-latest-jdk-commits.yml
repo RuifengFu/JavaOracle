@@ -1,0 +1,46 @@
+name: Test Latest JDK Commits
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-latest-jdk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "23"
+          cache: maven
+      - name: Install jtreg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jtreg
+      - name: Clone jdk17u-dev
+        run: git clone https://github.com/openjdk/jdk17u-dev
+      - name: Configure JavaOracle runtime paths
+        run: |
+          sed -i "s#^suiteBasePath=.*#suiteBasePath=$GITHUB_WORKSPACE/jdk17u-dev/test/jdk/#" config.properties
+          sed -i "s#^jdkTestPath=.*#jdkTestPath=$GITHUB_WORKSPACE/jdk17u-dev/test#" config.properties
+          sed -i "s#^jdkPaths=.*#jdkPaths=$JAVA_HOME#" config.properties
+      - name: Build JavaOracle
+        run: mvn -B -Dmaven.test.skip=true package
+      - name: Run JavaOracle on changed tests in last 24 hours
+        run: |
+          CHANGED_CASES=$(git -C jdk17u-dev log --since="24 hours ago" --name-only --pretty=format: -- test/jdk/java test/jdk/javax | grep '\.java$' | sort -u || true)
+          if [ -z "$CHANGED_CASES" ]; then
+            echo "No java/javax testcases changed in the last 24 hours."
+            exit 0
+          fi
+          echo "$CHANGED_CASES" | sed -E 's#^test/jdk/##; s#/[^/]+$##' | sort -u > changed_targets.txt
+          while IFS= read -r target; do
+            [ -z "$target" ] && continue
+            echo "Running JavaOracle execute for: $target"
+            mvn -B -q exec:java -Dexec.mainClass=edu.tju.ista.llm4test.Main -Dexec.args="execute $target"
+          done < changed_targets.txt
