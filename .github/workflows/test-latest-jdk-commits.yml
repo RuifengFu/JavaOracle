@@ -2,7 +2,7 @@ name: Test Latest JDK Commits
 
 on:
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: "0 2 * * *"
   workflow_dispatch:
 
 permissions:
@@ -11,6 +11,19 @@ permissions:
 jobs:
   test-latest-jdk:
     runs-on: ubuntu-latest
+    concurrency:
+      group: test-latest-jdk-${{ github.ref }}
+      cancel-in-progress: false
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+      OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
+      ARK_API_KEY: ${{ secrets.ARK_API_KEY }}
+      ARK_BASE_URL: ${{ secrets.ARK_BASE_URL }}
+      ARK_MODEL: ${{ secrets.ARK_MODEL }}
+      MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+      MOONSHOT_BASE_URL: ${{ secrets.MOONSHOT_BASE_URL }}
+      BOCHA_API_KEY: ${{ secrets.BOCHA_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -29,6 +42,12 @@ jobs:
           sed -i "s#^suiteBasePath=.*#suiteBasePath=$GITHUB_WORKSPACE/jdk17u-dev/test/jdk/#" config.properties
           sed -i "s#^jdkTestPath=.*#jdkTestPath=$GITHUB_WORKSPACE/jdk17u-dev/test#" config.properties
           sed -i "s#^jdkPaths=.*#jdkPaths=$JAVA_HOME#" config.properties
+      - name: Validate required LLM secrets
+        run: |
+          if [ -z "$OPENAI_API_KEY" ] && [ -z "$ARK_API_KEY" ] && [ -z "$MOONSHOT_API_KEY" ]; then
+            echo "Missing LLM API key secrets. Set at least one of OPENAI_API_KEY / ARK_API_KEY / MOONSHOT_API_KEY." >&2
+            exit 1
+          fi
       - name: Build JavaOracle
         run: mvn -B -Dmaven.test.skip=true package
       - name: Run JavaOracle on changed tests in last 24 hours

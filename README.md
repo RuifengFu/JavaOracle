@@ -128,4 +128,38 @@ mvn -B -q exec:java -Dexec.mainClass=edu.tju.ista.llm4test.Main -Dexec.args="exe
 ## 8. CI
 
 - `Build Linux Artifact`：构建并上传 Linux 产物。
-- `Test Latest JDK Commits`：针对最近变更的 JDK 测试路径进行环境配置与验证执行。
+- `Test Latest JDK Commits`：每日定时（UTC 02:00）拉取 `jdk17u-dev`，筛选最近 24 小时有变化的 `java/javax` 测试路径并运行验证。
+
+### 8.1 GitHub Secrets（LLM API）
+
+`Test Latest JDK Commits` 依赖 LLM API。请在仓库 `Settings -> Secrets and variables -> Actions` 中配置：
+
+- 必需（至少配置一组）
+  - `OPENAI_API_KEY` 或 `ARK_API_KEY` 或 `MOONSHOT_API_KEY`
+- 可选（按 provider 配置）
+  - `OPENAI_BASE_URL`, `OPENAI_MODEL`
+  - `ARK_BASE_URL`, `ARK_MODEL`
+  - `MOONSHOT_BASE_URL`
+  - `BOCHA_API_KEY`（启用外部检索时）
+
+工作流会在执行前进行 fail-fast 检查：若三组主 LLM Key 全部缺失，任务会直接失败并提示。
+
+### 8.2 JDK 源码准备建议
+
+当前 CI 采用“运行时 clone”的方式：
+
+```bash
+git clone https://github.com/openjdk/jdk17u-dev
+```
+
+这对持续集成是推荐默认方案（维护成本低、无需额外管理子模块）。
+仅当你需要“固定到某个 commit 做严格可复现”时，再考虑 submodule 或在 workflow 中 pin 到指定 SHA。
+
+### 8.3 配置优先级说明
+
+当前实现是：优先读取 `config.properties`，如果为空再读取环境变量。
+
+因此建议在 CI 中：
+
+1. 把密钥放到 GitHub Secrets；
+2. 保持 `config.properties` 中密钥项为空（或不写入），避免覆盖环境变量。
