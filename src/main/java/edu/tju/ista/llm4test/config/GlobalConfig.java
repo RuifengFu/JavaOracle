@@ -419,7 +419,7 @@ public class GlobalConfig {
     }
     
     public static String getOpenaiBaseUrl() {
-        return getConfigThenEnv("openai.base.url", "OPENAI_BASE_URL", "https://api.deepseek.com/beta/v1/chat/completions");
+        return getConfigThenEnv("openai.base.url", "OPENAI_BASE_URL", "https://api.deepseek.com/beta/v1");
     }
     
     public static String getOpenaiModel() {
