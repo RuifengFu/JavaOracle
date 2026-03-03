@@ -11,6 +11,7 @@ permissions:
 jobs:
   test-latest-jdk:
     runs-on: ubuntu-latest
+    environment: LLM
     timeout-minutes: 180
     concurrency:
       group: test-latest-jdk-${{ github.ref }}
