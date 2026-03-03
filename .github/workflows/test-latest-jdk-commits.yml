@@ -11,19 +11,21 @@ permissions:
 jobs:
   test-latest-jdk:
     runs-on: ubuntu-latest
+    environment: LLM
     timeout-minutes: 180
     concurrency:
       group: test-latest-jdk-${{ github.ref }}
       cancel-in-progress: false
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL || 'https://api.deepseek.com/beta/v1' }}
-      OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'deepseek-chat' }}
-      ARK_API_KEY: ${{ secrets.ARK_API_KEY }}
-      ARK_BASE_URL: ${{ vars.ARK_BASE_URL || 'https://ark.cn-beijing.volces.com/api/v3' }}
-      ARK_MODEL: ${{ vars.ARK_MODEL || 'ep-20250615170506-mtn4k' }}
-      MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
-      MOONSHOT_BASE_URL: ${{ vars.MOONSHOT_BASE_URL || 'https://api.moonshot.cn/v1' }}
+      OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL || 'https://integrate.api.nvidia.com/v1' }}
+      OPENAI_MODEL: ${{ vars.REASONER_MODEL || 'deepseek-reasoner' }}
+      ARK_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ARK_BASE_URL: ${{ vars.ARK_BASE_URL || 'https://integrate.api.nvidia.com/v1' }}
+      ARK_MODEL: ${{ vars.FLASH_MODEL || 'doubao-seed-1-6-flash-250715' }}
+      MOONSHOT_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      MOONSHOT_BASE_URL: ${{ vars.MOONSHOT_BASE_URL || 'https://integrate.api.nvidia.com/v1' }}
+      MOONSHOT_MODEL: ${{ vars.AGENT_MODEL || 'kimi-k2-0905-preview' }}
       BOCHA_API_KEY: ${{ secrets.BOCHA_API_KEY }}
     steps:
       - uses: actions/checkout@v4
@@ -51,8 +53,8 @@ jobs:
       - name: Validate required LLM secrets
         run: |
           set -euo pipefail
-          if [ -z "$OPENAI_API_KEY" ] && [ -z "$ARK_API_KEY" ] && [ -z "$MOONSHOT_API_KEY" ]; then
-            echo "Missing LLM API key secrets. Set at least one of OPENAI_API_KEY / ARK_API_KEY / MOONSHOT_API_KEY." >&2
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "Missing OPENAI_API_KEY secret." >&2
             exit 1
           fi
       - name: Build JavaOracle
