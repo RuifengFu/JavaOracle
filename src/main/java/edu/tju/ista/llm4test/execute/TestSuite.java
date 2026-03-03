@@ -39,13 +39,60 @@ public class TestSuite {
             builder.command("jtreg", "-l", rootPath);
             Process process = builder.start();
             String stdout = new String(process.getInputStream().readAllBytes());
+            String stderr = new String(process.getErrorStream().readAllBytes());
+            int exitCode = process.waitFor();
+            if (!stderr.isEmpty()) {
+                LoggerUtil.logExec(Level.WARNING, "jtreg stderr: " + stderr.trim());
+            }
             String[] lines = stdout.split("\n");
-            var list = Arrays.asList(lines).subList(1, lines.length - 1).stream().filter(s -> s.endsWith(".java")).collect(Collectors.toCollection(ArrayList::new));
-            return list;
+            if (lines.length >= 3) {
+                var list = Arrays.asList(lines).subList(1, lines.length - 1).stream()
+                        .filter(s -> s.endsWith(".java"))
+                        .collect(Collectors.toCollection(ArrayList::new));
+                if (!list.isEmpty()) {
+                    return list;
+                }
+            }
         } catch (Exception e) {
-            e.printStackTrace();
+            LoggerUtil.logExec(Level.WARNING, "jtreg -l 执行失败: " + e.getMessage());
         }
-        return new ArrayList<>();
+        // Fallback: scan directory for .java files when jtreg returns no results
+        return scanDirectoryForJavaFiles();
+    }
+
+    /**
+     * 当jtreg -l无法发现测试用例时，直接扫描目录中的.java文件作为后备方案
+     */
+    private ArrayList<String> scanDirectoryForJavaFiles() {
+        try {
+            Path rootDir = Paths.get(rootPath);
+            if (!Files.isDirectory(rootDir)) {
+                // rootPath might be a single file
+                if (Files.isRegularFile(rootDir) && rootPath.endsWith(".java")) {
+                    Path basePath = Paths.get(GlobalConfig.getSuiteBasePath()).toAbsolutePath().normalize();
+                    String relativePath = basePath.relativize(rootDir.toAbsolutePath().normalize()).toString().replace('\\', '/');
+                    ArrayList<String> result = new ArrayList<>();
+                    result.add(relativePath);
+                    LoggerUtil.logExec(Level.INFO, "通过文件路径直接加载 1 个测试用例");
+                    return result;
+                }
+                LoggerUtil.logExec(Level.WARNING, "测试路径不存在: " + rootPath);
+                return new ArrayList<>();
+            }
+            Path basePath = Paths.get(GlobalConfig.getSuiteBasePath()).toAbsolutePath().normalize();
+            ArrayList<String> javaFiles = Files.walk(rootDir)
+                    .filter(Files::isRegularFile)
+                    .filter(p -> p.toString().endsWith(".java"))
+                    .map(p -> basePath.relativize(p.toAbsolutePath().normalize()).toString().replace('\\', '/'))
+                    .collect(Collectors.toCollection(ArrayList::new));
+            if (!javaFiles.isEmpty()) {
+                LoggerUtil.logExec(Level.INFO, "通过目录扫描发现 " + javaFiles.size() + " 个Java文件: " + rootPath);
+            }
+            return javaFiles;
+        } catch (Exception e) {
+            LoggerUtil.logExec(Level.WARNING, "目录扫描失败: " + rootPath + " - " + e.getMessage());
+            return new ArrayList<>();
+        }
     }
     
     /**
