@@ -32,32 +32,40 @@ jobs:
           distribution: temurin
           java-version: "23"
           cache: maven
+      - name: Check LLM secrets
+        id: check-secrets
+        run: |
+          set -euo pipefail
+          if [ -z "$OPENAI_API_KEY" ] && [ -z "$ARK_API_KEY" ] && [ -z "$MOONSHOT_API_KEY" ]; then
+            echo "::warning::Missing LLM API key secrets. Set at least one of OPENAI_API_KEY / ARK_API_KEY / MOONSHOT_API_KEY. Skipping test run."
+            echo "has_keys=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_keys=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Install jtreg
+        if: steps.check-secrets.outputs.has_keys == 'true'
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y jtreg
       - name: Clone jdk17u-dev
+        if: steps.check-secrets.outputs.has_keys == 'true'
         run: |
           set -euo pipefail
           # keep full history: changed-test discovery relies on git log --since over the last 24h
           git clone https://github.com/openjdk/jdk17u-dev
       - name: Configure JavaOracle runtime paths
+        if: steps.check-secrets.outputs.has_keys == 'true'
         run: |
           set -euo pipefail
           sed -i "s#^suiteBasePath=.*#suiteBasePath=$GITHUB_WORKSPACE/jdk17u-dev/test/jdk/#" config.properties
           sed -i "s#^jdkTestPath=.*#jdkTestPath=$GITHUB_WORKSPACE/jdk17u-dev/test#" config.properties
           sed -i "s#^jdkPaths=.*#jdkPaths=$JAVA_HOME#" config.properties
-      - name: Validate required LLM secrets
-        run: |
-          set -euo pipefail
-          if [ -z "$OPENAI_API_KEY" ] && [ -z "$ARK_API_KEY" ] && [ -z "$MOONSHOT_API_KEY" ]; then
-            echo "Missing LLM API key secrets. Set at least one of OPENAI_API_KEY / ARK_API_KEY / MOONSHOT_API_KEY." >&2
-            exit 1
-          fi
       - name: Build JavaOracle
+        if: steps.check-secrets.outputs.has_keys == 'true'
         run: mvn -B -Dmaven.test.skip=true package
       - name: Run JavaOracle on changed tests in last 24 hours
+        if: steps.check-secrets.outputs.has_keys == 'true'
         run: |
           set -euo pipefail
           CHANGED_CASES=$(git -C jdk17u-dev log --since="24 hours ago" --name-only --pretty=format: -- test/jdk/java test/jdk/javax | grep '\.java$' | sort -u || true)
