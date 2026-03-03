@@ -37,14 +37,11 @@ public class TestSuite {
         try {
             ProcessBuilder builder = new ProcessBuilder();
             builder.command("jtreg", "-l", rootPath);
+            builder.redirectErrorStream(true);
             Process process = builder.start();
-            String stdout = new String(process.getInputStream().readAllBytes());
-            String stderr = new String(process.getErrorStream().readAllBytes());
+            String output = new String(process.getInputStream().readAllBytes());
             int exitCode = process.waitFor();
-            if (!stderr.isEmpty()) {
-                LoggerUtil.logExec(Level.WARNING, "jtreg stderr: " + stderr.trim());
-            }
-            String[] lines = stdout.split("\n");
+            String[] lines = output.split("\n");
             if (lines.length >= 3) {
                 var list = Arrays.asList(lines).subList(1, lines.length - 1).stream()
                         .filter(s -> s.endsWith(".java"))
@@ -52,6 +49,9 @@ public class TestSuite {
                 if (!list.isEmpty()) {
                     return list;
                 }
+            }
+            if (exitCode != 0) {
+                LoggerUtil.logExec(Level.WARNING, "jtreg -l 退出码: " + exitCode + ", 输出: " + output.trim());
             }
         } catch (Exception e) {
             LoggerUtil.logExec(Level.WARNING, "jtreg -l 执行失败: " + e.getMessage());
