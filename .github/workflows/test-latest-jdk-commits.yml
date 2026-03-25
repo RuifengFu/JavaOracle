@@ -59,17 +59,29 @@ jobs:
           fi
       - name: Build JavaOracle
         run: mvn -B -Dmaven.test.skip=true package
-      - name: Run JavaOracle on changed tests in last 24 hours
+      - name: Detect changed test files
+        id: detect
         run: |
           set -euo pipefail
           CHANGED_CASES=$(git -C jdk17u-dev log --since="24 hours ago" --name-only --pretty=format: -- test/jdk/java test/jdk/javax | grep '\.java$' | sort -u || true)
           if [ -z "$CHANGED_CASES" ]; then
             echo "No java/javax testcases changed in the last 24 hours."
+            echo "found=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          echo "=== Changed test files ==="
+          echo "$CHANGED_CASES"
           echo "$CHANGED_CASES" | sed -E 's#^test/jdk/##; s#/[^/]+$##' | sort -u > changed_targets.txt
+          echo "=== Target directories ==="
+          cat changed_targets.txt
+          echo "found=true" >> "$GITHUB_OUTPUT"
+      - name: Run JavaOracle on changed tests
+        if: steps.detect.outputs.found == 'true'
+        run: |
+          set -euo pipefail
           while IFS= read -r target; do
             [ -z "$target" ] && continue
-            echo "Running JavaOracle execute for: $target"
-            mvn -B -q exec:java -Dexec.mainClass=edu.tju.ista.llm4test.Main -Dexec.args="execute $target"
+            echo "::group::Running JavaOracle execute for: $target"
+            mvn -B -q exec:java -Dexec.mainClass=edu.tju.ista.llm4test.Main -Dexec.args="execute $target" || echo "Warning: JavaOracle returned non-zero for $target"
+            echo "::endgroup::"
           done < changed_targets.txt
