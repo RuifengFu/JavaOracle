@@ -24,17 +24,21 @@ Java Oracle is a framework for generating test oracles and verifying potential J
 git clone https://github.com/openjdk/jdk17u-dev
 ```
 
-2. Download JavaDoc (JDK 17 API docs) and extract to:
+2. Download JavaDoc (JDK 17 API docs), and place it in the path that matches `config.properties`:
 
 ```text
-jdk17u-dev/jdk/doc
+JavaDoc/docs/api/java.base
 ```
 
-3. Prepare verification workspace (for execution and bug verification):
+3. Prepare runtime output workspace (the framework will create/use this automatically):
 
 ```bash
-mkdir verify && cp -r jdk17u-dev/test verify
+mkdir -p test
 ```
+
+> Notes:
+> - `baseDocPath` defaults to `JavaDoc/docs/api/java.base`. If you prefer another JavaDoc location, update `config.properties` accordingly.
+> - `verify/` is a runtime temporary directory created by the framework during bug verification; you do **not** need to pre-copy `jdk17u-dev/test` into it.
 
 #### 1.3 Key Configuration
 
@@ -191,17 +195,21 @@ So in CI, it is recommended to:
 git clone https://github.com/openjdk/jdk17u-dev
 ```
 
-2. 下载 JavaDoc（JDK 17 API 文档），解压到：
+2. 下载 JavaDoc（JDK 17 API 文档），并放到与 `config.properties` 一致的路径：
 
 ```text
-jdk17u-dev/jdk/doc
+JavaDoc/docs/api/java.base
 ```
 
-3. 准备验证目录（用于执行与验证）：
+3. 准备运行输出目录（框架会自动使用/创建）：
 
 ```bash
-mkdir verify && cp -r jdk17u-dev/test verify
+mkdir -p test
 ```
+
+> 说明：
+> - `baseDocPath` 默认是 `JavaDoc/docs/api/java.base`。如果你把 JavaDoc 放在其他位置，请同步修改 `config.properties`。
+> - `verify/` 是框架在 Bug 验证阶段自动创建的临时目录，不需要手动把 `jdk17u-dev/test` 预先拷贝进去。
 
 #### 1.3 关键配置
 
