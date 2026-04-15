@@ -21,6 +21,12 @@ jobs:
           cd jtreg
           bash make/build.sh --jdk "$JAVA_HOME"
           echo "$PWD/build/images/jtreg/bin" >> "$GITHUB_PATH"
+      - name: Debug environment
+        run: |
+          echo "JAVA_HOME=$JAVA_HOME"
+          java -version 2>&1
+          which jtreg
+          cat "$(which jtreg)"
       - name: Verify jtreg version
         run: jtreg -version
       - name: Clone openjdk/jdk (shallow)
@@ -28,6 +34,6 @@ jobs:
       - name: Test jtreg -l against jdk test suite
         run: |
           set -euo pipefail
-          jtreg -l jdk/test/jdk/java/net/DatagramPacket || true
+          jtreg -l -jdk:"$JAVA_HOME" jdk/test/jdk/java/net/DatagramPacket || true
           echo "---"
-          jtreg -ea -va -jdk:"$JAVA_HOME" jdk/test/jdk/java/net/DatagramPacket/Setters.java || true
+          jtreg -ea -va -jdk:"$JAVA_HOME" -compilejdk:"$JAVA_HOME" jdk/test/jdk/java/net/DatagramPacket/Setters.java || true
