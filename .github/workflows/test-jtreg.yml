@@ -1,0 +1,33 @@
+name: Test jtreg build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-jtreg:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "23"
+      - name: Clone and build jtreg from source
+        run: |
+          set -euo pipefail
+          git clone https://github.com/openjdk/jtreg
+          cd jtreg
+          bash make/build.sh --jdk "$JAVA_HOME"
+          echo "$PWD/build/images/jtreg/bin" >> "$GITHUB_PATH"
+      - name: Verify jtreg version
+        run: jtreg -version
+      - name: Clone openjdk/jdk (shallow)
+        run: git clone --depth=1 https://github.com/openjdk/jdk
+      - name: Test jtreg -l against jdk test suite
+        run: |
+          set -euo pipefail
+          jtreg -l jdk/test/jdk/java/net/DatagramPacket || true
+          echo "---"
+          jtreg -ea -va -jdk:"$JAVA_HOME" jdk/test/jdk/java/net/DatagramPacket/Setters.java || true
