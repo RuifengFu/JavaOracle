@@ -16,7 +16,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "23"
+          java-version: "25"
       - name: Clone and build jtreg from source
         run: |
           set -euo pipefail
@@ -28,16 +28,6 @@ jobs:
         run: jtreg -version
       - name: Clone openjdk/jdk (shallow)
         run: git clone --depth=1 https://github.com/openjdk/jdk
-      - name: Manual compile Platform.java with JDK 23 javac
-        run: |
-          set -euo pipefail
-          echo "--- javac version ---"
-          "$JAVA_HOME/bin/javac" -version
-          echo "--- Try compiling Platform.java directly ---"
-          mkdir -p /tmp/manual-compile
-          "$JAVA_HOME/bin/javac" -d /tmp/manual-compile \
-            --add-exports java.base/jdk.internal.misc=ALL-UNNAMED \
-            jdk/test/lib/jdk/test/lib/Platform.java 2>&1 || true
       - name: Test jtreg against jdk test suite
         run: |
           set -euo pipefail
