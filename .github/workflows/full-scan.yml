@@ -37,7 +37,7 @@ jobs:
           curl -sL "https://ci.adoptium.net/view/Dependencies/job/dependency_pipeline/lastSuccessfulBuild/artifact/jtreg/jtreg-7.5.2+1.tar.gz" -o jtreg.tar.gz
           tar xzf jtreg.tar.gz
           echo "$PWD/jtreg/bin" >> "$GITHUB_PATH"
-          jtreg -version
+          "$PWD/jtreg/bin/jtreg" -version
 
       - name: Clone jdk17u-dev
         run: |
