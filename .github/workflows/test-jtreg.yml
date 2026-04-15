@@ -1,6 +1,9 @@
 name: Test jtreg build
 
 on:
+  push:
+    branches:
+      - "**"
   workflow_dispatch:
 
 permissions:
@@ -21,19 +24,23 @@ jobs:
           cd jtreg
           bash make/build.sh --jdk "$JAVA_HOME"
           echo "$PWD/build/images/jtreg/bin" >> "$GITHUB_PATH"
-      - name: Debug environment
-        run: |
-          echo "JAVA_HOME=$JAVA_HOME"
-          java -version 2>&1
-          which jtreg
-          cat "$(which jtreg)"
       - name: Verify jtreg version
         run: jtreg -version
       - name: Clone openjdk/jdk (shallow)
         run: git clone --depth=1 https://github.com/openjdk/jdk
-      - name: Test jtreg -l against jdk test suite
+      - name: Manual compile Platform.java with JDK 23 javac
         run: |
           set -euo pipefail
-          jtreg -l -jdk:"$JAVA_HOME" jdk/test/jdk/java/net/DatagramPacket || true
+          echo "--- javac version ---"
+          "$JAVA_HOME/bin/javac" -version
+          echo "--- Try compiling Platform.java directly ---"
+          mkdir -p /tmp/manual-compile
+          "$JAVA_HOME/bin/javac" -d /tmp/manual-compile \
+            --add-exports java.base/jdk.internal.misc=ALL-UNNAMED \
+            jdk/test/lib/jdk/test/lib/Platform.java 2>&1 || true
+      - name: Test jtreg against jdk test suite
+        run: |
+          set -euo pipefail
+          jtreg -l -jdk:"$JAVA_HOME" -compilejdk:"$JAVA_HOME" jdk/test/jdk/java/net/DatagramPacket 2>&1 || true
           echo "---"
-          jtreg -ea -va -jdk:"$JAVA_HOME" -compilejdk:"$JAVA_HOME" jdk/test/jdk/java/net/DatagramPacket/Setters.java || true
+          jtreg -ea -va -jdk:"$JAVA_HOME" -compilejdk:"$JAVA_HOME" jdk/test/jdk/java/net/DatagramPacket/Setters.java 2>&1 || true
