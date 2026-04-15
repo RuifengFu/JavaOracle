@@ -7,10 +7,13 @@ import edu.tju.ista.llm4test.utils.*;
 
 import java.io.File;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
 
@@ -73,29 +76,95 @@ public class TestExecutionManager {
 
     /**
      * 并行执行测试套件（执行模式）
-     * 使用测试线程池进行测试执行（CPU密集型）
+     * 支持断点续传：加载已有缓存跳过已完成的用例，每个用例完成后立即保存
      */
     public void runTestSuiteParallelExecution() {
         TokenUsageTracker.getInstance().reset();
         System.out.println("开始执行模式");
-        
-        // 创建并执行所有测试用例
-        List<TestCase> testCases = createExecutionTestCases();
-        System.out.println("总文件数: " + testCases.size());
-        
-        // 执行测试并记录结果
+
+        Set<String> cachedPaths = testSuite.loadCachedTestCasePaths();
+        List<TestCase> allTestCases = createExecutionTestCases();
+
+        List<TestCase> remainingTestCases;
+        if (cachedPaths.isEmpty()) {
+            remainingTestCases = allTestCases;
+        } else {
+            String jdkTestPath = GlobalConfig.getJdkTestPath() + "/jdk/";
+            Path jdkTestRoot = Paths.get(jdkTestPath).toAbsolutePath().normalize();
+            remainingTestCases = allTestCases.stream()
+                    .filter(tc -> {
+                        try {
+                            String relPath = jdkTestRoot.relativize(tc.getOriginFile().toPath().toAbsolutePath().normalize())
+                                    .toString().replace('\\', '/');
+                            boolean skip = cachedPaths.contains(relPath);
+                            if (skip) {
+                                LoggerUtil.logExec(Level.FINE, "跳过已缓存用例: " + relPath);
+                            }
+                            return !skip;
+                        } catch (Exception e) {
+                            return true;
+                        }
+                    })
+                    .collect(Collectors.toList());
+            LoggerUtil.logExec(Level.INFO, String.format("断点续传: 总计 %d, 已缓存 %d, 剩余 %d",
+                    allTestCases.size(), cachedPaths.size(), remainingTestCases.size()));
+            System.out.println("断点续传: 总计 " + allTestCases.size() +
+                    ", 已缓存 " + cachedPaths.size() +
+                    ", 剩余 " + remainingTestCases.size());
+        }
+
+        if (remainingTestCases.isEmpty()) {
+            System.out.println("所有测试用例已缓存，无需重新执行");
+            statistics.logStatistics();
+            return;
+        }
+
+        System.out.println("待执行文件数: " + remainingTestCases.size());
+
+        AtomicInteger completedCount = new AtomicInteger(0);
+        AtomicInteger successCount = new AtomicInteger(0);
+
         try {
-            testSuite.executeTestCasesAsync(testCases, testExecutor)
-                    .whenComplete((result, throwable) -> testCases.forEach(this::recordTestResult))
-                    .join();
+            CompletableFuture<Void> execution = CompletableFuture.allOf(
+                    remainingTestCases.stream()
+                            .map(testCase -> testCase.executeTestAsync(testExecutor)
+                                    .handle((result, throwable) -> {
+                                        if (throwable != null) {
+                                            LoggerUtil.logExec(Level.WARNING, "测试执行失败: " + testCase.getFile() + "\n" + throwable.getMessage());
+                                            testCase.setResult(new TestResult(TestResultKind.TEST_FAIL));
+                                        } else {
+                                            testCase.setResult(result);
+                                            LoggerUtil.logResult(Level.INFO, "测试执行: " + testCase.getFile() + " " + result.getKind());
+                                            if (result.isSuccess()) {
+                                                testSuite.appendTestCaseToCache(testCase);
+                                                successCount.incrementAndGet();
+                                            }
+                                        }
+                                        recordTestResult(testCase);
+                                        int completed = completedCount.incrementAndGet();
+                                        if (completed % 50 == 0) {
+                                            System.out.println("进度: " + completed + "/" + remainingTestCases.size() +
+                                                    " (成功: " + successCount.get() + ")");
+                                        }
+                                        return null;
+                                    }))
+                            .toArray(CompletableFuture[]::new));
+
+            execution.join();
             LoggerUtil.logExec(Level.INFO, "所有测试执行任务完成");
+            System.out.println("执行完成: " + successCount.get() + "/" + remainingTestCases.size() + " 通过");
         } catch (Exception e) {
             LoggerUtil.logExec(Level.SEVERE, "测试执行过程中发生不可恢复的错误: " + e.getMessage());
             e.printStackTrace();
         }
-        
+
+        List<TestCase> newlySuccessful = remainingTestCases.stream()
+                .filter(tc -> tc.getResult() != null && tc.getResult().isSuccess())
+                .collect(Collectors.toList());
+        testSuite.deduplicateAndSaveCache(newlySuccessful);
+
         statistics.logStatistics();
-        TokenUsageTracker.getInstance().logSummary(testCases.size());
+        TokenUsageTracker.getInstance().logSummary(remainingTestCases.size());
     }
 
     /**

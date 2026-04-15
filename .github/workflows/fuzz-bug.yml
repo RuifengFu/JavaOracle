@@ -1,0 +1,298 @@
+name: Fuzz & Discover JDK Bugs
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_attempts:
+        description: 'Maximum sampling attempts before stopping'
+        required: false
+        default: '100'
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  fuzz-bug:
+    runs-on: ubuntu-latest
+    environment: LLM
+    timeout-minutes: 360
+    concurrency:
+      group: fuzz-bug-${{ github.ref }}
+      cancel-in-progress: false
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL || 'https://integrate.api.nvidia.com/v1' }}
+      OPENAI_MODEL: ${{ vars.REASONER_MODEL || 'deepseek-reasoner' }}
+      ARK_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ARK_BASE_URL: ${{ vars.ARK_BASE_URL || 'https://integrate.api.nvidia.com/v1' }}
+      ARK_MODEL: ${{ vars.FLASH_MODEL || 'doubao-seed-1-6-flash-250715' }}
+      MOONSHOT_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      MOONSHOT_BASE_URL: ${{ vars.MOONSHOT_BASE_URL || 'https://integrate.api.nvidia.com/v1' }}
+      MOONSHOT_MODEL: ${{ vars.AGENT_MODEL || 'kimi-k2-0905-preview' }}
+      BOCHA_API_KEY: ${{ secrets.BOCHA_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "23"
+          cache: maven
+
+      - name: Install jtreg
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y jtreg
+
+      - name: Clone jdk17u-dev
+        run: |
+          set -euo pipefail
+          git clone --depth=1 https://github.com/openjdk/jdk17u-dev
+
+      - name: Configure JavaOracle runtime paths
+        run: |
+          set -euo pipefail
+          sed -i "s#^suiteBasePath=.*#suiteBasePath=$GITHUB_WORKSPACE/jdk17u-dev/test/jdk/#" config.properties
+          sed -i "s#^jdkTestPath=.*#jdkTestPath=$GITHUB_WORKSPACE/jdk17u-dev/test#" config.properties
+          sed -i "s#^jdkPaths=.*#jdkPaths=$JAVA_HOME#" config.properties
+          sed -i "s#^useCacheMode=.*#useCacheMode=true#" config.properties
+          sed -i "s#^testCoreMultiplier=.*#testCoreMultiplier=1.0#" config.properties
+          sed -i "s#^testMaxMultiplier=.*#testMaxMultiplier=2.0#" config.properties
+          sed -i "s#^threadMultiplierExecute=.*#threadMultiplierExecute=2#" config.properties
+          sed -i "s#^llm.maxConcurrency=.*#llm.maxConcurrency=20#" config.properties
+          sed -i "s#^llm.maxQps=.*#llm.maxQps=5#" config.properties
+
+          echo "=== config.properties (key settings) ==="
+          grep -E '(suiteBasePath|jdkTestPath|jdkPaths|useCacheMode|llm|testCore|testMax|threadMultiplier)' config.properties
+
+      - name: Validate required secrets
+        run: |
+          set -euo pipefail
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "Missing OPENAI_API_KEY secret." >&2
+            exit 1
+          fi
+
+      - name: Build JavaOracle
+        run: mvn -B -Dmaven.test.skip=true package
+
+      - name: Check pass list exists
+        run: |
+          set -euo pipefail
+          if [ ! -d "ValidTestCases" ] || [ -z "$(find ValidTestCases -name '*.txt' -not -empty)" ]; then
+            echo "::error::No pass list found. Run full-scan workflow first."
+            exit 1
+          fi
+          TOTAL=$(find ValidTestCases/ -name "*.txt" -exec cat {} \; | wc -l | tr -d ' ')
+          echo "Pass list contains $TOTAL test cases"
+
+      - name: Sample and fuzz for JDK bugs
+        id: fuzz
+        run: |
+          set -uo pipefail
+          MAX_ATTEMPTS=${{ inputs.max_attempts || '100' }}
+          ATTEMPTS=0
+          BUG_FOUND=false
+          BUG_TESTCASE=""
+          BUG_DIR=""
+
+          mkdir -p fuzz-workspace
+
+          while [ "$ATTEMPTS" -lt "$MAX_ATTEMPTS" ]; do
+            ATTEMPTS=$((ATTEMPTS + 1))
+
+            RANDOM_CASE=$(find ValidTestCases/ -name "*.txt" -exec cat {} \; | grep -v '^#' | grep -v '^$' | shuf -n 1)
+            if [ -z "$RANDOM_CASE" ]; then
+              echo "No test cases available in pass list"
+              break
+            fi
+
+            echo "=== Attempt $ATTEMPTS/$MAX_ATTEMPTS: $RANDOM_CASE ==="
+            DIR=$(dirname "$RANDOM_CASE")
+
+            # Clear previous results
+            rm -f result.log
+
+            # Run generate (enhance + verify + deep verify)
+            mvn -B -q exec:java \
+              -Dexec.mainClass=edu.tju.ista.llm4test.Main \
+              -Dexec.args="generate $DIR" || true
+
+            # Check if VERIFIED_BUG was found in the log
+            if grep -q "VERIFIED_BUG" result.log 2>/dev/null; then
+              echo "*** BUG FOUND: $RANDOM_CASE ***"
+              BUG_FOUND=true
+              BUG_TESTCASE="$RANDOM_CASE"
+              BUG_DIR="$DIR"
+              break
+            fi
+
+            echo "No bug found for $RANDOM_CASE, continuing..."
+          done
+
+          echo "attempts=$ATTEMPTS" >> "$GITHUB_OUTPUT"
+          echo "bug_found=$BUG_FOUND" >> "$GITHUB_OUTPUT"
+          echo "bug_testcase=$BUG_TESTCASE" >> "$GITHUB_OUTPUT"
+          echo "bug_dir=$BUG_DIR" >> "$GITHUB_OUTPUT"
+
+          if [ "$BUG_FOUND" = "true" ]; then
+            echo "=== Bug discovered after $ATTEMPTS attempts ==="
+          else
+            echo "=== No bug found after $ATTEMPTS/$MAX_ATTEMPTS attempts ==="
+          fi
+
+      - name: Collect bug report artifacts
+        if: steps.fuzz.outputs.bug_found == 'true'
+        run: |
+          set -euo pipefail
+          BUG_TESTCASE="${{ steps.fuzz.outputs.bug_testcase }}"
+          COLLECTION_DIR="bug-collection"
+          mkdir -p "$COLLECTION_DIR"
+
+          echo "=== Collecting artifacts for: $BUG_TESTCASE ==="
+
+          # 1. Original test case
+          ORIG_FILE="jdk17u-dev/test/jdk/$BUG_TESTCASE"
+          if [ -f "$ORIG_FILE" ]; then
+            cp "$ORIG_FILE" "$COLLECTION_DIR/original_testcase.java"
+            echo "Copied original test case"
+          fi
+
+          # 2. Enhanced test case (from test/ directory)
+          ENHANCED_FILE="test/$BUG_TESTCASE"
+          if [ -f "$ENHANCED_FILE" ]; then
+            cp "$ENHANCED_FILE" "$COLLECTION_DIR/enhanced_testcase.java"
+            echo "Copied enhanced test case"
+          fi
+
+          # 3. Bug reports (from BugReport/)
+          if [ -d "BugReport" ]; then
+            cp -r BugReport/ "$COLLECTION_DIR/BugReport/"
+            echo "Copied BugReport directory"
+          fi
+
+          # 4. Debug output (VerifyFail etc.)
+          if [ -d "debug" ]; then
+            cp -r debug/ "$COLLECTION_DIR/debug/"
+            echo "Copied debug directory"
+          fi
+
+          # 5. Execution result log
+          if [ -f "result.log" ]; then
+            cp result.log "$COLLECTION_DIR/result.log"
+            echo "Copied result.log"
+          fi
+
+          # 6. Minimized test cases
+          if [ -d "ReduceResult" ]; then
+            cp -r ReduceResult/ "$COLLECTION_DIR/ReduceResult/"
+            echo "Copied ReduceResult directory"
+          fi
+
+          # 7. Summary
+          echo "Bug Testcase: $BUG_TESTCASE" > "$COLLECTION_DIR/summary.txt"
+          echo "Discovery Attempt: ${{ steps.fuzz.outputs.attempts }}" >> "$COLLECTION_DIR/summary.txt"
+          echo "Timestamp: $(date -u)" >> "$COLLECTION_DIR/summary.txt"
+          echo "" >> "$COLLECTION_DIR/summary.txt"
+          echo "=== Files ===" >> "$COLLECTION_DIR/summary.txt"
+          find "$COLLECTION_DIR" -type f >> "$COLLECTION_DIR/summary.txt"
+
+          echo "=== Collection complete ==="
+          cat "$COLLECTION_DIR/summary.txt"
+
+      - name: Create GitHub Issue for bug
+        if: steps.fuzz.outputs.bug_found == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          BUG_TESTCASE="${{ steps.fuzz.outputs.bug_testcase }}"
+          ATTEMPT="${{ steps.fuzz.outputs.attempts }}"
+          COLLECTION_DIR="bug-collection"
+
+          # Build issue body
+          cat > issue_body.md <<'ISSUE_HEADER'
+          ## JDK Bug Discovered
+
+          **Automatically discovered by JavaOracle fuzz testing.**
+
+          ISSUE_HEADER
+
+          echo "- **Test Case**: \`${BUG_TESTCASE}\`" >> issue_body.md
+          echo "- **Discovery Attempt**: ${ATTEMPT}/${{ inputs.max_attempts || '100' }}" >> issue_body.md
+          echo "- **Timestamp**: $(date -u)" >> issue_body.md
+          echo "- **Workflow Run**: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> issue_body.md
+          echo "" >> issue_body.md
+
+          # Add original test case
+          if [ -f "$COLLECTION_DIR/original_testcase.java" ]; then
+            echo "### Original Test Case" >> issue_body.md
+            echo '```java' >> issue_body.md
+            head -100 "$COLLECTION_DIR/original_testcase.java" >> issue_body.md
+            echo '```' >> issue_body.md
+            echo "" >> issue_body.md
+          fi
+
+          # Add enhanced test case
+          if [ -f "$COLLECTION_DIR/enhanced_testcase.java" ]; then
+            echo "### Enhanced Test Case" >> issue_body.md
+            echo '```java' >> issue_body.md
+            head -100 "$COLLECTION_DIR/enhanced_testcase.java" >> issue_body.md
+            echo '```' >> issue_body.md
+            echo "" >> issue_body.md
+          fi
+
+          # Add execution result excerpt
+          if [ -f "$COLLECTION_DIR/result.log" ]; then
+            echo "### Execution Result (excerpt)" >> issue_body.md
+            echo '```' >> issue_body.md
+            grep -A 5 "VERIFIED_BUG" "$COLLECTION_DIR/result.log" | head -50 >> issue_body.md
+            echo '```' >> issue_body.md
+            echo "" >> issue_body.md
+          fi
+
+          # Reference bug report if exists
+          if [ -d "$COLLECTION_DIR/BugReport" ]; then
+            echo "### Bug Report" >> issue_body.md
+            echo "See attached artifacts for detailed bug report." >> issue_body.md
+            # Try to include the report content
+            REPORT_FILE=$(find "$COLLECTION_DIR/BugReport" -name "report.md" -o -name "*.json" | head -1)
+            if [ -n "$REPORT_FILE" ]; then
+              echo "" >> issue_body.md
+              echo '```' >> issue_body.md
+              head -200 "$REPORT_FILE" >> issue_body.md
+              echo '```' >> issue_body.md
+            fi
+          fi
+
+          echo "---" >> issue_body.md
+          echo "*Download the full [bug-collection artifact](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for complete details.*" >> issue_body.md
+
+          # Create issue
+          gh issue create \
+            --title "JDK Bug: ${BUG_TESTCASE}" \
+            --body-file issue_body.md \
+            --label "bug,jdk-bug" || \
+          gh issue create \
+            --title "JDK Bug: ${BUG_TESTCASE}" \
+            --body-file issue_body.md
+
+      - name: Upload bug artifacts
+        if: steps.fuzz.outputs.bug_found == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bug-report-${{ github.run_id }}
+          path: bug-collection/
+          retention-days: 90
+
+      - name: Upload results on no-bug
+        if: steps.fuzz.outputs.bug_found == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-results-${{ github.run_id }}
+          path: |
+            result.log
+            ValidTestCases/
+          retention-days: 7

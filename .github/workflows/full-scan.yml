@@ -1,0 +1,96 @@
+name: Full Scan - Build Pass List
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_path:
+        description: 'Test subdirectory (e.g. java/lang, java/util, or java for all)'
+        required: false
+        default: 'java'
+  schedule:
+    - cron: "0 0 * * 0"
+
+permissions:
+  contents: write
+
+jobs:
+  full-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    concurrency:
+      group: full-scan-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "23"
+          cache: maven
+
+      - name: Install jtreg
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y jtreg
+
+      - name: Clone jdk17u-dev
+        run: |
+          set -euo pipefail
+          git clone --depth=1 https://github.com/openjdk/jdk17u-dev
+
+      - name: Configure JavaOracle runtime paths
+        run: |
+          set -euo pipefail
+          TARGET="${{ inputs.target_path || 'java' }}"
+          echo "Target path: $TARGET"
+
+          sed -i "s#^suiteBasePath=.*#suiteBasePath=$GITHUB_WORKSPACE/jdk17u-dev/test/jdk/#" config.properties
+          sed -i "s#^jdkTestPath=.*#jdkTestPath=$GITHUB_WORKSPACE/jdk17u-dev/test#" config.properties
+          sed -i "s#^jdkPaths=.*#jdkPaths=$JAVA_HOME#" config.properties
+          sed -i "s#^useCacheMode=.*#useCacheMode=false#" config.properties
+
+          sed -i "s#^testCoreMultiplier=.*#testCoreMultiplier=2.0#" config.properties
+          sed -i "s#^testMaxMultiplier=.*#testMaxMultiplier=3.0#" config.properties
+          sed -i "s#^testQueueSize=.*#testQueueSize=500#" config.properties
+          sed -i "s#^threadMultiplierExecute=.*#threadMultiplierExecute=3#" config.properties
+
+          echo "=== config.properties ==="
+          grep -E '(suiteBasePath|jdkTestPath|jdkPaths|useCacheMode|testCoreMultiplier|testMaxMultiplier|testQueueSize|threadMultiplierExecute)' config.properties
+
+      - name: Build JavaOracle
+        run: mvn -B -Dmaven.test.skip=true package
+
+      - name: Run full scan
+        run: |
+          set -euo pipefail
+          TARGET="${{ inputs.target_path || 'java' }}"
+          echo "=== Running execute for: $TARGET ==="
+          mvn -B -q exec:java \
+            -Dexec.mainClass=edu.tju.ista.llm4test.Main \
+            -Dexec.args="execute $TARGET" || echo "Warning: execute returned non-zero for $TARGET"
+
+      - name: Show pass list statistics
+        run: |
+          set -euo pipefail
+          echo "=== Pass List Files ==="
+          find ValidTestCases/ -name "*.txt" -exec sh -c 'echo "$(basename {}): $(wc -l < {}) lines"' \;
+          echo "=== First 20 entries ==="
+          head -20 ValidTestCases/*.txt || true
+
+      - name: Commit and push pass list
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add ValidTestCases/
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            TOTAL=$(find ValidTestCases/ -name "*.txt" -exec cat {} \; | wc -l | tr -d ' ')
+            git commit -m "update pass list: ${TOTAL} test cases (${{ inputs.target_path || 'java' }}) [skip ci]"
+            git push
+          fi

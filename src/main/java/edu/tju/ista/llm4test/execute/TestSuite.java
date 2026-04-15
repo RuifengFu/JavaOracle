@@ -9,10 +9,13 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 import java.util.logging.Level;
@@ -259,9 +262,9 @@ public class TestSuite {
     }
     
     /**
-     * 将成功的测试用例保存到缓存文件
+     * 将成功的测试用例保存到缓存文件（覆盖写入）
      */
-    private void saveSuccessfulTestCasesToCache(List<TestCase> successfulTestCases) {
+    public void saveSuccessfulTestCasesToCache(List<TestCase> successfulTestCases) {
         try {
             String jdkTestPath = GlobalConfig.getJdkTestPath() + "/jdk/";
             Path jdkTestRoot = Paths.get(jdkTestPath).toAbsolutePath().normalize();
@@ -272,7 +275,6 @@ public class TestSuite {
                         try {
                             relPath = jdkTestRoot.relativize(fullPath);
                         } catch (Exception e) {
-                            // 如果无法relativize，直接用文件名
                             relPath = fullPath.getFileName();
                         }
                         return relPath.toString().replace('\\', '/');
@@ -284,6 +286,78 @@ public class TestSuite {
             
         } catch (IOException e) {
             LoggerUtil.logExec(Level.WARNING, "保存缓存文件失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 将单个成功的测试用例追加到缓存文件（增量保存，用于断点续传）
+     */
+    public synchronized void appendTestCaseToCache(TestCase testCase) {
+        try {
+            String jdkTestPath = GlobalConfig.getJdkTestPath() + "/jdk/";
+            Path jdkTestRoot = Paths.get(jdkTestPath).toAbsolutePath().normalize();
+            Path fullPath = testCase.getOriginFile().toPath().toAbsolutePath().normalize();
+            Path relPath;
+            try {
+                relPath = jdkTestRoot.relativize(fullPath);
+            } catch (Exception e) {
+                relPath = fullPath.getFileName();
+            }
+            String entry = relPath.toString().replace('\\', '/');
+            Path cacheFile = Paths.get(GlobalConfig.getValidTestCasesPath(rootPath));
+            Files.write(cacheFile, (entry + "\n").getBytes(),
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (IOException e) {
+            LoggerUtil.logExec(Level.WARNING, "追加缓存失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 加载已缓存的测试用例路径集合（用于断点续传）
+     */
+    public Set<String> loadCachedTestCasePaths() {
+        Set<String> cached = new HashSet<>();
+        Path cacheFile = Paths.get(GlobalConfig.getValidTestCasesPath(rootPath));
+        if (!Files.exists(cacheFile)) {
+            return cached;
+        }
+        try {
+            Files.readAllLines(cacheFile).stream()
+                    .map(String::trim)
+                    .filter(line -> !line.isEmpty() && !line.startsWith("#"))
+                    .forEach(cached::add);
+            LoggerUtil.logExec(Level.INFO, "从缓存加载了 " + cached.size() + " 个已完成测试用例（断点续传）");
+        } catch (IOException e) {
+            LoggerUtil.logExec(Level.WARNING, "读取缓存文件失败: " + e.getMessage());
+        }
+        return cached;
+    }
+
+    /**
+     * 将新成功的测试用例与已有缓存合并，去重并覆盖写入
+     */
+    public void deduplicateAndSaveCache(List<TestCase> newSuccessfulCases) {
+        try {
+            String jdkTestPath = GlobalConfig.getJdkTestPath() + "/jdk/";
+            Path jdkTestRoot = Paths.get(jdkTestPath).toAbsolutePath().normalize();
+            Set<String> allPaths = new HashSet<>(loadCachedTestCasePaths());
+
+            for (TestCase tc : newSuccessfulCases) {
+                Path fullPath = tc.getOriginFile().toPath().toAbsolutePath().normalize();
+                Path relPath;
+                try {
+                    relPath = jdkTestRoot.relativize(fullPath);
+                } catch (Exception e) {
+                    relPath = fullPath.getFileName();
+                }
+                allPaths.add(relPath.toString().replace('\\', '/'));
+            }
+
+            List<String> sorted = allPaths.stream().sorted().collect(Collectors.toList());
+            Files.write(Paths.get(GlobalConfig.getValidTestCasesPath(rootPath)), sorted);
+            LoggerUtil.logExec(Level.INFO, "缓存去重完成，共 " + sorted.size() + " 个测试用例: " + GlobalConfig.getValidTestCasesPath(rootPath));
+        } catch (IOException e) {
+            LoggerUtil.logExec(Level.WARNING, "缓存去重保存失败: " + e.getMessage());
         }
     }
 
