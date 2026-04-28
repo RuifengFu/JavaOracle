@@ -7,8 +7,10 @@ on:
         description: 'Test subdirectory (e.g. java/lang, java/util, or java for all)'
         required: false
         default: 'java'
-  schedule:
-    - cron: "0 0 * * 0"
+      duration_minutes:
+        description: 'Max execution time in minutes (0 = run until all complete)'
+        required: false
+        default: '60'
 
 permissions:
   contents: write
@@ -48,7 +50,9 @@ jobs:
         run: |
           set -euo pipefail
           TARGET="${{ inputs.target_path || 'java' }}"
+          DURATION="${{ inputs.duration_minutes || '60' }}"
           echo "Target path: $TARGET"
+          echo "Duration: $DURATION minutes"
 
           sed -i "s#^suiteBasePath=.*#suiteBasePath=$GITHUB_WORKSPACE/jdk17u-dev/test/jdk/#" config.properties
           sed -i "s#^jdkTestPath=.*#jdkTestPath=$GITHUB_WORKSPACE/jdk17u-dev/test#" config.properties
@@ -59,9 +63,10 @@ jobs:
           sed -i "s#^testMaxMultiplier=.*#testMaxMultiplier=3.0#" config.properties
           sed -i "s#^testQueueSize=.*#testQueueSize=500#" config.properties
           sed -i "s#^threadMultiplierExecute=.*#threadMultiplierExecute=3#" config.properties
+          sed -i "s#^sampleDurationMinutes=.*#sampleDurationMinutes=$DURATION#" config.properties
 
           echo "=== config.properties ==="
-          grep -E '(suiteBasePath|jdkTestPath|jdkPaths|useCacheMode|testCoreMultiplier|testMaxMultiplier|testQueueSize|threadMultiplierExecute)' config.properties
+          grep -E '(suiteBasePath|jdkTestPath|jdkPaths|useCacheMode|testCoreMultiplier|testMaxMultiplier|testQueueSize|threadMultiplierExecute|sampleDurationMinutes)' config.properties
 
       - name: Build JavaOracle
         run: mvn -B -Dmaven.test.skip=true package
@@ -93,6 +98,6 @@ jobs:
             echo "No changes to commit"
           else
             TOTAL=$(find ValidTestCases/ -name "*.txt" -exec cat {} \; | wc -l | tr -d ' ')
-            git commit -m "update pass list: ${TOTAL} test cases (${{ inputs.target_path || 'java' }}) [skip ci]"
+            git commit -m "update pass list: ${TOTAL} test cases (${{ inputs.target_path || 'java' }}) duration=${{ inputs.duration_minutes || '60' }}min [skip ci]"
             git push
           fi

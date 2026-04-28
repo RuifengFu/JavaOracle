@@ -31,6 +31,8 @@ public class GlobalConfig {
     private static final double DEFAULT_TEST_CORE_MULTIPLIER = 0.5;
     private static final double DEFAULT_TEST_MAX_MULTIPLIER = 1.5;
     private static final int DEFAULT_TEST_QUEUE_SIZE = 200;
+    private static final int DEFAULT_SAMPLE_SIZE = 0;
+    private static final int DEFAULT_SAMPLE_DURATION_MINUTES = 60;
     
     // LLM QPS控制默认配置
     private static final int DEFAULT_LLM_MAX_QPS = 10;  // 默认每秒最多10个请求
@@ -348,6 +350,14 @@ public class GlobalConfig {
      */
     public static int getTestQueueSize() {
         return ConfigUtil.getInt("testQueueSize", DEFAULT_TEST_QUEUE_SIZE);
+    }
+
+    public static int getSampleSize() {
+        return ConfigUtil.getInt("sampleSize", DEFAULT_SAMPLE_SIZE);
+    }
+
+    public static int getSampleDurationMinutes() {
+        return ConfigUtil.getInt("sampleDurationMinutes", DEFAULT_SAMPLE_DURATION_MINUTES);
     }
     
     /**

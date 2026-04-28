@@ -8,11 +8,15 @@ import edu.tju.ista.llm4test.utils.*;
 import java.io.File;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
@@ -119,39 +123,71 @@ public class TestExecutionManager {
             return;
         }
 
+        int sampleSize = GlobalConfig.getSampleSize();
+        if (sampleSize > 0 && remainingTestCases.size() > sampleSize) {
+            List<TestCase> copy = new ArrayList<>(remainingTestCases);
+            Collections.shuffle(copy);
+            remainingTestCases = copy.subList(0, sampleSize);
+            System.out.println("采样模式: 从 " + copy.size() + " 个候选中随机选取 " + sampleSize + " 个执行");
+        }
+
         System.out.println("待执行文件数: " + remainingTestCases.size());
 
         AtomicInteger completedCount = new AtomicInteger(0);
         AtomicInteger successCount = new AtomicInteger(0);
 
-        try {
-            CompletableFuture<Void> execution = CompletableFuture.allOf(
-                    remainingTestCases.stream()
-                            .map(testCase -> testCase.executeTestAsync(testExecutor)
-                                    .handle((result, throwable) -> {
-                                        if (throwable != null) {
-                                            LoggerUtil.logExec(Level.WARNING, "测试执行失败: " + testCase.getFile() + "\n" + throwable.getMessage());
-                                            testCase.setResult(new TestResult(TestResultKind.TEST_FAIL));
-                                        } else {
-                                            testCase.setResult(result);
-                                            LoggerUtil.logResult(Level.INFO, "测试执行: " + testCase.getFile() + " " + result.getKind());
-                                            if (result.isSuccess()) {
-                                                testSuite.appendTestCaseToCache(testCase);
-                                                successCount.incrementAndGet();
-                                            }
-                                        }
-                                        recordTestResult(testCase);
-                                        int completed = completedCount.incrementAndGet();
-                                        if (completed % 50 == 0) {
-                                            System.out.println("进度: " + completed + "/" + remainingTestCases.size() +
-                                                    " (成功: " + successCount.get() + ")");
-                                        }
-                                        return null;
-                                    }))
-                            .toArray(CompletableFuture[]::new));
+        int durationMinutes = GlobalConfig.getSampleDurationMinutes();
 
-            execution.join();
-            LoggerUtil.logExec(Level.INFO, "所有测试执行任务完成");
+        try {
+            CompletableFuture<?>[] futures = remainingTestCases.stream()
+                    .map(testCase -> testCase.executeTestAsync(testExecutor)
+                            .handle((result, throwable) -> {
+                                if (throwable != null) {
+                                    if (!(throwable instanceof java.util.concurrent.CancellationException)) {
+                                        LoggerUtil.logExec(Level.WARNING, "测试执行失败: " + testCase.getFile() + "\n" + throwable.getMessage());
+                                        testCase.setResult(new TestResult(TestResultKind.TEST_FAIL));
+                                    }
+                                } else {
+                                    testCase.setResult(result);
+                                    LoggerUtil.logResult(Level.INFO, "测试执行: " + testCase.getFile() + " " + result.getKind());
+                                    if (result.isSuccess()) {
+                                        testSuite.appendTestCaseToCache(testCase);
+                                        successCount.incrementAndGet();
+                                    }
+                                }
+                                if (testCase.getResult() != null) {
+                                    recordTestResult(testCase);
+                                }
+                                int completed = completedCount.incrementAndGet();
+                                if (completed % 50 == 0) {
+                                    System.out.println("进度: " + completed + "/" + remainingTestCases.size() +
+                                            " (成功: " + successCount.get() + ")");
+                                }
+                                return null;
+                            }))
+                    .toArray(CompletableFuture[]::new);
+
+            CompletableFuture<Void> execution = CompletableFuture.allOf(futures);
+
+            if (durationMinutes > 0) {
+                System.out.println("时间限制: " + durationMinutes + " 分钟");
+                try {
+                    execution.get(durationMinutes, TimeUnit.MINUTES);
+                } catch (TimeoutException e) {
+                    long cancelled = 0;
+                    for (CompletableFuture<?> f : futures) {
+                        if (!f.isDone()) {
+                            f.cancel(true);
+                            cancelled++;
+                        }
+                    }
+                    System.out.println("时间限制到达，取消 " + cancelled + " 个未完成任务");
+                }
+            } else {
+                execution.join();
+            }
+
+            LoggerUtil.logExec(Level.INFO, "测试执行阶段结束");
             System.out.println("执行完成: " + successCount.get() + "/" + remainingTestCases.size() + " 通过");
         } catch (Exception e) {
             LoggerUtil.logExec(Level.SEVERE, "测试执行过程中发生不可恢复的错误: " + e.getMessage());
