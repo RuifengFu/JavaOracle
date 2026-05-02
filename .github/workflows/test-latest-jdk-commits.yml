@@ -1,20 +1,23 @@
-name: Test Latest JDK Commits
+name: Sample & Generate
 
 on:
-  schedule:
-    - cron: "0 2 * * *"
   workflow_dispatch:
+    inputs:
+      sample_count:
+        description: 'Number of test cases to randomly sample and generate'
+        required: false
+        default: '10'
 
 permissions:
   contents: write
 
 jobs:
-  test-latest-jdk:
+  sample-generate:
     runs-on: ubuntu-latest
     environment: LLM
     timeout-minutes: 180
     concurrency:
-      group: test-latest-jdk-${{ github.ref }}
+      group: sample-generate-${{ github.ref }}
       cancel-in-progress: false
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -49,7 +52,7 @@ jobs:
       - name: Clone jdk17u-dev
         run: |
           set -euo pipefail
-          git clone https://github.com/openjdk/jdk17u-dev
+          git clone --depth=1 https://github.com/openjdk/jdk17u-dev
 
       - name: Configure JavaOracle runtime paths
         run: |
@@ -57,11 +60,15 @@ jobs:
           sed -i "s#^suiteBasePath=.*#suiteBasePath=$GITHUB_WORKSPACE/jdk17u-dev/test/jdk/#" config.properties
           sed -i "s#^jdkTestPath=.*#jdkTestPath=$GITHUB_WORKSPACE/jdk17u-dev/test#" config.properties
           sed -i "s#^jdkPaths=.*#jdkPaths=$JAVA_HOME#" config.properties
-          sed -i "s#^useCacheMode=.*#useCacheMode=false#" config.properties
-          sed -i "s#^testCoreMultiplier=.*#testCoreMultiplier=2.0#" config.properties
-          sed -i "s#^testMaxMultiplier=.*#testMaxMultiplier=3.0#" config.properties
-          sed -i "s#^testQueueSize=.*#testQueueSize=500#" config.properties
-          sed -i "s#^threadMultiplierExecute=.*#threadMultiplierExecute=3#" config.properties
+          sed -i "s#^useCacheMode=.*#useCacheMode=true#" config.properties
+          sed -i "s#^testCoreMultiplier=.*#testCoreMultiplier=1.0#" config.properties
+          sed -i "s#^testMaxMultiplier=.*#testMaxMultiplier=2.0#" config.properties
+          sed -i "s#^threadMultiplierExecute=.*#threadMultiplierExecute=2#" config.properties
+          sed -i "s#^llm.maxConcurrency=.*#llm.maxConcurrency=20#" config.properties
+          sed -i "s#^llm.maxQps=.*#llm.maxQps=5#" config.properties
+
+          echo "=== config.properties (key settings) ==="
+          grep -E '(suiteBasePath|jdkTestPath|jdkPaths|useCacheMode|llm|testCore|testMax|threadMultiplier)' config.properties
 
       - name: Validate required LLM secrets
         run: |
@@ -74,45 +81,61 @@ jobs:
       - name: Build JavaOracle
         run: mvn -B -Dmaven.test.skip=true package
 
-      - name: Detect changed test files
-        id: detect
+      - name: Check pass list exists
         run: |
           set -euo pipefail
-          CHANGED_CASES=$(git -C jdk17u-dev log --since="24 hours ago" --name-only --pretty=format: -- test/jdk/java test/jdk/javax | grep '\.java$' | sort -u || true)
-          if [ -z "$CHANGED_CASES" ]; then
-            echo "No java/javax testcases changed in the last 24 hours."
-            echo "found=false" >> "$GITHUB_OUTPUT"
-            exit 0
+          if [ ! -d "ValidTestCases" ] || [ -z "$(find ValidTestCases -name '*.txt' -not -empty)" ]; then
+            echo "::error::No pass list found. Run full-scan workflow first."
+            exit 1
           fi
-          echo "=== Changed test files ==="
-          echo "$CHANGED_CASES"
-          echo "$CHANGED_CASES" | sed -E 's#^test/jdk/##; s#/[^/]+$##' | sort -u > changed_targets.txt
-          echo "=== Target directories ==="
-          cat changed_targets.txt
-          echo "found=true" >> "$GITHUB_OUTPUT"
+          TOTAL=$(find ValidTestCases/ -name "*.txt" -exec cat {} \; | wc -l | tr -d ' ')
+          echo "Pass list contains $TOTAL test cases"
 
-      - name: Run JavaOracle on changed tests
-        if: steps.detect.outputs.found == 'true'
+      - name: Sample and generate
         run: |
-          set -euo pipefail
-          while IFS= read -r target; do
-            [ -z "$target" ] && continue
-            echo "::group::Running JavaOracle execute for: $target"
-            mvn -B -q exec:java -Dexec.mainClass=edu.tju.ista.llm4test.Main -Dexec.args="execute $target" || echo "Warning: JavaOracle returned non-zero for $target"
-            echo "::endgroup::"
-          done < changed_targets.txt
+          set -uo pipefail
+          COUNT=${{ inputs.sample_count || '10' }}
+          echo "=== Sampling $COUNT test cases from pass list ==="
 
-      - name: Commit and push updated pass list
-        if: steps.detect.outputs.found == 'true'
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add ValidTestCases/
-          if git diff --cached --quiet; then
-            echo "No pass list changes to commit"
-          else
-            CHANGED=$(wc -l < changed_targets.txt | tr -d ' ')
-            git commit -m "update pass list: incremental update ($CHANGED targets) [skip ci]"
-            git push
+          PASS_LIST=$(find ValidTestCases/ -name "*.txt" -exec cat {} \; | grep -v '^#' | grep -v '^$')
+          TOTAL=$(echo "$PASS_LIST" | wc -l | tr -d ' ')
+
+          if [ "$TOTAL" -eq 0 ]; then
+            echo "No test cases in pass list"
+            exit 1
           fi
+
+          SAMPLED=$(echo "$PASS_LIST" | shuf -n "$COUNT")
+          echo "=== Sampled test cases ==="
+          echo "$SAMPLED"
+
+          echo "" > generate-results.txt
+          I=0
+          echo "$SAMPLED" | while IFS= read -r CASE; do
+            I=$((I + 1))
+            DIR=$(dirname "$CASE")
+            echo ""
+            echo "=== [$I/$COUNT] generate: $CASE (dir: $DIR) ==="
+
+            mvn -B -q exec:java \
+              -Dexec.mainClass=edu.tju.ista.llm4test.Main \
+              -Dexec.args="generate $DIR" || echo "Warning: generate returned non-zero for $DIR"
+
+            echo "$CASE: done" >> generate-results.txt
+          done
+
+          echo ""
+          echo "=== Generation complete ==="
+          cat generate-results.txt
+
+      - name: Upload generate results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: generate-results-${{ github.run_id }}
+          path: |
+            result.log
+            BugReport/
+            debug/
+            test/
+          retention-days: 7
