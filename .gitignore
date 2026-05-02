@@ -11,3 +11,5 @@
 !.github/workflows/
 !.github/workflows/*.yml
 !src/main/java/edu/tju/ista/llm4test/utils/JavaBaseClassCollector.java
+!ValidTestCases/
+!ValidTestCases/**
