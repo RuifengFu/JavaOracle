@@ -132,6 +132,7 @@ public class TestExecutionManager {
         }
 
         System.out.println("待执行文件数: " + remainingTestCases.size());
+        final List<TestCase> finalTestCases = remainingTestCases;
 
         AtomicInteger completedCount = new AtomicInteger(0);
         AtomicInteger successCount = new AtomicInteger(0);
@@ -139,7 +140,7 @@ public class TestExecutionManager {
         int durationMinutes = GlobalConfig.getSampleDurationMinutes();
 
         try {
-            CompletableFuture<?>[] futures = remainingTestCases.stream()
+            CompletableFuture<?>[] futures = finalTestCases.stream()
                     .map(testCase -> testCase.executeTestAsync(testExecutor)
                             .handle((result, throwable) -> {
                                 if (throwable != null) {
@@ -160,7 +161,7 @@ public class TestExecutionManager {
                                 }
                                 int completed = completedCount.incrementAndGet();
                                 if (completed % 50 == 0) {
-                                    System.out.println("进度: " + completed + "/" + remainingTestCases.size() +
+                                    System.out.println("进度: " + completed + "/" + finalTestCases.size() +
                                             " (成功: " + successCount.get() + ")");
                                 }
                                 return null;
@@ -188,19 +189,19 @@ public class TestExecutionManager {
             }
 
             LoggerUtil.logExec(Level.INFO, "测试执行阶段结束");
-            System.out.println("执行完成: " + successCount.get() + "/" + remainingTestCases.size() + " 通过");
+            System.out.println("执行完成: " + successCount.get() + "/" + finalTestCases.size() + " 通过");
         } catch (Exception e) {
             LoggerUtil.logExec(Level.SEVERE, "测试执行过程中发生不可恢复的错误: " + e.getMessage());
             e.printStackTrace();
         }
 
-        List<TestCase> newlySuccessful = remainingTestCases.stream()
+        List<TestCase> newlySuccessful = finalTestCases.stream()
                 .filter(tc -> tc.getResult() != null && tc.getResult().isSuccess())
                 .collect(Collectors.toList());
         testSuite.deduplicateAndSaveCache(newlySuccessful);
 
         statistics.logStatistics();
-        TokenUsageTracker.getInstance().logSummary(remainingTestCases.size());
+        TokenUsageTracker.getInstance().logSummary(finalTestCases.size());
     }
 
     /**
