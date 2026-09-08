@@ -57,7 +57,12 @@ public class InformationCollectionAgent extends Agent {
         
         // Initialize tools
         this.sourceTool = sourcePath != null ? new SimplifiedSourceCodeSearchTool(sourcePath) : null;
-        this.javadocTool = javadocPath != null ? new SimplifiedJavaDocSearchTool(javadocPath) : null;
+        // JavaDoc搜索工具：源码注释优先（传入sourcePath），HTML JavaDoc仅作回退
+        if (sourcePath != null || javadocPath != null) {
+            this.javadocTool = new SimplifiedJavaDocSearchTool(sourcePath, javadocPath);
+        } else {
+            this.javadocTool = null;
+        }
         
         // Initialize Web search tool
         String apiKey = System.getenv("BOCHA_API_KEY");

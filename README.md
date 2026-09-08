@@ -24,11 +24,13 @@ Java Oracle is a framework for generating test oracles and verifying potential J
 git clone https://github.com/openjdk/jdk17u-dev
 ```
 
-2. Download JavaDoc (JDK 17 API docs), and place it in the path that matches `config.properties`:
+2. Download JavaDoc (JDK 17 API docs), and place it in the path that matches `config.properties` (**optional since the source-comment doc extraction**):
 
 ```text
 JavaDoc/docs/api/java.base
 ```
+
+> API docs are now parsed directly from the Javadoc comments in the JDK source tree (`jdk17u-dev/src`). The HTML JavaDoc is only used as a fallback for classes generated at build time from templates (e.g. `ByteBuffer`), for which no `.java` file exists in the source tree.
 
 3. Prepare runtime output workspace (the framework will create/use this automatically):
 
@@ -195,11 +197,13 @@ So in CI, it is recommended to:
 git clone https://github.com/openjdk/jdk17u-dev
 ```
 
-2. 下载 JavaDoc（JDK 17 API 文档），并放到与 `config.properties` 一致的路径：
+2. 下载 JavaDoc（JDK 17 API 文档），并放到与 `config.properties` 一致的路径（**自源码注释文档提取上线后为可选**）：
 
 ```text
 JavaDoc/docs/api/java.base
 ```
+
+> API 文档默认直接从 JDK 源码树（`jdk17u-dev/src`）的 Javadoc 注释中解析，无需下载 HTML 文档。HTML JavaDoc 仅作为回退，用于覆盖构建时由模板生成、源码树中不存在 `.java` 文件的类（如 `ByteBuffer`）。
 
 3. 准备运行输出目录（框架会自动使用/创建）：
 
