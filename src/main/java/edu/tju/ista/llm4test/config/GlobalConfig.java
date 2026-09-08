@@ -7,6 +7,13 @@ import java.io.File;
  * 从config.properties文件读取所有配置项
  */
 public class GlobalConfig {
+
+    /**
+     * 获取目标项目类型（适配器选择）：jdk（默认，JDK/jtreg场景）
+     */
+    public static String getProjectType() {
+        return ConfigUtil.getOrDefault("project.type", "jdk");
+    }
     
     // 默认值常量（当配置文件中没有对应配置时使用）
     private static final String DEFAULT_TEST_DIR = "test";

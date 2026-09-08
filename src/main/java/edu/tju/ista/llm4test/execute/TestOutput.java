@@ -1,5 +1,7 @@
 package edu.tju.ista.llm4test.execute;
 
+import edu.tju.ista.llm4test.adapter.jdk.JtregOutputParser;
+
 public class TestOutput {
 
     public final String stdout;
@@ -18,117 +20,10 @@ public class TestOutput {
         this.stdout = stdout;
         this.stderr = stderr;
         this.exitValue = exitValue;
-        parseJtregOutput();
-    }
-
-    /**
-     * 解析JTreg输出，提取关键信息
-     */
-    private void parseJtregOutput() {
-        if (stdout == null || stdout.isEmpty()) {
-            this.testout = "";
-            this.testerr = stderr != null ? stderr : "";
-            return;
-        }
-
-        StringBuilder testOutput = new StringBuilder();
-        StringBuilder testError = new StringBuilder();
-
-        // 使用保留尾部空元素的 split，避免丢失末尾空行
-        String[] lines = stdout.split("\n", -1);
-        boolean inStderr = false;
-        boolean inStdout = false;
-
-        for (String rawLine : lines) {
-            String trimmed = rawLine.trim();
-
-            // 先处理区块切换标记（使用trimmed判断）
-            if ("STDOUT:".equals(trimmed)) {
-                inStdout = true;
-                inStderr = false;
-                continue;
-            }
-            if ("STDERR:".equals(trimmed)) {
-                inStdout = false;
-                inStderr = true;
-                continue;
-            }
-
-            // 在 STDOUT/STDERR 区块内保留原始行（含空行与空白）
-            if (inStdout) {
-                testOutput.append(rawLine).append("\n");
-                continue;
-            }
-            if (inStderr) {
-                // 遇到新的段落标记则结束 STDERR 捕获
-                if (trimmed.startsWith("ACTION:") || trimmed.startsWith("JavaTest Message:")) {
-                    inStderr = false;
-                    // 不 return，下面的通用逻辑会正常处理 ACTION 等行
-                } else {
-                    testError.append(rawLine).append("\n");
-                    continue;
-                }
-            }
-
-            // 区块外逻辑：此处可以使用 trimmed 并跳过无意义的空行与分隔线
-            if (trimmed.contains("Compilation failed")) {
-                testOutput.append(trimmed).append("\n");
-                continue;
-            }
-            // 跳过空行和分隔线（仅限区块外）
-            if (trimmed.isEmpty() || trimmed.startsWith("---")) {
-                continue;
-            }
-
-            // 提取测试名称和JDK信息
-            if (trimmed.startsWith("TEST:")) {
-                testOutput.append(trimmed).append("\n");
-                continue;
-            }
-
-            if (trimmed.startsWith("TEST JDK:")) {
-                testOutput.append(trimmed).append("\n");
-                continue;
-            }
-
-            // 提取最终测试结果
-            if (trimmed.startsWith("TEST RESULT:")) {
-                testOutput.append(trimmed).append("\n");
-                continue;
-            }
-
-            // 提取测试结果摘要
-            if (trimmed.startsWith("Test results:")) {
-                testOutput.append(trimmed).append("\n");
-                continue;
-            }
-
-            if (trimmed.startsWith("ACTION:")) {
-                testOutput.append(trimmed).append("\n");
-                continue;
-            }
-        }
-
-        this.testout = testOutput.toString().trim();
-        this.testerr = testError.toString().trim();
-
-        // 如果没有解析到测试错误，但有stderr，则提取stderr中的关键错误信息
-        if (this.testerr.isEmpty() && stderr != null && !stderr.isEmpty()) {
-            String[] stderrLines = stderr.split("\n");
-            StringBuilder stderrBuilder = new StringBuilder();
-
-            for (String line : stderrLines) {
-                line = line.trim();
-                // 只保留异常、错误消息，跳过WARNING
-                if (line.startsWith("java.lang.") || line.startsWith("\tat ") ||
-                    line.startsWith("Exception") || line.startsWith("Error:") ||
-                    line.startsWith("JavaTest Message:")) {
-                    stderrBuilder.append(line).append("\n");
-                }
-            }
-
-            this.testerr = stderrBuilder.toString().trim();
-        }
+        // 解析逻辑已抽取到 JtregOutputParser（后续harness适配的过渡期默认使用jtreg解析）
+        JtregOutputParser.ParsedOutput parsed = new JtregOutputParser().parse(stdout, stderr);
+        this.testout = parsed.testout();
+        this.testerr = parsed.testerr();
     }
 
     public String getEnv() {
