@@ -5,6 +5,8 @@ import edu.tju.ista.llm4test.config.ConfigUtil;
 import edu.tju.ista.llm4test.execute.TestCase;
 import edu.tju.ista.llm4test.execute.TestResult;
 import edu.tju.ista.llm4test.execute.TestResultKind;
+import edu.tju.ista.llm4test.llm.tools.TestExecuteTool;
+import edu.tju.ista.llm4test.llm.tools.ToolResponse;
 import edu.tju.ista.llm4test.utils.ApiInfoProcessor;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
@@ -156,6 +158,72 @@ class CommonsLangPilotTest {
     }
 
     // ==================== 3. 执行它的测试 ====================
+
+    // ==================== 4. Agent 面向的执行工具（Maven 模式全链路） ====================
+
+    /**
+     * Agent 增强用例时给的是**源码字符串**，不是文件路径（HypothesisAgent 那条重载）。
+     * 这里不经 LLM，直接走 Agent 会走的同一个入口：
+     * {@code createExecuteTool().execute(sourceCode)} → 落临时文件 → javac →
+     * junit-console → 分类，验证 Maven 模式下 agent 侧执行链路是通的。
+     */
+    @Test
+    void executeToolRunsEnhancedSourceAgainstLibrary() {
+        TestExecuteTool tool = adapter.createExecuteTool();
+        assertEquals("junit_execute", tool.getName());
+
+        // 针对被测库 API 的“增强用例”，断言取自 StringUtils.substring 的 javadoc 行为表
+        ToolResponse<TestResult> response = tool.execute("""
+                package org.apache.commons.lang3;
+
+                import org.junit.jupiter.api.Test;
+                import static org.junit.jupiter.api.Assertions.assertEquals;
+                import static org.junit.jupiter.api.Assertions.assertNull;
+
+                public class EnhancedSubstringProbeTest {
+                    @Test
+                    void substringHonoursDocumentedContract() {
+                        assertNull(StringUtils.substring(null, 2, 4));
+                        assertEquals("c", StringUtils.substring("abc", 2, 4));
+                        assertEquals("b", StringUtils.substring("abc", -2, -1));
+                        assertEquals("", StringUtils.substring("abc", 2, 0));
+                    }
+                }
+                """);
+
+        assertTrue(response.isSuccess(), "工具本身应执行成功: " + response.getResult());
+        TestResult result = response.getResult();
+        assertEquals(TestResultKind.SUCCESS, result.getKind(),
+                "契约相符的增强用例应通过。输出:\n" + result.getOutput());
+    }
+
+    /**
+     * 反向用例：故意违反 javadoc 契约的断言必须被判失败——否则 oracle 无法区分
+     * 「API 行为正确」与「用例根本没跑起来」。
+     */
+    @Test
+    void executeToolReportsFailureForContractViolation() {
+        ToolResponse<TestResult> response = adapter.createExecuteTool().execute("""
+                package org.apache.commons.lang3;
+
+                import org.junit.jupiter.api.Test;
+                import static org.junit.jupiter.api.Assertions.assertEquals;
+
+                public class ViolatedContractProbeTest {
+                    @Test
+                    void substringDoesNotReturnWhatDocSays() {
+                        // javadoc 明确 substring("abc", 2, 4) == "c"
+                        assertEquals("WRONG", StringUtils.substring("abc", 2, 4));
+                    }
+                }
+                """);
+
+        assertTrue(response.isSuccess(), "工具执行本身不应报错");
+        TestResult result = response.getResult();
+        assertEquals(TestResultKind.TEST_FAIL, result.getKind(),
+                "违反契约应判 TEST_FAIL。输出:\n" + result.getOutput());
+        assertFalse(result.getCompilationFailed(), "这是断言失败，不是编译失败");
+    }
 
     @Test
     void executesLibraryOwnTestThroughAdapter() {

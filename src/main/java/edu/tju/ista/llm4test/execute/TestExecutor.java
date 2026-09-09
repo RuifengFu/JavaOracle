@@ -87,11 +87,8 @@ public class TestExecutor {
      * 清理临时目录（谨慎使用！）
      */
     public void clearTempDirectories() {
-        if (adapter instanceof JdkProjectAdapter jdkAdapter) {
-            jdkAdapter.cleanupWorkspace();
-        } else {
-            LoggerUtil.logExec(Level.WARNING, "当前适配器不支持临时目录清理: " + adapter.id());
-        }
+        // 由适配器自己决定清什么（接口上的默认实现是不做事），门面不再向下转型
+        adapter.cleanupWorkspace();
     }
 
     /**
@@ -100,17 +97,6 @@ public class TestExecutor {
      */
     public void shutdown() {
         LoggerUtil.logExec(Level.INFO, "TestExecutor关闭完成");
-    }
-
-    /**
-     * 获取默认JDK列表（用于测试）
-     * @return JDK路径列表
-     */
-    public List<String> getDefaultJDKs() {
-        if (adapter instanceof JdkProjectAdapter jdkAdapter) {
-            return jdkAdapter.getDefaultJDKs();
-        }
-        return List.of();
     }
 
     /**

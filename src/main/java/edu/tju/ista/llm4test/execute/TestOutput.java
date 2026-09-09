@@ -1,6 +1,7 @@
 package edu.tju.ista.llm4test.execute;
 
-import edu.tju.ista.llm4test.adapter.jdk.JtregOutputParser;
+import edu.tju.ista.llm4test.adapter.AdapterRegistry;
+import edu.tju.ista.llm4test.adapter.HarnessOutputParser;
 
 public class TestOutput {
 
@@ -16,8 +17,15 @@ public class TestOutput {
     // 环境信息
     private String env;
 
+    /**
+     * 用当前适配器的解析器构造。
+     * <p>
+     * 原先这里写死 {@code new JtregOutputParser()}，核心层因此反向依赖
+     * {@code adapter.jdk}，且 Maven 模式下 core 路径会静默拿到 jtreg 解析。
+     * 改由 {@link AdapterRegistry} 提供当前 harness 的解析器：JDK 模式取值不变。
+     */
     public TestOutput(String stdout, String stderr, int exitValue) {
-        this(stdout, stderr, exitValue, new JtregOutputParser());
+        this(stdout, stderr, exitValue, AdapterRegistry.get().outputParser());
     }
 
     /**
@@ -25,7 +33,7 @@ public class TestOutput {
      * @param parser 与执行框架匹配的输出解析器
      */
     public TestOutput(String stdout, String stderr, int exitValue,
-                      edu.tju.ista.llm4test.adapter.HarnessOutputParser parser) {
+                      HarnessOutputParser parser) {
         this.stdout = stdout;
         this.stderr = stderr;
         this.exitValue = exitValue;
@@ -82,26 +90,10 @@ public class TestOutput {
     public String getSimpleOutput() {
         StringBuilder sb = new StringBuilder();
 
-        // 添加退出码和含义
-        sb.append("exitValue: ").append(exitValue);
-        switch (exitValue) {
-            case 0:
-                sb.append(" (SUCCESS)");
-                break;
-            case 2:
-                sb.append(" (TEST_FAIL)");
-                break;
-            case 3:
-                sb.append(" (ENV_ERROR)");
-                break;
-            case 124:
-                sb.append(" (TIMEOUT)");
-                break;
-            default:
-                sb.append(" (UNKNOWN)");
-                break;
-        }
-        sb.append("\n");
+        // 退出码含义由当前 harness 解释（这段文本会进 prompt）
+        sb.append("exitValue: ").append(exitValue)
+                .append(" (").append(AdapterRegistry.get().describeExitValue(exitValue)).append(")")
+                .append("\n");
 
         // 添加解析后的测试输出
         if (testout != null && !testout.isEmpty()) {

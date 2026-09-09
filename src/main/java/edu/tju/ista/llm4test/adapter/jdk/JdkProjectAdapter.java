@@ -5,11 +5,14 @@ import edu.tju.ista.llm4test.config.GlobalConfig;
 import edu.tju.ista.llm4test.execute.TestCase;
 import edu.tju.ista.llm4test.execute.TestOutput;
 import edu.tju.ista.llm4test.execute.TestResult;
+import edu.tju.ista.llm4test.execute.TestResultKind;
+import edu.tju.ista.llm4test.adapter.HarnessOutputParser;
+import edu.tju.ista.llm4test.llm.tools.TestExecuteTool;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
+import edu.tju.ista.llm4test.utils.ProcessRunner;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -30,6 +33,9 @@ import java.util.stream.Collectors;
  * </ul>
  */
 public class JdkProjectAdapter implements ProjectAdapter {
+
+    /** 解析器无状态，进程内共享一份即可 */
+    private static final HarnessOutputParser JTREG_OUTPUT_PARSER = new JtregOutputParser();
 
     private final List<String> jdkPaths;
 
@@ -66,7 +72,7 @@ public class JdkProjectAdapter implements ProjectAdapter {
                  * @summary Tests for Float.parseFloat method
                  */
                 ```""");
-        directives.put("executeToolName", "jtreg_execute");
+        directives.put("executeToolName", JtregExecuteTool.TOOL_NAME);
         return directives;
     }
 
@@ -140,6 +146,40 @@ public class JdkProjectAdapter implements ProjectAdapter {
         // 自 TestSuite.getTestFiles 迁移：jdkTestPath + "/jdk/" + 相对路径
         // （等价于 resolveSuitePath：suiteBasePath 默认与配置值均为 jdk17u-dev/test/jdk/）
         return new File(resolveSuitePath(relativeTestPath));
+    }
+
+    @Override
+    public TestExecuteTool createExecuteTool() {
+        return new JtregExecuteTool();
+    }
+
+    @Override
+    public HarnessOutputParser outputParser() {
+        return JTREG_OUTPUT_PARSER;
+    }
+
+    /** jtreg 码表（与迁移前 TestResult 内联的特判逐字一致） */
+    @Override
+    public TestResultKind classifyExitValue(int exitValue) {
+        return switch (exitValue) {
+            case 0 -> TestResultKind.SUCCESS;
+            case 3 -> TestResultKind.EXECUTE_ERROR;
+            case 5 -> TestResultKind.WRONG_FORMAT;
+            case 124 -> TestResultKind.EXECUTE_TIMEOUT;
+            default -> TestResultKind.TEST_FAIL;
+        };
+    }
+
+    /** 与迁移前 TestOutput.getSimpleOutput 的标签逐字一致 */
+    @Override
+    public String describeExitValue(int exitValue) {
+        return switch (exitValue) {
+            case 0 -> "SUCCESS";
+            case 2 -> "TEST_FAIL";
+            case 3 -> "ENV_ERROR";
+            case 124 -> "TIMEOUT";
+            default -> "UNKNOWN";
+        };
     }
 
     /** 套件根：jdk17u-dev/test/jdk/（发现结果与通过列表都相对于它） */
@@ -266,56 +306,31 @@ public class JdkProjectAdapter implements ProjectAdapter {
         LoggerUtil.logExec(Level.FINE,
             String.format("JAVA_HOME: %s", env.get("JAVA_HOME")));
 
-        ProcessBuilder processBuilder = new ProcessBuilder(command);
-        processBuilder.environment().putAll(env);
-
-        Process process;
+        // 并发消费流 + 超时 + 终止进程树，见 ProcessRunner
+        ProcessRunner.Result result;
         try {
-            process = processBuilder.start();
+            result = ProcessRunner.run(command, env, EXECUTION_TIMEOUT_MS);
         } catch (IOException e) {
             String errorMsg = String.format("启动进程失败: %s - %s", String.join(" ", command), e.getMessage());
             LoggerUtil.logExec(Level.SEVERE, errorMsg);
             throw new Exception(errorMsg, e);
-        }
-
-        // 等待进程完成或超时
-        boolean finished;
-        try {
-            finished = process.waitFor(EXECUTION_TIMEOUT_MS, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
-            process.destroy();
-            process.destroyForcibly();
             String errorMsg = String.format("进程等待被中断: %s", String.join(" ", command));
             LoggerUtil.logExec(Level.WARNING, errorMsg);
-            Thread.currentThread().interrupt();
             throw new Exception(errorMsg, e);
         }
 
-        // 直接在当前线程中读取输出，避免嵌套的异步调用
-        String stdout, stderr;
-        if (!finished) {
-            process.destroy();
-            process.destroyForcibly();
+        if (result.timedOut()) {
             String timeoutMsg = String.format("执行超时 (%d ms): %s", EXECUTION_TIMEOUT_MS, String.join(" ", command));
             LoggerUtil.logExec(Level.WARNING, timeoutMsg);
-
-            // 超时情况下尝试读取已有输出
-            stdout = readStream(process.getInputStream());
-            stderr = readStream(process.getErrorStream());
-            return new TestOutput(stdout, stderr + "\n[TIMEOUT after " + EXECUTION_TIMEOUT_MS + " ms]", 124);
+            // 退出码沿用 jtreg 语义的 124（ProcessRunner 返回的是中性占位）
+            return new TestOutput(result.stdout(),
+                    result.stderr() + "\n[TIMEOUT after " + EXECUTION_TIMEOUT_MS + " ms]", 124);
         }
 
-        // 进程正常完成，读取输出
-        int exitValue = process.exitValue();
-        try {
-            stdout = readStream(process.getInputStream());
-            stderr = readStream(process.getErrorStream());
-        } catch (Exception e) {
-            String errorMsg = String.format("读取进程输出失败: %s - %s", String.join(" ", command), e.getMessage());
-            LoggerUtil.logExec(Level.WARNING, errorMsg);
-            stdout = "";
-            stderr = "读取输出失败: " + e.getMessage();
-        }
+        int exitValue = result.exitValue();
+        String stdout = result.stdout();
+        String stderr = result.stderr();
 
         TestOutput output = new TestOutput(stdout, stderr, exitValue);
 
@@ -353,18 +368,6 @@ public class JdkProjectAdapter implements ProjectAdapter {
         return output;
     }
 
-    /**
-     * 读取输入流内容（自 TestExecutor 迁移）
-     */
-    private String readStream(InputStream stream) {
-        try {
-            return new String(stream.readAllBytes());
-        } catch (IOException e) {
-            LoggerUtil.logExec(Level.WARNING, "读取流失败: " + e.getMessage());
-            return "";
-        }
-    }
-
     // ==================== 环境（自 TestExecutor 迁移） ====================
 
     @Override
@@ -373,20 +376,15 @@ public class JdkProjectAdapter implements ProjectAdapter {
 
         // 检查jtreg命令是否可用
         try {
-            ProcessBuilder pb = new ProcessBuilder("jtreg", "-version");
-            Process process = pb.start();
-            boolean finished = process.waitFor(5, TimeUnit.SECONDS);
+            ProcessRunner.Result result = ProcessRunner.run(
+                    List.of("jtreg", "-version"), TimeUnit.SECONDS.toMillis(5));
 
-            if (finished) {
-                int exitCode = process.exitValue();
-                if (exitCode == 0) {
-                    LoggerUtil.logExec(Level.INFO, "jtreg命令检查通过");
-                } else {
-                    LoggerUtil.logExec(Level.WARNING, "jtreg命令返回非零退出码: " + exitCode);
-                }
-            } else {
-                process.destroyForcibly();
+            if (result.timedOut()) {
                 LoggerUtil.logExec(Level.WARNING, "jtreg命令检查超时");
+            } else if (result.exitValue() == 0) {
+                LoggerUtil.logExec(Level.INFO, "jtreg命令检查通过");
+            } else {
+                LoggerUtil.logExec(Level.WARNING, "jtreg命令返回非零退出码: " + result.exitValue());
             }
         } catch (Exception e) {
             LoggerUtil.logExec(Level.SEVERE, "jtreg不可用: " + e.getMessage());
@@ -432,21 +430,16 @@ public class JdkProjectAdapter implements ProjectAdapter {
 
         List<String> testCommand = Arrays.asList("java", "-version");
 
-        ProcessBuilder processBuilder = new ProcessBuilder(testCommand);
-        processBuilder.environment().putAll(jdkEnv);
-        Process process = processBuilder.start();
+        ProcessRunner.Result result = ProcessRunner.run(testCommand, jdkEnv, JDK_TEST_TIMEOUT_MS);
 
-        boolean finished = process.waitFor(JDK_TEST_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-
-        if (!finished) {
-            process.destroyForcibly();
+        if (result.timedOut()) {
             LoggerUtil.logExec(Level.SEVERE, "JDK测试超时: " + jdk);
             return;
         }
 
-        int exitValue = process.exitValue();
-        String stdout = readStream(process.getInputStream());
-        String stderr = readStream(process.getErrorStream());
+        int exitValue = result.exitValue();
+        String stdout = result.stdout();
+        String stderr = result.stderr();
 
         if (exitValue == 0) {
             LoggerUtil.logExec(Level.INFO, "JDK测试成功: " + jdk);
@@ -462,6 +455,7 @@ public class JdkProjectAdapter implements ProjectAdapter {
     /**
      * 清理临时目录（自 TestExecutor.clearTempDirectories 迁移；谨慎使用）
      */
+    @Override
     public void cleanupWorkspace() {
         LoggerUtil.logExec(Level.WARNING, "执行全局临时目录清理，这可能影响其他正在运行的测试");
 

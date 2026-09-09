@@ -3,7 +3,7 @@ package edu.tju.ista.llm4test.llm.agents;
 import edu.tju.ista.llm4test.execute.TestCase;
 import edu.tju.ista.llm4test.execute.TestResult;
 import edu.tju.ista.llm4test.execute.TestResultKind;
-import edu.tju.ista.llm4test.llm.tools.JtregExecuteTool;
+import edu.tju.ista.llm4test.adapter.jdk.JtregExecuteTool;
 import edu.tju.ista.llm4test.llm.tools.Tool;
 import edu.tju.ista.llm4test.llm.tools.ToolCall;
 import edu.tju.ista.llm4test.llm.tools.ToolRegistry;

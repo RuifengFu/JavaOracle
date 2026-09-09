@@ -1,8 +1,12 @@
 package edu.tju.ista.llm4test.execute;
 
+import edu.tju.ista.llm4test.adapter.AdapterRegistry;
+import edu.tju.ista.llm4test.utils.LoggerUtil;
+
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Level;
 import java.util.stream.Collectors;
 
 public class TestResult {
@@ -29,19 +33,8 @@ public class TestResult {
 
     public TestResult(TestOutput jtregResult) {
         this.jtregResult = jtregResult;
-        if (jtregResult.exitValue != 0) {
-            if (jtregResult.exitValue == 124) {
-                kind = TestResultKind.EXECUTE_TIMEOUT;
-            } else if (jtregResult.exitValue == 3) {
-                kind = TestResultKind.EXECUTE_ERROR;
-            } else if (jtregResult.exitValue == 5) {
-                kind = TestResultKind.WRONG_FORMAT;
-            } else {
-                kind = TestResultKind.TEST_FAIL;
-            }
-        } else {
-            kind = TestResultKind.SUCCESS;
-        }
+        // 分类码表由当前 harness 提供（JDK 模式取值与迁移前逐字一致）
+        kind = AdapterRegistry.get().classifyExitValue(jtregResult.exitValue);
         if (jtregResult.toString().contains("Compilation failed")) {
             compilationFailed = true;
         } else {
@@ -101,22 +94,15 @@ public class TestResult {
     public void mergeResults(Map<String, TestOutput> results) {
         execResults.putAll(results);
         List<Integer> list = execResults.values().stream().map(TestOutput::getExitValue).distinct().collect(Collectors.toList());
-        if (list.size() > 1) {
+        if (list.isEmpty()) {
+            // 空结果集：历史实现会在 list.get(0) 抛 IndexOutOfBounds
+            kind = TestResultKind.EXECUTE_ERROR;
+            LoggerUtil.logExec(Level.WARNING, "合并测试结果时没有任何执行输出，按执行错误处理");
+        } else if (list.size() > 1) {
             kind = TestResultKind.DIFF;
         } else {
-            int value = list.get(0);
             this.jtregResult = results.values().stream().findFirst().orElse(null);
-            if (value == 124) {
-                kind = TestResultKind.EXECUTE_TIMEOUT;
-            } else if (value == 3) {
-                kind = TestResultKind.EXECUTE_ERROR;
-            } else if (value == 5) {
-                kind = TestResultKind.WRONG_FORMAT;
-            } else if (value != 0) {
-                kind = TestResultKind.TEST_FAIL;
-            } else {
-                kind = TestResultKind.SUCCESS;
-            }
+            kind = AdapterRegistry.get().classifyExitValue(list.get(0));
         }
         compilationFailed = results.values().stream().anyMatch(result -> result.toString().contains("Compilation failed"));
     }

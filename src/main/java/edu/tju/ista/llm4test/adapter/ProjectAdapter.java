@@ -4,6 +4,8 @@ import edu.tju.ista.llm4test.config.GlobalConfig;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
 import edu.tju.ista.llm4test.execute.TestCase;
 import edu.tju.ista.llm4test.execute.TestResult;
+import edu.tju.ista.llm4test.execute.TestResultKind;
+import edu.tju.ista.llm4test.llm.tools.TestExecuteTool;
 
 import java.io.File;
 import java.util.List;
@@ -141,6 +143,54 @@ public interface ProjectAdapter {
      */
     TestResult executeTest(TestCase testCase);
 
+    /**
+     * 退出码 → 结果分类。
+     * <p>
+     * 默认中性语义（0 成功、其余判失败）。历史上 {@code TestResult} 在两处内联
+     * jtreg 的特判（124/3/5），Maven 模式也会走那套码表——分类结果凑巧正确，
+     * 但语义是错的，交给各 harness 自己说更清楚。
+     */
+    default TestResultKind classifyExitValue(int exitValue) {
+        return exitValue == 0 ? TestResultKind.SUCCESS : TestResultKind.TEST_FAIL;
+    }
+
+    /**
+     * 退出码的可读标签，会进 prompt 给 LLM 看（{@code TestOutput.getSimpleOutput}）。
+     * <p>
+     * 因此不能沿用 jtreg 码表：Maven 失败的 exit 1 被标成 {@code UNKNOWN}
+     * 会误导模型在修复/验证环节的判断。
+     */
+    default String describeExitValue(int exitValue) {
+        return exitValue == 0 ? "SUCCESS" : "FAIL";
+    }
+
+    /**
+     * 本 harness 的输出解析器。
+     * <p>
+     * 让 {@code execute.TestOutput} 能按当前适配器解析，而不必 import 某个具体
+     * 适配器的实现——核心层反向依赖 {@code adapter.jdk} 会让 Maven 模式下
+     * core 路径静默拿到 jtreg 解析。
+     */
+    HarnessOutputParser outputParser();
+
+    /**
+     * 清理本适配器的临时工作区（默认不做事）。
+     * <p>
+     * 放在接口上是为了让门面不必 {@code instanceof} 向下转型到具体适配器。
+     */
+    default void cleanupWorkspace() {
+    }
+
+    /**
+     * 提供本 harness 的测试执行工具（LLM 工具）。
+     * <p>
+     * Agent 由此获得执行能力，不再自己 {@code new JtregExecuteTool()}——那是
+     * Maven 模式下 agent 工作流不可用的根因。工具名请取自
+     * {@code createExecuteTool().getName()}，它与 {@code harnessDirectives()}
+     * 里的 {@code executeToolName} 必须一致（有测试锁住）。
+     */
+    TestExecuteTool createExecuteTool();
+
     // ==================== harness 说明（注入prompt模板） ====================
 
     /**
@@ -167,7 +217,9 @@ public interface ProjectAdapter {
                     // assertions
                 }
                 ```""");
-        directives.put("executeToolName", "execute_test");
+        // 从工具本身取名：写死默认值的话，新适配器忘了覆盖就会让 prompt 指向一个
+        // 没注册的工具名，且这种漂移只有在真跑 LLM 时才暴露
+        directives.put("executeToolName", createExecuteTool().getName());
         return directives;
     }
 

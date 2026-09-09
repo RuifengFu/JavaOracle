@@ -1,11 +1,15 @@
 package edu.tju.ista.llm4test.adapter.maven;
 
+import edu.tju.ista.llm4test.adapter.HarnessOutputParser;
 import edu.tju.ista.llm4test.adapter.ProjectAdapter;
 import edu.tju.ista.llm4test.config.GlobalConfig;
 import edu.tju.ista.llm4test.execute.TestCase;
 import edu.tju.ista.llm4test.execute.TestOutput;
 import edu.tju.ista.llm4test.execute.TestResult;
+import edu.tju.ista.llm4test.execute.TestResultKind;
+import edu.tju.ista.llm4test.llm.tools.TestExecuteTool;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
+import edu.tju.ista.llm4test.utils.ProcessRunner;
 
 import java.io.File;
 import java.io.IOException;
@@ -33,6 +37,9 @@ import java.util.stream.Stream;
  * </ul>
  */
 public class MavenProjectAdapter implements ProjectAdapter {
+
+    /** 解析器无状态，进程内共享一份即可 */
+    private static final HarnessOutputParser JUNIT5_OUTPUT_PARSER = new JUnit5OutputParser();
 
     private static final long EXECUTION_TIMEOUT_MS = 600_000;   // 单次测试执行上限
     private static final long BUILD_TIMEOUT_MS = 600_000;       // mvn 构建上限
@@ -92,6 +99,39 @@ public class MavenProjectAdapter implements ProjectAdapter {
     @Override
     public File resolveTestFile(String relativeTestPath) {
         return testSourceRoot.resolve(relativeTestPath).toFile();
+    }
+
+    @Override
+    public TestExecuteTool createExecuteTool() {
+        return new MavenExecuteTool(this);
+    }
+
+    @Override
+    public HarnessOutputParser outputParser() {
+        return JUNIT5_OUTPUT_PARSER;
+    }
+
+    /**
+     * junit-platform-console 的退出码：0 全通过、1 有测试失败、
+     * 2 是 {@code --fail-if-no-tests} 没匹配到用例。
+     * <p>
+     * 分类上 2 仍归 TEST_FAIL（保持既有行为），但标签区分开——它通常意味着
+     * FQN 推导错了（文件名 ≠ 主类名），而不是被测代码有问题。
+     */
+    @Override
+    public TestResultKind classifyExitValue(int exitValue) {
+        return exitValue == 0 ? TestResultKind.SUCCESS : TestResultKind.TEST_FAIL;
+    }
+
+    @Override
+    public String describeExitValue(int exitValue) {
+        return switch (exitValue) {
+            case 0 -> "SUCCESS";
+            case 1 -> "TEST_FAIL";
+            case 2 -> "NO_TESTS_FOUND";
+            case -1 -> "TIMEOUT";
+            default -> "UNKNOWN";
+        };
     }
 
     /** 套件根即测试源根：src/test/java（发现结果与通过列表都相对于它） */
@@ -183,7 +223,7 @@ public class MavenProjectAdapter implements ProjectAdapter {
         ProcessOutput po = runProcess(command, EXECUTION_TIMEOUT_MS);
         if (po.exitValue() != 0) {
             return new TestOutput("Compilation failed\n" + po.stdout() + po.stderr(),
-                    po.stderr(), 2, new JUnit5OutputParser());
+                    po.stderr(), 2, outputParser());
         }
         return null;
     }
@@ -204,7 +244,7 @@ public class MavenProjectAdapter implements ProjectAdapter {
         if (po.timedOut()) {
             stderr = stderr + "\n[TIMEOUT after " + EXECUTION_TIMEOUT_MS + " ms]";
         }
-        return new TestOutput(stdout, stderr, exit, new JUnit5OutputParser());
+        return new TestOutput(stdout, stderr, exit, outputParser());
     }
 
     /**
@@ -312,16 +352,14 @@ public class MavenProjectAdapter implements ProjectAdapter {
 
     private void checkCommandAvailable(String cmd, String arg, int timeoutSec) {
         try {
-            Process p = new ProcessBuilder(cmd, arg).redirectErrorStream(true).start();
-            if (!p.waitFor(timeoutSec, TimeUnit.SECONDS)) {
-                p.destroyForcibly();
+            ProcessRunner.Result result = ProcessRunner.run(
+                    List.of(cmd, arg), TimeUnit.SECONDS.toMillis(timeoutSec));
+            if (result.timedOut()) {
                 LoggerUtil.logExec(Level.SEVERE, cmd + " 检查超时");
-                return;
-            }
-            if (p.exitValue() == 0) {
+            } else if (result.exitValue() == 0) {
                 LoggerUtil.logExec(Level.INFO, cmd + " 命令检查通过");
             } else {
-                LoggerUtil.logExec(Level.WARNING, cmd + " 返回非零退出码: " + p.exitValue());
+                LoggerUtil.logExec(Level.WARNING, cmd + " 返回非零退出码: " + result.exitValue());
             }
         } catch (Exception e) {
             LoggerUtil.logExec(Level.SEVERE, cmd + " 不可用: " + e.getMessage());
@@ -333,47 +371,11 @@ public class MavenProjectAdapter implements ProjectAdapter {
     private record ProcessOutput(String stdout, String stderr, int exitValue, boolean timedOut) {
     }
 
-    /**
-     * 同步执行外部进程并收集输出。
-     * <p>
-     * 已知限制：流在进程退出（或被终止）之后才读取，子进程输出超过管道缓冲
-     * （Linux 默认 64KB）时写端阻塞，会表现为假超时。JdkProjectAdapter 有同样的模式，
-     * 二者将一起迁移到共享的并发消费流 ProcessRunner（见 issue #15）。
-     */
+    /** 同步执行外部进程并收集输出（并发消费流 + 超时 + 终止进程树见 {@link ProcessRunner}） */
     private ProcessOutput runProcess(List<String> command, long timeoutMs) throws Exception {
         LoggerUtil.logExec(Level.INFO, "执行进程: " + String.join(" ", command));
-        ProcessBuilder pb = new ProcessBuilder(command);
-        pb.environment().put("LANG", "en_US.UTF-8");
-        Process process = pb.start();
-
-        boolean finished = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS);
-        if (!finished) {
-            // 必须先终止再读流：readAllBytes() 等到 EOF 才返回，对仍存活的子进程
-            // 会无限阻塞，使“超时”形同虚设。终止后写端关闭，读取拿到已缓冲的部分输出。
-            // 子孙进程也要杀：mvn 是包装脚本，真正的 java 进程继承了同一个管道写端，
-            // 只杀直接子进程的话 EOF 永远不会到来。
-            terminate(process);
-            String partialOut = readStream(process.getInputStream());
-            String partialErr = readStream(process.getErrorStream());
-            return new ProcessOutput(partialOut, partialErr, -1, true);
-        }
-        return new ProcessOutput(readStream(process.getInputStream()),
-                readStream(process.getErrorStream()), process.exitValue(), false);
-    }
-
-    /** 终止进程树：先子孙后自身，确保管道写端全部关闭。 */
-    private static void terminate(Process process) {
-        process.descendants().forEach(ProcessHandle::destroyForcibly);
-        process.destroy();
-        process.destroyForcibly();
-    }
-
-    private String readStream(java.io.InputStream stream) {
-        try {
-            return new String(stream.readAllBytes());
-        } catch (IOException e) {
-            return "";
-        }
+        ProcessRunner.Result result = ProcessRunner.run(command, Map.of("LANG", "en_US.UTF-8"), timeoutMs);
+        return new ProcessOutput(result.stdout(), result.stderr(), result.exitValue(), result.timedOut());
     }
 
     private static String javaBinary() {

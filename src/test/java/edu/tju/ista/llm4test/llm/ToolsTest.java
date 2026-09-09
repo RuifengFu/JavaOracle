@@ -1,5 +1,6 @@
 package edu.tju.ista.llm4test.llm;
 
+import edu.tju.ista.llm4test.adapter.jdk.JtregExecuteTool;
 import edu.tju.ista.llm4test.execute.TestResult;
 import org.junit.Before;
 import org.junit.Test;

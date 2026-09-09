@@ -2,6 +2,7 @@ package edu.tju.ista.llm4test.llm.agents;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import edu.tju.ista.llm4test.adapter.AdapterRegistry;
 import edu.tju.ista.llm4test.execute.TestResult;
 import edu.tju.ista.llm4test.llm.OpenAI;
 import edu.tju.ista.llm4test.llm.tools.*;
@@ -33,7 +34,8 @@ public class HypothesisAgent extends Agent {
     
     private final OpenAI llm;
     private final JavaExecuteTool executeTool;
-    private final JtregExecuteTool jtregTool;
+    /** 由适配器提供：JDK 模式是 jtreg，Maven 模式是 junit console */
+    private final TestExecuteTool jtregTool;
     
     // 假设相关状态
     private List<String> hypotheses = new ArrayList<>();
@@ -49,7 +51,7 @@ public class HypothesisAgent extends Agent {
     public HypothesisAgent() {
         this.llm = OpenAI.DoubaoThinking;
         this.executeTool = new JavaExecuteTool();
-        this.jtregTool = new JtregExecuteTool();
+        this.jtregTool = AdapterRegistry.get().createExecuteTool();
         // 获取项目根目录
         this.projectRoot = System.getProperty("user.dir");
         LoggerUtil.logExec(Level.INFO, "项目根目录: " + projectRoot);

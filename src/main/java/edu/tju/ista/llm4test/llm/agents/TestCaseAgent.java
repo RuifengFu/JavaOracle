@@ -1,6 +1,7 @@
 package edu.tju.ista.llm4test.llm.agents;
 
 
+import edu.tju.ista.llm4test.adapter.AdapterRegistry;
 import edu.tju.ista.llm4test.execute.TestCase;
 import edu.tju.ista.llm4test.execute.TestResult;
 import edu.tju.ista.llm4test.llm.OpenAI;
@@ -29,6 +30,8 @@ public class TestCaseAgent extends Agent {
 
 
     private final ToolRegistry toolRegistry;
+    /** 执行工具名取自适配器提供的工具本身，避免与注册名/prompt 文案漂移 */
+    private final String executeToolName;
     private final List<String> history;
     private final List<String> feedbackHistory;
     private static final int MAX_ITERATIONS = 20; // Safety limit for the reduction loop
@@ -48,15 +51,13 @@ public class TestCaseAgent extends Agent {
         super("You are an expert test case minimizer. Your goal is to reduce a given Java test case to its minimal form while preserving the original failure.");
         this.LLM = OpenAI.AgentModel;
         this.toolRegistry = new ToolRegistry();
+        TestExecuteTool executeTool = AdapterRegistry.get().createExecuteTool();
+        this.executeToolName = executeTool.getName();
+        this.toolRegistry.register(new WriteFileTool());
+        this.toolRegistry.register(executeTool);
         this.history = new ArrayList<>();
         this.feedbackHistory = new ArrayList<>();
         this.lastExecutedTools = new ArrayList<>();
-        registerTools();
-    }
-
-    private void registerTools() {
-        toolRegistry.register(new WriteFileTool());
-        toolRegistry.register(new JtregExecuteTool());
     }
 
     public static String codeWithLineNumber(String s) {
@@ -226,7 +227,7 @@ public class TestCaseAgent extends Agent {
         
         // Auto-execute test after a file write
         if (toolCalls.stream().anyMatch(tc -> tc.toolName.equals("write_to_file"))) {
-            toolCalls.add(new ToolCall("jtreg_execute", Map.of(
+            toolCalls.add(new ToolCall(executeToolName, Map.of(
                 "content", testCase.getFile().getAbsolutePath().toString(),
                 "is_file_path", true,
                 "class_name", testCase.getName()
@@ -245,14 +246,17 @@ public class TestCaseAgent extends Agent {
             }
 
             addToHistory("ACT: Executing " + toolName);
-            Tool<?> tool = toolRegistry.get(toolName);
-            if (tool != null) {
-                responses.add(tool.execute(parameters));
-                lastExecutedTools.add(toolName);
-            } else {
+            // ToolRegistry.get() 找不到工具会抛 IllegalArgumentException，原先的
+            // `if (tool != null) ... else` 是死代码：LLM 给出未知工具名（例如沿用
+            // 历史上下文里的旧工具名）会直接中断整个最小化循环，而不是回灌反馈让它自纠。
+            if (!toolRegistry.has(toolName)) {
                 addToHistory(Level.WARNING, "ACT: Tool not found: " + toolName);
                 responses.add(ToolResponse.failure("Tool not found: " + toolName));
+                continue;
             }
+            Tool<?> tool = toolRegistry.get(toolName);
+            responses.add(tool.execute(parameters));
+            lastExecutedTools.add(toolName);
         }
         return responses;
     }
@@ -278,7 +282,7 @@ public class TestCaseAgent extends Agent {
             feedback.append("File write operation failed. No changes were applied to the file.");
         }
 
-        int testIndex = lastExecutedTools.indexOf("jtreg_execute");
+        int testIndex = lastExecutedTools.indexOf(executeToolName);
         if (testIndex != -1 && toolResponses.get(testIndex).isSuccess() && toolResponses.get(testIndex).getResult() instanceof TestResult) {
             lastTestResult = (TestResult) toolResponses.get(testIndex).getResult();
             String status = lastTestResult.isFail() ? "FAILED" : "PASSED";
@@ -294,7 +298,7 @@ public class TestCaseAgent extends Agent {
                     feedback.append(" Failure reason: ").append(failureReason);
                 }
             } else {
-                feedback.append(" 'jtreg_execute' tool was not run.");
+                feedback.append(" '").append(executeToolName).append("' tool was not run.");
             }
         }
 
