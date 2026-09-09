@@ -1,6 +1,7 @@
 package edu.tju.ista.llm4test.adapter;
 
 import edu.tju.ista.llm4test.adapter.jdk.JdkProjectAdapter;
+import edu.tju.ista.llm4test.adapter.maven.MavenProjectAdapter;
 import edu.tju.ista.llm4test.config.GlobalConfig;
 
 import java.util.concurrent.ConcurrentHashMap;
@@ -11,8 +12,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * 当前支持：
  * <ul>
  *   <li>{@code jdk}（默认）—— JDK/jtreg 场景 {@link JdkProjectAdapter}</li>
+ *   <li>{@code maven} —— 第三方 Maven 仓库（JUnit 测试增强）{@link MavenProjectAdapter}</li>
  * </ul>
- * 后续新增适配器（如 maven）在此注册即可，业务代码统一通过
+ * 后续新增适配器在此注册即可，业务代码统一通过
  * {@link #get()} 获取，不感知具体实现。
  */
 public final class AdapterRegistry {
@@ -37,7 +39,10 @@ public final class AdapterRegistry {
         if (type == null || type.isBlank() || "jdk".equalsIgnoreCase(type.trim())) {
             return CACHE.computeIfAbsent("jdk", k -> new JdkProjectAdapter());
         }
+        if ("maven".equalsIgnoreCase(type.trim())) {
+            return CACHE.computeIfAbsent("maven", k -> new MavenProjectAdapter());
+        }
         throw new IllegalArgumentException(
-                "未支持的 project.type: " + type + "（当前支持: jdk；maven 适配器规划中）");
+                "未支持的 project.type: " + type + "（当前支持: jdk, maven）");
     }
 }

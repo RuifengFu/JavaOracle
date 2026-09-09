@@ -17,11 +17,19 @@ public class TestOutput {
     private String env;
 
     public TestOutput(String stdout, String stderr, int exitValue) {
+        this(stdout, stderr, exitValue, new JtregOutputParser());
+    }
+
+    /**
+     * 指定harness解析器构造（供各ProjectAdapter使用）
+     * @param parser 与执行框架匹配的输出解析器
+     */
+    public TestOutput(String stdout, String stderr, int exitValue,
+                      edu.tju.ista.llm4test.adapter.HarnessOutputParser parser) {
         this.stdout = stdout;
         this.stderr = stderr;
         this.exitValue = exitValue;
-        // 解析逻辑已抽取到 JtregOutputParser（后续harness适配的过渡期默认使用jtreg解析）
-        JtregOutputParser.ParsedOutput parsed = new JtregOutputParser().parse(stdout, stderr);
+        var parsed = parser.parse(stdout, stderr);
         this.testout = parsed.testout();
         this.testerr = parsed.testerr();
     }

@@ -78,7 +78,7 @@ public final class SourceTreeIndex {
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
                     String name = file.getFileName().toString();
                     if (name.endsWith(".java")) {
-                        String rel = relativeToClasses(file);
+                        String rel = keyOf(file);
                         if (rel != null) {
                             String abs = file.toString();
                             String prev = entries.containsKey(rel) ? entries.get(rel).toString() : null;
@@ -96,12 +96,12 @@ public final class SourceTreeIndex {
                 }
             });
             // 建立辅助索引
-            for (Path p : entries.values()) {
-                String fileName = p.getFileName().toString();
-                byFileName.computeIfAbsent(fileName, k -> new ArrayList<>()).add(p);
-                String parent = parentKey(p);
+            for (Map.Entry<String, Path> e : entries.entrySet()) {
+                String fileName = e.getValue().getFileName().toString();
+                byFileName.computeIfAbsent(fileName, k -> new ArrayList<>()).add(e.getValue());
+                String parent = parentKey(e.getKey());
                 if (parent != null) {
-                    packageDirs.computeIfAbsent(parent, k -> new ArrayList<>()).add(p);
+                    packageDirs.computeIfAbsent(parent, k -> new ArrayList<>()).add(e.getValue());
                 }
             }
         } catch (Exception e) {
@@ -113,30 +113,33 @@ public final class SourceTreeIndex {
     }
 
     /**
-     * 计算文件相对于 .../classes/ 根的包相对路径（'/'分隔）
+     * 计算文件的索引键：
+     * JDK布局（src/&lt;module&gt;/&lt;platform&gt;/classes/&lt;包路径&gt;）取 classes 后的包相对路径；
+     * 平铺布局（Maven等仓库的 src/main/java 根即包根）取相对根路径。
      */
-    private static String relativeToClasses(Path file) {
+    private String keyOf(Path file) {
         String s = file.toString();
         int idx = s.lastIndexOf("/classes/");
-        if (idx < 0) {
-            // Windows风格兜底
-            idx = s.lastIndexOf("\\classes\\");
-            if (idx >= 0) {
-                return s.substring(idx + "\\classes\\".length()).replace('\\', '/');
-            }
+        if (idx >= 0) {
+            return s.substring(idx + "/classes/".length());
+        }
+        // Windows风格兜底
+        idx = s.lastIndexOf("\\classes\\");
+        if (idx >= 0) {
+            return s.substring(idx + "\\classes\\".length()).replace('\\', '/');
+        }
+        // 平铺布局：相对根目录
+        try {
+            String rel = root.relativize(file.toAbsolutePath().normalize()).toString();
+            return rel.replace('\\', '/');
+        } catch (Exception e) {
             return null;
         }
-        return s.substring(idx + "/classes/".length());
     }
 
-    private static String parentKey(Path p) {
-        Path parent = p.getParent();
-        if (parent == null) {
-            return null;
-        }
-        String s = parent.toString();
-        int idx = s.lastIndexOf("/classes/");
-        return idx >= 0 ? s.substring(idx + "/classes/".length()) : null;
+    private static String parentKey(String key) {
+        int slash = key.lastIndexOf('/');
+        return slash > 0 ? key.substring(0, slash) : null;
     }
 
     /**

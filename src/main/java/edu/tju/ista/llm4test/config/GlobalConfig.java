@@ -9,10 +9,25 @@ import java.io.File;
 public class GlobalConfig {
 
     /**
-     * 获取目标项目类型（适配器选择）：jdk（默认，JDK/jtreg场景）
+     * 获取目标项目类型（适配器选择）：jdk（默认，JDK/jtreg场景）/ maven（第三方Maven仓库）
      */
     public static String getProjectType() {
         return ConfigUtil.getOrDefault("project.type", "jdk");
+    }
+
+    /**
+     * Maven模式：目标项目仓库根目录
+     */
+    public static String getProjectRoot() {
+        return ConfigUtil.getOrDefault("project.root", ".");
+    }
+
+    /**
+     * Maven模式：junit-platform-console-standalone 执行器jar路径
+     */
+    public static String getJUnitConsoleJar() {
+        return ConfigUtil.getOrDefault("maven.junitConsoleJar",
+                "Dependency/junit-platform-console-standalone-1.11.4.jar");
     }
     
     // 默认值常量（当配置文件中没有对应配置时使用）
