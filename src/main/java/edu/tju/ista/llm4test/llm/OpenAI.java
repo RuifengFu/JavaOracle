@@ -149,23 +149,43 @@ public class OpenAI {
         try {
             java.util.Map<String, edu.tju.ista.llm4test.config.ModelConfig> models =
                 edu.tju.ista.llm4test.config.ModelConfig.getModelsMap();
-            ThinkingModel = new OpenAI(models.get("deepseek-reasoner"));
-            V3 = new OpenAI(models.get("deepseek-chat"));
-            FlashModel = new OpenAI(models.get("doubao-flash"));
-            DoubaoThinking = new OpenAI(models.get("doubao-thinking"));
-            AgentModel = new OpenAI(models.get("k2"));
 
-            if (GlobalConfig.isUseFlash() && models.containsKey("doubao-flash")) {
-                DoubaoThinking = new OpenAI(models.get("doubao-flash"));
-                ThinkingModel = new OpenAI(models.get("doubao-flash"));
-                V3 = new OpenAI(models.get("doubao-flash"));
-                AgentModel = new OpenAI(models.get("doubao-flash"));
+            // 角色 → 模型名来自配置（默认值即历史取值），不再把供应商名字写死在代码里
+            ThinkingModel = new OpenAI(require(models, GlobalConfig.getThinkingModelName()));
+            V3 = new OpenAI(require(models, GlobalConfig.getV3ModelName()));
+            FlashModel = new OpenAI(require(models, GlobalConfig.getFlashModelName()));
+            DoubaoThinking = new OpenAI(require(models, GlobalConfig.getVerifyModelName()));
+            AgentModel = new OpenAI(require(models, GlobalConfig.getAgentModelName()));
+
+            String flashName = GlobalConfig.getFlashModelName();
+            if (GlobalConfig.isUseFlash() && models.containsKey(flashName)) {
+                DoubaoThinking = new OpenAI(models.get(flashName));
+                ThinkingModel = new OpenAI(models.get(flashName));
+                V3 = new OpenAI(models.get(flashName));
+                AgentModel = new OpenAI(models.get(flashName));
             }
 
         } catch (Exception e) {
             LoggerUtil.logExec(Level.SEVERE, "Can not find LLM config!!!");
             throw new ConfigError("Can not find LLM config, make sure you have config.json!!!");
         }
+    }
+
+    /**
+     * 按名字取模型配置；缺失时明确报错。
+     * <p>
+     * 原先是 {@code models.get(name)} 直接用：配置里没有该条目就悄悄传 null，
+     * {@code OpenAI(ModelConfig)} 再回落到 openai.* 配置，最终以一个与真实原因
+     * 无关的报错收场。
+     */
+    private static edu.tju.ista.llm4test.config.ModelConfig require(
+            java.util.Map<String, edu.tju.ista.llm4test.config.ModelConfig> models, String name) {
+        edu.tju.ista.llm4test.config.ModelConfig config = models.get(name);
+        if (config == null) {
+            throw new ConfigError("models.json 中找不到模型条目: " + name
+                    + "（可用: " + models.keySet() + "；相关配置项 llm.*Model）");
+        }
+        return config;
     }
 
     /**

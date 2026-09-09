@@ -438,6 +438,38 @@ public class TestCase {
         return testcase;
     }
 
+    /**
+     * 只有看起来是 Java 源码时才写回用例文件，否则保留原文件并返回 false。
+     * <p>
+     * LLM 的回复有两种会毁掉用例的情况，历史实现都直接写回、且无备份：
+     * <ul>
+     *   <li><b>正文为空</b>：推理模型把 completion 额度全花在 reasoning 上
+     *       （实测 deepseek-v4-flash 出现 19 次 completion=reasoning=8192、正文 0 字），
+     *       于是把**空串**写进 .java，用例直接消失</li>
+     *   <li><b>返回解释性文字</b>：拿到空用例的后续修复轮会回一段
+     *       「No original test case was supplied」之类的散文，又被原样写进 .java</li>
+     * </ul>
+     * 一旦发生，用例不可恢复，后面每一轮都在放大破坏。
+     */
+    public boolean writeSourceIfValid(String candidate, String stage) {
+        if (candidate == null || candidate.isBlank()) {
+            LoggerUtil.logExec(Level.WARNING, stage + " 返回空内容，保留原用例不改写: " + file);
+            return false;
+        }
+        // Java 测试文件必然含类型声明；只有解释性文字时不会有
+        boolean hasTypeDeclaration = candidate.contains("class ")
+                || candidate.contains("interface ")
+                || candidate.contains("enum ")
+                || candidate.contains("record ");
+        if (!hasTypeDeclaration) {
+            LoggerUtil.logExec(Level.WARNING, stage + " 返回的不是 Java 源码，保留原用例不改写: " + file
+                    + "\n内容前 200 字: " + candidate.substring(0, Math.min(200, candidate.length())));
+            return false;
+        }
+        writeTestCaseToFile(candidate);
+        return true;
+    }
+
     public void writeTestCaseToFile(String content) {
         try {
             Files.writeString(file.toPath(), content);
@@ -501,12 +533,8 @@ public class TestCase {
             // 统一处理所有模式的输出
             ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
 
-            if (codeBlocks.isEmpty()) {
-                writeTestCaseToFile(text);
-            } else {
-                String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
-                writeTestCaseToFile(generatedCode);
-            }
+            String candidate = codeBlocks.isEmpty() ? text : codeBlocks.get(codeBlocks.size() - 1);
+            writeSourceIfValid(candidate, "增强(enhance)");
 
             if (isFuzz4AllMode) {
                 LoggerUtil.logExec(Level.INFO, "Applied Fuzz4All result directly to test case: " + file);
@@ -529,12 +557,8 @@ public class TestCase {
             String prompt = PromptGen.generatePrompt("ApplyChange", dataModel);
             String text = executeWithTokenContext(TokenUsagePhase.GENERATION, () -> OpenAI.FlashModel.messageCompletion(prompt));
             ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
-            if (codeBlocks.isEmpty() && !text.contains("```")) {
-                writeTestCaseToFile(text);
-            } else {
-                String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
-                writeTestCaseToFile(generatedCode);
-            }
+            String candidate = codeBlocks.isEmpty() ? text : codeBlocks.get(codeBlocks.size() - 1);
+            writeSourceIfValid(candidate, "应用变更(applyChange)");
         } catch (Exception e) {
             LoggerUtil.logExec(Level.WARNING, "Applying change failed: " + file + "\n" + e.getMessage());
         }

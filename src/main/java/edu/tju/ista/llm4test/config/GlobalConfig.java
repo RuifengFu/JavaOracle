@@ -122,6 +122,34 @@ public class GlobalConfig {
     }
     
     /**
+     * 各角色使用的模型名（对应 models.json 里的条目名）。
+     * <p>
+     * 原先在 {@code OpenAI} 的静态块里写死成 deepseek-reasoner / doubao-flash / k2
+     * 这些**供应商专属名字**，换一家模型就得改代码。默认值保持现状，配置即可覆盖。
+     */
+    public static String getThinkingModelName() {
+        return ConfigUtil.getOrDefault("llm.thinkingModel", "deepseek-reasoner");
+    }
+
+    public static String getV3ModelName() {
+        return ConfigUtil.getOrDefault("llm.v3Model", "deepseek-chat");
+    }
+
+    public static String getFlashModelName() {
+        return ConfigUtil.getOrDefault("llm.flashModel", "doubao-flash");
+    }
+
+    /** HypothesisAgent 等使用的"更强"模型 */
+    public static String getVerifyModelName() {
+        return ConfigUtil.getOrDefault("llm.verifyModel", "doubao-thinking");
+    }
+
+    /** TestCaseAgent 使用的 agent 模型 */
+    public static String getAgentModelName() {
+        return ConfigUtil.getOrDefault("llm.agentModel", "k2");
+    }
+
+    /**
      * Maven模式的工作区根目录（classpath 缓存等）。
      * 放在本项目工作目录下而不是被测仓库里，避免污染别人的检出。
      */

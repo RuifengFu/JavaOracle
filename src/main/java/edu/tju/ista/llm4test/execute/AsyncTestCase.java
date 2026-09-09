@@ -269,8 +269,9 @@ public class AsyncTestCase {
         .thenAccept(text -> {
             try {
                 ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
-                String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
-                writeTestCaseToFile(generatedCode);
+                // 空回复 / 非代码回复不能写回，否则用例被永久破坏（见 writeSourceIfValid）
+                String candidate = codeBlocks.isEmpty() ? text : codeBlocks.get(codeBlocks.size() - 1);
+                writeSourceIfValid(candidate, "异步应用变更");
             } catch (Exception e) {
                 LoggerUtil.logExec(Level.WARNING, "写入变更失败: " + file + "\n" + e.getMessage());
             }
@@ -299,6 +300,29 @@ public class AsyncTestCase {
             sb.append(i + 1).append(": ").append(lines[i]).append("\n");
         }
         return testcase;
+    }
+
+    /**
+     * 只有看起来是 Java 源码时才写回，否则保留原文件。
+     * 与 {@link TestCase#writeSourceIfValid} 同一规则：LLM 返回空正文
+     * （推理模型把额度全用在 reasoning 上）或返回解释性文字时，写回会把用例永久破坏。
+     */
+    public boolean writeSourceIfValid(String candidate, String stage) {
+        if (candidate == null || candidate.isBlank()) {
+            LoggerUtil.logExec(Level.WARNING, stage + " 返回空内容，保留原用例不改写: " + file);
+            return false;
+        }
+        boolean hasTypeDeclaration = candidate.contains("class ")
+                || candidate.contains("interface ")
+                || candidate.contains("enum ")
+                || candidate.contains("record ");
+        if (!hasTypeDeclaration) {
+            LoggerUtil.logExec(Level.WARNING, stage + " 返回的不是 Java 源码，保留原用例不改写: " + file
+                    + "\n内容前 200 字: " + candidate.substring(0, Math.min(200, candidate.length())));
+            return false;
+        }
+        writeTestCaseToFile(candidate);
+        return true;
     }
 
     /**

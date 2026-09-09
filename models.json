@@ -59,7 +59,18 @@
       "stream": true,
       "jsonOutput": false,
       "description": "Moonshot K2 model for agents"
+    },
+    {
+      "name": "deepseek-v4-flash",
+      "displayName": "DeepSeek Chat",
+      "apiKey": "${DEEPSEEK_API_KEY}",
+      "baseUrl": "https://api.deepseek.com/v1",
+      "model": "deepseek-v4-flash",
+      "temperature": 0.0,
+      "maxTokens": 32768,
+      "stream": true,
+      "jsonOutput": false,
+      "description": "DeepSeek general chat model"
     }
-
   ]
 }
