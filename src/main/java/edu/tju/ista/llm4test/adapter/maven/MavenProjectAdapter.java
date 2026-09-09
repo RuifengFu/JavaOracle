@@ -54,7 +54,10 @@ public class MavenProjectAdapter implements ProjectAdapter {
     public MavenProjectAdapter(String projectRoot, String junitConsoleJar) {
         this.projectRoot = projectRoot;
         this.junitConsoleJar = junitConsoleJar;
-        this.testSourceRoot = Paths.get(projectRoot, "src", "test", "java");
+        // 绝对化+规范化：project.root 默认是相对路径 "."，而发现阶段 relativize 的
+        // 是绝对路径；Path.relativize 不允许混用相对/绝对形式，否则整个发现静默返回空。
+        this.testSourceRoot = Paths.get(projectRoot, "src", "test", "java")
+                .toAbsolutePath().normalize();
     }
 
     @Override
@@ -97,10 +100,10 @@ public class MavenProjectAdapter implements ProjectAdapter {
         }
         Path p = Paths.get(rootPath);
         if (p.isAbsolute()) {
-            return p;
+            return p.normalize();
         }
         // 相对路径：优先解释为相对测试根（与JDK模式的包路径语义对齐）
-        return testSourceRoot.resolve(rootPath);
+        return testSourceRoot.resolve(rootPath).normalize();
     }
 
     private boolean containsTestMarker(Path file) {
