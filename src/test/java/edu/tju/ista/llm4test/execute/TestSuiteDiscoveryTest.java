@@ -1,5 +1,7 @@
 package edu.tju.ista.llm4test.execute;
 
+import edu.tju.ista.llm4test.config.GlobalConfig;
+
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -42,10 +44,16 @@ class TestSuiteDiscoveryTest {
         Files.writeString(small.toPath(), "/* @test */ public class Small {}");
         assertTrue(suite.isValidTestFile(small));
 
+        // 阈值从配置取，不写死字节数（maxFileSize 是可配置的兜底护栏）
+        long limit = GlobalConfig.getMaxFileSize();
+
+        File atLimit = tempDir.resolve("AtLimit.java").toFile();
+        Files.write(atLimit.toPath(), new byte[(int) limit]);
+        assertTrue(suite.isValidTestFile(atLimit), "正好等于阈值应通过");
+
         File big = tempDir.resolve("Big.java").toFile();
-        byte[] bytes = new byte[20000]; // 超过 maxFileSize=10000
-        Files.write(big.toPath(), bytes);
-        assertFalse(suite.isValidTestFile(big));
+        Files.write(big.toPath(), new byte[(int) limit + 1]);
+        assertFalse(suite.isValidTestFile(big), "超过阈值一个字节即应被过滤");
 
         assertFalse(suite.isValidTestFile(tempDir.resolve("NotExist.java").toFile()));
     }

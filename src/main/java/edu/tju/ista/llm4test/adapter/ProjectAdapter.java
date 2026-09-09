@@ -1,6 +1,7 @@
 package edu.tju.ista.llm4test.adapter;
 
 import edu.tju.ista.llm4test.config.GlobalConfig;
+import edu.tju.ista.llm4test.utils.LoggerUtil;
 import edu.tju.ista.llm4test.execute.TestCase;
 import edu.tju.ista.llm4test.execute.TestResult;
 
@@ -41,11 +42,24 @@ public interface ProjectAdapter {
     File resolveTestFile(String relativeTestPath);
 
     /**
-     * 测试文件有效性检查（默认按全局大小限制，与历史行为一致）
+     * 测试文件有效性检查（默认按 {@code maxFileSize} 兜底护栏过滤）。
+     * <p>
+     * 超限会记 WARNING：这个阈值曾经按 jtreg 用例（普遍很小）定得很紧，
+     * 第三方库的测试文件大得多，静默过滤会让「一个用例都没发现」变得无从排查。
      */
     default boolean isValidTest(File test) {
         try {
-            return test.exists() && test.length() <= GlobalConfig.getMaxFileSize();
+            if (!test.exists()) {
+                return false;
+            }
+            long limit = GlobalConfig.getMaxFileSize();
+            if (test.length() > limit) {
+                LoggerUtil.logExec(java.util.logging.Level.WARNING,
+                        "跳过超出 maxFileSize(" + limit + ") 的测试文件: "
+                                + test.getPath() + " (" + test.length() + " 字节)");
+                return false;
+            }
+            return true;
         } catch (Exception e) {
             return false;
         }

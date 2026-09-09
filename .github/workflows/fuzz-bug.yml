@@ -56,8 +56,8 @@ jobs:
       - name: Configure JavaOracle runtime paths
         run: |
           set -euo pipefail
-          sed -i "s#^suiteBasePath=.*#suiteBasePath=$GITHUB_WORKSPACE/jdk17u-dev/test/jdk/#" config.properties
-          sed -i "s#^jdkTestPath=.*#jdkTestPath=$GITHUB_WORKSPACE/jdk17u-dev/test#" config.properties
+          sed -i "s#^suiteBasePath=.*#suiteBasePath=jdk17u-dev/test/jdk/#" config.properties
+          sed -i "s#^jdkTestPath=.*#jdkTestPath=jdk17u-dev/test#" config.properties
           sed -i "s#^jdkPaths=.*#jdkPaths=$JAVA_HOME#" config.properties
           sed -i "s#^useCacheMode=.*#useCacheMode=true#" config.properties
           sed -i "s#^testCoreMultiplier=.*#testCoreMultiplier=1.0#" config.properties

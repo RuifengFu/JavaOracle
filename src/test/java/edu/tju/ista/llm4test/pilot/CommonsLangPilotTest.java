@@ -1,6 +1,7 @@
 package edu.tju.ista.llm4test.pilot;
 
 import edu.tju.ista.llm4test.adapter.maven.MavenProjectAdapter;
+import edu.tju.ista.llm4test.config.ConfigUtil;
 import edu.tju.ista.llm4test.execute.TestCase;
 import edu.tju.ista.llm4test.execute.TestResult;
 import edu.tju.ista.llm4test.execute.TestResultKind;
@@ -27,10 +28,11 @@ import static org.junit.jupiter.api.Assertions.*;
  *   <li><b>找到它的 API</b> —— 从库自身源码注释里提取 javadoc（不是 JDK 的）</li>
  *   <li><b>执行它的测试</b> —— 走 javac + junit-console 链路并正确分类</li>
  * </ol>
- * 仓库位置来自环境变量 {@code PILOT_MAVEN_REPO}，缺省
- * {@code ~/Research/Java/commons-lang}；不存在则整类跳过（不影响 CI）。
+ * 仓库位置按以下顺序解析（都支持相对路径，相对本项目工作目录）：
+ * 环境变量 {@code PILOT_MAVEN_REPO} → 配置项 {@code pilot.mavenRepo} →
+ * 缺省的同级检出 {@code ../commons-lang}；不存在则整类跳过（不影响 CI）。
  * <pre>
- * git clone --depth 1 https://github.com/apache/commons-lang.git
+ * cd .. &amp;&amp; git clone --depth 1 https://github.com/apache/commons-lang.git
  * </pre>
  */
 class CommonsLangPilotTest {
@@ -43,12 +45,15 @@ class CommonsLangPilotTest {
     @TempDir
     Path tempDir;
 
+    /** 同级检出：本项目与被测库并列，避免把仓库位置写死成某台机器的绝对路径 */
+    private static final String DEFAULT_PILOT_REPO = "../commons-lang";
+
     @BeforeAll
     static void locateRepo() {
-        String configured = System.getenv("PILOT_MAVEN_REPO");
-        repo = configured != null && !configured.isBlank()
-                ? Path.of(configured)
-                : Path.of(System.getProperty("user.home"), "Research/Java/commons-lang");
+        repo = Path.of(firstNonBlank(
+                System.getenv("PILOT_MAVEN_REPO"),
+                ConfigUtil.get("pilot.mavenRepo"),
+                DEFAULT_PILOT_REPO));
 
         Assumptions.assumeTrue(Files.isDirectory(repo.resolve("src/test/java")),
                 "commons-lang 未克隆到 " + repo + "，跳过 pilot");
@@ -56,6 +61,15 @@ class CommonsLangPilotTest {
                 "junit-console jar 缺失，跳过 pilot");
 
         adapter = new MavenProjectAdapter(repo.toString(), CONSOLE_JAR);
+    }
+
+    private static String firstNonBlank(String... candidates) {
+        for (String candidate : candidates) {
+            if (candidate != null && !candidate.isBlank()) {
+                return candidate.trim();
+            }
+        }
+        throw new IllegalStateException("无可用的 pilot 仓库路径");
     }
 
     /** 库自身源码根（包根平铺，无 JDK 的 module/platform/classes 层级） */

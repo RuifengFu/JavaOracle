@@ -56,12 +56,8 @@ public class TestSuite {
      * 检查文件是否有效
      */
     public boolean isValidTestFile(File file) {
-        try {
-            return file.exists() && Files.size(file.toPath()) <= GlobalConfig.getMaxFileSize();
-        } catch (Exception e) {
-            LoggerUtil.logExec(Level.WARNING, "检查文件失败: " + file + "\n" + e.getMessage());
-            return false;
-        }
+        // 判定与日志都收敛到适配器，避免两处各写一遍大小规则
+        return adapter.isValidTest(file);
     }
     
     /**

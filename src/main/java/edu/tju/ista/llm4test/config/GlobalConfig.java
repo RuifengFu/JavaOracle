@@ -1,6 +1,7 @@
 package edu.tju.ista.llm4test.config;
 
 import java.io.File;
+import java.nio.file.Path;
 
 /**
  * 应用程序配置管理类
@@ -44,7 +45,7 @@ public class GlobalConfig {
         "Dependency/junit-jupiter-engine-5.11.4.jar",
         "Dependency/junit-4.13.1.jar"
     };
-    private static final long DEFAULT_MAX_FILE_SIZE = 10000;
+    private static final long DEFAULT_MAX_FILE_SIZE = 512L * 1024;   // 512KiB：仅作兜底护栏
     private static final double DEFAULT_THREAD_MULTIPLIER_GENERATE = 3.0;
     private static final double DEFAULT_THREAD_MULTIPLIER_EXECUTE = 2.0;
     private static final int DEFAULT_EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS = 30;
@@ -315,12 +316,42 @@ public class GlobalConfig {
         String cacheDir = getValidTestCasesDir();
         ensureDirectoryExists(cacheDir);
         
-        // 将rootPath转换为文件名安全的格式
-        String fileName = rootPath.replace("/", "_").replace("\\", "_").replace(":", "_");
-        if (fileName.isEmpty()) {
-            fileName = "default";
+        return cacheDir + "/" + toCacheKey(rootPath) + ".txt";
+    }
+
+    /**
+     * 把套件路径转成通过列表的文件名键。
+     * <p>
+     * 先相对化到工作目录再替换分隔符：否则绝对配置（CI 的 $GITHUB_WORKSPACE、
+     * Maven 模式的 project.root）会把机器路径写进文件名，换机器或换检出目录后
+     * 缓存直接失效。工作目录之外的仓库丢掉 {@code ../} 前缀，保留可辨识的尾部。
+     */
+    private static String toCacheKey(String rootPath) {
+        if (rootPath == null || rootPath.isBlank()) {
+            return "default";
         }
-        return cacheDir + "/" + fileName + ".txt";
+        try {
+            Path cwd = Path.of("").toAbsolutePath().normalize();
+            Path relative = cwd.relativize(Path.of(rootPath).toAbsolutePath().normalize());
+            StringBuilder key = new StringBuilder();
+            for (Path segment : relative) {
+                String name = segment.toString();
+                if (name.isEmpty() || "..".equals(name)) {
+                    continue;
+                }
+                if (key.length() > 0) {
+                    key.append('_');
+                }
+                key.append(name);
+            }
+            if (key.length() > 0) {
+                return key.toString();
+            }
+        } catch (Exception e) {
+            // 无法相对化（如 Windows 跨盘符）时退回原有的分隔符替换
+        }
+        String fallback = rootPath.replace("/", "_").replace("\\", "_").replace(":", "_");
+        return fallback.isEmpty() ? "default" : fallback;
     }
     
     /**

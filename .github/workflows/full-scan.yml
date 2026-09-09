@@ -54,8 +54,8 @@ jobs:
           echo "Target path: $TARGET"
           echo "Duration: $DURATION minutes"
 
-          sed -i "s#^suiteBasePath=.*#suiteBasePath=$GITHUB_WORKSPACE/jdk17u-dev/test/jdk/#" config.properties
-          sed -i "s#^jdkTestPath=.*#jdkTestPath=$GITHUB_WORKSPACE/jdk17u-dev/test#" config.properties
+          sed -i "s#^suiteBasePath=.*#suiteBasePath=jdk17u-dev/test/jdk/#" config.properties
+          sed -i "s#^jdkTestPath=.*#jdkTestPath=jdk17u-dev/test#" config.properties
           sed -i "s#^jdkPaths=.*#jdkPaths=$JAVA_HOME#" config.properties
           sed -i "s#^useCacheMode=.*#useCacheMode=false#" config.properties
 
