@@ -135,7 +135,9 @@ public class ApiInfoProcessor {
                 ? Path.of(sourcePath)
                 : Path.of(sourcePath, sourcePrefix);
         if (!Files.isDirectory(packageRoot)) {
-            LoggerUtil.logExec(Level.FINE, "跳过符号解析源码根（不存在）: " + packageRoot);
+            // 这里静默的话，症状就是「被测库的 API 一个都抽不到」而毫无线索
+            LoggerUtil.logExec(Level.WARNING, "符号解析源码根不存在，将无法解析被测项目自身的类型: "
+                    + packageRoot + "（检查 jdkSourcePath / defaultSourcePrefix）");
             return;
         }
         try {
@@ -384,20 +386,14 @@ public class ApiInfoProcessor {
                 "-type", "f"
             );
 
-            ProcessBuilder processBuilder = new ProcessBuilder(command);
-            Process process = processBuilder.start();
-
-            // 等待命令完成（设置超时）
-            boolean finished = process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS);
-            if (!finished) {
-                process.destroy();
-                process.destroyForcibly();
+            // 并发消费流：原先 waitFor 之后才读，find 命中很多时输出会写满管道 → 假超时
+            ProcessRunner.Result run = ProcessRunner.run(command, 10_000);
+            if (run.timedOut()) {
                 return null;
             }
 
-            // 读取输出
             try (java.io.BufferedReader reader = new java.io.BufferedReader(
-                    new java.io.InputStreamReader(process.getInputStream()))) {
+                    new java.io.StringReader(run.stdout()))) {
                 String line = reader.readLine();
                 if (line != null && !line.trim().isEmpty()) {
                     return line.trim();

@@ -31,6 +31,16 @@ public final class ProcessRunner {
     /** 终止进程树后等待流线程收尾的时间，避免个别卡死的读线程拖住调用方 */
     private static final long DRAIN_JOIN_TIMEOUT_MS = 2_000;
 
+    /**
+     * 单个流的收集上限。
+     * <p>
+     * 并发抽干之后子进程不会再被管道卡住，因此一个话痨用例
+     * （{@code junit-console --details=tree} 跑参数化套件、或死循环打印）
+     * 能把几百 MB 灌进内存，再乘上并行池就是 OOM。修复前反而是「写满 64KB
+     * 就卡住被杀」隐式限了流量。超限后丢弃后续内容并留下明确标记。
+     */
+    private static final int MAX_STREAM_BYTES = 8 * 1024 * 1024;
+
     private ProcessRunner() {
     }
 
@@ -118,6 +128,10 @@ public final class ProcessRunner {
         private final InputStream stream;
         private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         private final Thread thread;
+        /** 是否因超过上限而截断（截断必须留痕，否则下游会拿残缺输出当完整输出比对） */
+        private volatile boolean truncated;
+        /** 读线程是否正常读到 EOF；join 超时而未结束同样要留痕 */
+        private volatile boolean completed;
 
         private StreamDrainer(InputStream stream, String name) {
             this.stream = stream;
@@ -138,9 +152,17 @@ public final class ProcessRunner {
                 int read;
                 while ((read = stream.read(chunk)) != -1) {
                     synchronized (buffer) {
-                        buffer.write(chunk, 0, read);
+                        int room = MAX_STREAM_BYTES - buffer.size();
+                        if (room > 0) {
+                            buffer.write(chunk, 0, Math.min(read, room));
+                        }
+                        if (buffer.size() >= MAX_STREAM_BYTES) {
+                            truncated = true;
+                        }
                     }
+                    // 超限后继续读但不再存：保持管道畅通，子进程才能正常退出
                 }
+                completed = true;
             } catch (IOException e) {
                 // 进程被强杀时读端报错属正常，已读到的部分仍然有效
                 LoggerUtil.logExec(Level.FINE, "读取进程流结束: " + e.getMessage());
@@ -156,10 +178,21 @@ public final class ProcessRunner {
         }
 
         String content() {
+            String text;
+            boolean cut;
             synchronized (buffer) {
                 // 编码沿用历史行为：平台默认字符集（JDK18+ 即 UTF-8）
-                return buffer.toString();
+                text = buffer.toString();
+                cut = truncated;
             }
+            if (cut) {
+                return text + "\n[output truncated at " + MAX_STREAM_BYTES + " bytes]";
+            }
+            if (!completed) {
+                // join 超时：仍有进程持着写端（被 reparent 的孙进程等），输出可能不全
+                return text + "\n[output may be incomplete: stream reader did not finish]";
+            }
+            return text;
         }
     }
 }

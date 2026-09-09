@@ -113,15 +113,25 @@ public class MavenProjectAdapter implements ProjectAdapter {
     }
 
     /**
-     * junit-platform-console 的退出码：0 全通过、1 有测试失败、
-     * 2 是 {@code --fail-if-no-tests} 没匹配到用例。
-     * <p>
-     * 分类上 2 仍归 TEST_FAIL（保持既有行为），但标签区分开——它通常意味着
-     * FQN 推导错了（文件名 ≠ 主类名），而不是被测代码有问题。
+     * 码表要覆盖本适配器**自己实际发出**的退出码，而不只是 junit-console 的文档值：
+     * <ul>
+     *   <li>{@code 0} 全通过；{@code 1} 有测试失败（console 原生）</li>
+     *   <li>{@code 2} 本适配器用于编译失败（见 {@link #compile}），
+     *       console 也用它表示 {@code --fail-if-no-tests} 没匹配到用例</li>
+     *   <li>{@code 124} 本适配器用于执行超时（见 {@link #runJUnitConsole}）</li>
+     *   <li>{@code -1} 本适配器用于 workspace 准备失败与未预期异常</li>
+     * </ul>
+     * 超时必须归 {@code EXECUTE_TIMEOUT}：归 TEST_FAIL 会让 {@code isFail()} 为真，
+     * 把一次超时当作失败用例推进 bug 验证链路。
      */
     @Override
     public TestResultKind classifyExitValue(int exitValue) {
-        return exitValue == 0 ? TestResultKind.SUCCESS : TestResultKind.TEST_FAIL;
+        return switch (exitValue) {
+            case 0 -> TestResultKind.SUCCESS;
+            case 124 -> TestResultKind.EXECUTE_TIMEOUT;
+            case -1 -> TestResultKind.EXECUTE_ERROR;
+            default -> TestResultKind.TEST_FAIL;
+        };
     }
 
     @Override
@@ -129,8 +139,9 @@ public class MavenProjectAdapter implements ProjectAdapter {
         return switch (exitValue) {
             case 0 -> "SUCCESS";
             case 1 -> "TEST_FAIL";
-            case 2 -> "NO_TESTS_FOUND";
-            case -1 -> "TIMEOUT";
+            case 2 -> "COMPILE_FAIL_OR_NO_TESTS";
+            case 124 -> "TIMEOUT";
+            case -1 -> "EXECUTE_ERROR";
             default -> "UNKNOWN";
         };
     }
@@ -176,7 +187,7 @@ public class MavenProjectAdapter implements ProjectAdapter {
         } catch (Exception e) {
             LoggerUtil.logExec(Level.SEVERE, "Maven workspace准备失败: " + e.getMessage());
             TestResult r = new TestResult();
-            r.mergeResults(Map.of("maven", new TestOutput("", e.getMessage(), -1)));
+            r.mergeResults(Map.of("maven", new TestOutput("", e.getMessage(), -1, this)));
             return r;
         }
 
@@ -205,7 +216,7 @@ public class MavenProjectAdapter implements ProjectAdapter {
         } catch (Exception e) {
             LoggerUtil.logExec(Level.SEVERE, "Maven测试执行异常: " + e.getMessage());
             TestResult r = new TestResult();
-            r.mergeResults(Map.of("maven", new TestOutput("", e.getMessage(), -1)));
+            r.mergeResults(Map.of("maven", new TestOutput("", e.getMessage(), -1, this)));
             return r;
         } finally {
             deleteRecursively(tmpOut);
@@ -224,7 +235,7 @@ public class MavenProjectAdapter implements ProjectAdapter {
         ProcessOutput po = runProcess(command, EXECUTION_TIMEOUT_MS);
         if (po.exitValue() != 0) {
             return new TestOutput("Compilation failed\n" + po.stdout() + po.stderr(),
-                    po.stderr(), 2, outputParser());
+                    po.stderr(), 2, this);
         }
         return null;
     }
@@ -245,7 +256,7 @@ public class MavenProjectAdapter implements ProjectAdapter {
         if (po.timedOut()) {
             stderr = stderr + "\n[TIMEOUT after " + EXECUTION_TIMEOUT_MS + " ms]";
         }
-        return new TestOutput(stdout, stderr, exit, outputParser());
+        return new TestOutput(stdout, stderr, exit, this);
     }
 
     /**
@@ -270,7 +281,13 @@ public class MavenProjectAdapter implements ProjectAdapter {
      * pom.xml 比 classpath.txt 新时自动重建。
      * test-compile 失败（仓库自带测试编译不过）时降级为 compile，仅用主代码classpath。
      */
-    String ensureWorkspace() throws Exception {
+    /**
+     * 必须串行：这个方法在并行测试池里被每个用例调用，冷缓存时 N 个 worker 会同时
+     * 对同一仓库跑 {@code mvn ... -Dmdep.outputFile=<同一个 classpath.txt>}。
+     * 并发 Maven 共用一个 target/ 会互相破坏，半写的 classpath.txt 又会被后续
+     * 所有用例当作编译 classpath 读走。
+     */
+    synchronized String ensureWorkspace() throws Exception {
         Path root = Paths.get(projectRoot).toAbsolutePath().normalize();
         Path pom = root.resolve("pom.xml");
         long pomModified = Files.exists(pom) ? Files.getLastModifiedTime(pom).toMillis() : 0L;

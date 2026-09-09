@@ -34,8 +34,8 @@ public class TestResult {
 
     public TestResult(TestOutput harnessResult) {
         this.harnessResult = harnessResult;
-        // 分类码表由当前 harness 提供（JDK 模式取值与迁移前逐字一致）
-        kind = AdapterRegistry.get().classifyExitValue(harnessResult.exitValue);
+        // 码表由产出这份输出的 harness 自带（JDK 模式取值与迁移前逐字一致）
+        kind = harnessResult.classify();
         compilationFailed = harnessResult.isCompilationFailed();
     }
 
@@ -99,7 +99,9 @@ public class TestResult {
             kind = TestResultKind.DIFF;
         } else {
             this.harnessResult = results.values().stream().findFirst().orElse(null);
-            kind = AdapterRegistry.get().classifyExitValue(list.get(0));
+            kind = harnessResult != null
+                    ? harnessResult.classify()
+                    : AdapterRegistry.get().classifyExitValue(list.get(0));
         }
         compilationFailed = results.values().stream().anyMatch(TestOutput::isCompilationFailed);
     }

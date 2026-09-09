@@ -76,17 +76,24 @@ public class JdkProjectAdapter implements ProjectAdapter {
         return directives;
     }
 
+    /** jtreg -l 的上限：发现阶段应当很快，卡住就回退目录扫描 */
+    private static final long DISCOVERY_TIMEOUT_MS = 120_000;
+
     // ==================== 测试发现（自 TestSuite 迁移） ====================
 
     @Override
     public List<String> discoverTests(String rootPath) {
         try {
-            ProcessBuilder builder = new ProcessBuilder();
-            builder.command("jtreg", "-l", rootPath);
-            builder.redirectErrorStream(true);
-            Process process = builder.start();
-            String output = new String(process.getInputStream().readAllBytes());
-            int exitCode = process.waitFor();
+            // 原先是 waitFor() 不带超时：jtreg 一旦卡住，整个发现阶段永久挂起
+            ProcessRunner.Result run = ProcessRunner.run(
+                    List.of("jtreg", "-l", rootPath), DISCOVERY_TIMEOUT_MS);
+            String output = run.stdout() + run.stderr();
+            if (run.timedOut()) {
+                LoggerUtil.logExec(Level.WARNING,
+                        "jtreg -l 超时(" + DISCOVERY_TIMEOUT_MS + "ms)，回退目录扫描: " + rootPath);
+                return scanDirectoryForJavaFiles(rootPath);
+            }
+            int exitCode = run.exitValue();
             String[] lines = output.split("\n");
             if (lines.length >= 3) {
                 var list = Arrays.asList(lines).subList(1, lines.length - 1).stream()
@@ -151,6 +158,12 @@ public class JdkProjectAdapter implements ProjectAdapter {
     @Override
     public TestExecuteTool createExecuteTool() {
         return new JtregExecuteTool();
+    }
+
+    /** jtreg 用小写的 {@code @test} 标记 */
+    @Override
+    public boolean looksLikeHarnessTest(String sourceCode) {
+        return sourceCode != null && sourceCode.contains("@test");
     }
 
     @Override
@@ -220,7 +233,7 @@ public class JdkProjectAdapter implements ProjectAdapter {
                 e.printStackTrace();
                 LoggerUtil.logExec(Level.WARNING,
                     "JDK测试执行失败: " + jdk + " - " + e.getMessage());
-                results.put(jdk, new TestOutput("", e.getMessage(), -1));
+                results.put(jdk, new TestOutput("", e.getMessage(), -1, this));
             }
         }
 
@@ -325,14 +338,14 @@ public class JdkProjectAdapter implements ProjectAdapter {
             LoggerUtil.logExec(Level.WARNING, timeoutMsg);
             // 退出码沿用 jtreg 语义的 124（ProcessRunner 返回的是中性占位）
             return new TestOutput(result.stdout(),
-                    result.stderr() + "\n[TIMEOUT after " + EXECUTION_TIMEOUT_MS + " ms]", 124);
+                    result.stderr() + "\n[TIMEOUT after " + EXECUTION_TIMEOUT_MS + " ms]", 124, this);
         }
 
         int exitValue = result.exitValue();
         String stdout = result.stdout();
         String stderr = result.stderr();
 
-        TestOutput output = new TestOutput(stdout, stderr, exitValue);
+        TestOutput output = new TestOutput(stdout, stderr, exitValue, this);
 
         // 记录详细的执行结果
         if (exitValue != 0) {

@@ -1,7 +1,9 @@
 package edu.tju.ista.llm4test.execute;
 
 import edu.tju.ista.llm4test.adapter.AdapterRegistry;
+import edu.tju.ista.llm4test.adapter.HarnessExitSemantics;
 import edu.tju.ista.llm4test.adapter.HarnessOutputParser;
+import edu.tju.ista.llm4test.adapter.ProjectAdapter;
 
 public class TestOutput {
 
@@ -26,6 +28,9 @@ public class TestOutput {
      */
     private final boolean compilationFailed;
 
+    /** 产出这份输出的 harness 的退出码语义（不是「当前配置的」适配器的） */
+    private final HarnessExitSemantics exitSemantics;
+
     /**
      * 用当前适配器的解析器构造。
      * <p>
@@ -34,7 +39,17 @@ public class TestOutput {
      * 改由 {@link AdapterRegistry} 提供当前 harness 的解析器：JDK 模式取值不变。
      */
     public TestOutput(String stdout, String stderr, int exitValue) {
-        this(stdout, stderr, exitValue, AdapterRegistry.get().outputParser());
+        this(stdout, stderr, exitValue, AdapterRegistry.get());
+    }
+
+    /**
+     * 解析器与退出码码表都取自同一个适配器——适配器构造自己的输出时用这个。
+     * <p>
+     * 只传解析器的重载会把码表回落到「当前配置的」适配器：直接使用某个适配器
+     * 而配置指向另一个时（测试与 pilot 就是这样），分类和标签都会拿错表。
+     */
+    public TestOutput(String stdout, String stderr, int exitValue, ProjectAdapter adapter) {
+        this(stdout, stderr, exitValue, adapter.outputParser(), adapter);
     }
 
     /**
@@ -43,6 +58,12 @@ public class TestOutput {
      */
     public TestOutput(String stdout, String stderr, int exitValue,
                       HarnessOutputParser parser) {
+        this(stdout, stderr, exitValue, parser, AdapterRegistry.get());
+    }
+
+    public TestOutput(String stdout, String stderr, int exitValue,
+                      HarnessOutputParser parser, HarnessExitSemantics exitSemantics) {
+        this.exitSemantics = exitSemantics;
         this.stdout = stdout;
         this.stderr = stderr;
         this.exitValue = exitValue;
@@ -50,6 +71,11 @@ public class TestOutput {
         this.testout = parsed.testout();
         this.testerr = parsed.testerr();
         this.compilationFailed = getSimpleOutput().contains("Compilation failed");
+    }
+
+    /** 按产出它的 harness 的码表分类 */
+    public TestResultKind classify() {
+        return exitSemantics.classifyExitValue(exitValue);
     }
 
     /** 是否编译失败（构造时判定，见字段注释） */
@@ -107,7 +133,7 @@ public class TestOutput {
 
         // 退出码含义由当前 harness 解释（这段文本会进 prompt）
         sb.append("exitValue: ").append(exitValue)
-                .append(" (").append(AdapterRegistry.get().describeExitValue(exitValue)).append(")")
+                .append(" (").append(exitSemantics.describeExitValue(exitValue)).append(")")
                 .append("\n");
 
         // 添加解析后的测试输出

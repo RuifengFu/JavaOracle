@@ -91,7 +91,15 @@ public class MavenExecuteTool implements TestExecuteTool {
      * 而 javac 的 {@code -d} 输出也按包分层，保持一致可避免类名不匹配。
      */
     private File createTemporaryTestFile(String sourceCode, String className) throws IOException {
-        String resolved = className != null ? className : JavaSourceUtils.extractMainClassName(sourceCode);
+        // 源码里声明的类名优先于调用方给的 class_name：javac 要求文件名与 public 类同名，
+        // 两者不一致会得到 "class X is public, should be declared in a file named X.java"，
+        // 表现为一次没头没尾的编译失败。FQN 也是按 package + 文件名推导的。
+        String fromSource = JavaSourceUtils.extractMainClassName(sourceCode);
+        if (fromSource != null && className != null && !fromSource.equals(className)) {
+            LoggerUtil.logExec(Level.WARNING, "class_name(" + className
+                    + ") 与源码声明的类名(" + fromSource + ")不一致，按源码为准");
+        }
+        String resolved = fromSource != null ? fromSource : className;
         String actualClassName = resolved != null
                 ? resolved
                 : "TestClass_" + UUID.randomUUID().toString().replace("-", "");

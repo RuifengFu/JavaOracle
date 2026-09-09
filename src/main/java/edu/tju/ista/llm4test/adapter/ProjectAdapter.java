@@ -24,7 +24,7 @@ import java.util.Map;
  * 约定：适配器只负责"执行并分类结果"（SUCCESS/COMPILE_FAIL/TEST_FAIL/EXECUTE_TIMEOUT等），
  * "真bug vs 测试问题"的裁决（VERIFIED_BUG）统一由上层 LLM 流程完成。
  */
-public interface ProjectAdapter {
+public interface ProjectAdapter extends HarnessExitSemantics {
 
     /** 适配器标识，如 "jdk"、"maven" */
     String id();
@@ -111,8 +111,14 @@ public interface ProjectAdapter {
      * 无需副本的适配器可覆盖为空实现。
      */
     default void prepareWorkspace(File resultDir) {
-        new edu.tju.ista.llm4test.utils.FileProcessor(resultDir)
-                .copyTestFiles(java.nio.file.Path.of(workspaceSourceRoot()));
+        java.nio.file.Path source = java.nio.file.Path.of(workspaceSourceRoot());
+        if (!java.nio.file.Files.isDirectory(source)) {
+            // FileProcessor 里是 Objects.requireNonNull(listFiles())，目录不存在会抛裸 NPE，
+            // 排查起来毫无线索（Maven 模式下 project.root 配错就是这个症状）
+            throw new IllegalStateException("工作区源目录不存在: " + source.toAbsolutePath()
+                    + "（适配器 " + id() + "；请检查 project.root / jdkTestPath 配置）");
+        }
+        new edu.tju.ista.llm4test.utils.FileProcessor(resultDir).copyTestFiles(source);
     }
 
     /**
@@ -126,6 +132,11 @@ public interface ProjectAdapter {
             java.nio.file.Path origin = originFile.toPath().toAbsolutePath().normalize();
             java.nio.file.Path rel = srcRoot.relativize(origin);
             if (rel.toString().isEmpty() || rel.startsWith("..")) {
+                // 调用方拿到这个文件之后会**写**它（removeHeader / 写回增强代码），
+                // 原样返回等于直接改上游检出。保持历史行为但必须留下告警。
+                LoggerUtil.logExec(java.util.logging.Level.WARNING,
+                        "用例不在工作区源根之下，将直接就地修改上游文件: " + originFile
+                                + "（源根 " + srcRoot + "）");
                 return originFile;
             }
             return java.nio.file.Path.of(GlobalConfig.getTestDir())
@@ -144,27 +155,6 @@ public interface ProjectAdapter {
     TestResult executeTest(TestCase testCase);
 
     /**
-     * 退出码 → 结果分类。
-     * <p>
-     * 默认中性语义（0 成功、其余判失败）。历史上 {@code TestResult} 在两处内联
-     * jtreg 的特判（124/3/5），Maven 模式也会走那套码表——分类结果凑巧正确，
-     * 但语义是错的，交给各 harness 自己说更清楚。
-     */
-    default TestResultKind classifyExitValue(int exitValue) {
-        return exitValue == 0 ? TestResultKind.SUCCESS : TestResultKind.TEST_FAIL;
-    }
-
-    /**
-     * 退出码的可读标签，会进 prompt 给 LLM 看（{@code TestOutput.getSimpleOutput}）。
-     * <p>
-     * 因此不能沿用 jtreg 码表：Maven 失败的 exit 1 被标成 {@code UNKNOWN}
-     * 会误导模型在修复/验证环节的判断。
-     */
-    default String describeExitValue(int exitValue) {
-        return exitValue == 0 ? "SUCCESS" : "FAIL";
-    }
-
-    /**
      * 本 harness 的输出解析器。
      * <p>
      * 让 {@code execute.TestOutput} 能按当前适配器解析，而不必 import 某个具体
@@ -179,6 +169,17 @@ public interface ProjectAdapter {
      * 放在接口上是为了让门面不必 {@code instanceof} 向下转型到具体适配器。
      */
     default void cleanupWorkspace() {
+    }
+
+    /**
+     * 这段源码看起来是否本 harness 的测试（用于决定能否交给执行工具跑）。
+     * <p>
+     * 默认按 JUnit 约定认 {@code @Test}。HypothesisAgent 历史上直接判
+     * {@code code.contains("@test")}——那是 jtreg 的小写标记，JUnit 代码永远不含，
+     * 于是 Maven 模式下每个假设都掉进它自己那套 JDK 取向的编译执行回退路径。
+     */
+    default boolean looksLikeHarnessTest(String sourceCode) {
+        return sourceCode != null && sourceCode.contains("@Test");
     }
 
     /**

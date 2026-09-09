@@ -343,9 +343,15 @@ public class GlobalConfig {
             Path cwd = Path.of("").toAbsolutePath().normalize();
             Path relative = cwd.relativize(Path.of(rootPath).toAbsolutePath().normalize());
             StringBuilder key = new StringBuilder();
+            boolean escapedWorkdir = false;
             for (Path segment : relative) {
                 String name = segment.toString();
-                if (name.isEmpty() || "..".equals(name)) {
+                if (name.isEmpty()) {
+                    continue;
+                }
+                if ("..".equals(name)) {
+                    // 丢掉 ../ 前缀以免文件名难读，但必须记下「曾经上跳」
+                    escapedWorkdir = true;
                     continue;
                 }
                 if (key.length() > 0) {
@@ -353,14 +359,26 @@ public class GlobalConfig {
                 }
                 key.append(name);
             }
+            if (escapedWorkdir) {
+                // 否则 ../commons-lang/... 、<cwd>/commons-lang/... 、
+                // ../../别处/commons-lang/... 会撞成同一个文件名，
+                // 一个仓库的通过列表被静默套用到另一个仓库上
+                key.append('_').append(shortHash(relative.toString()));
+            }
             if (key.length() > 0) {
                 return key.toString();
             }
+            // 相对化后为空（rootPath 就是工作目录本身）
+            return "default";
         } catch (Exception e) {
-            // 无法相对化（如 Windows 跨盘符）时退回原有的分隔符替换
+            // 无法相对化（如 Windows 跨盘符）：用 hash 而不是把机器绝对路径写进文件名
+            return "suite_" + shortHash(rootPath);
         }
-        String fallback = rootPath.replace("/", "_").replace("\\", "_").replace(":", "_");
-        return fallback.isEmpty() ? "default" : fallback;
+    }
+
+    /** 稳定的短摘要，用于消歧文件名 */
+    private static String shortHash(String value) {
+        return String.format("%08x", value.hashCode());
     }
     
     /**
