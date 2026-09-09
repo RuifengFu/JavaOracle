@@ -13,7 +13,8 @@ public class TestResult {
 
     private TestResultKind kind;
     private TestOutput compileResult;
-    private TestOutput jtregResult;
+    /** 单环境执行的那一份输出（JDK 差分模式下是任取其一）；原名 jtregResult */
+    private TestOutput harnessResult;
     private HashMap<String, TestOutput> execResults = new HashMap<>();
     private String output;
     private boolean compilationFailed;
@@ -31,11 +32,11 @@ public class TestResult {
     }
 
 
-    public TestResult(TestOutput jtregResult) {
-        this.jtregResult = jtregResult;
+    public TestResult(TestOutput harnessResult) {
+        this.harnessResult = harnessResult;
         // 分类码表由当前 harness 提供（JDK 模式取值与迁移前逐字一致）
-        kind = AdapterRegistry.get().classifyExitValue(jtregResult.exitValue);
-        compilationFailed = jtregResult.isCompilationFailed();
+        kind = AdapterRegistry.get().classifyExitValue(harnessResult.exitValue);
+        compilationFailed = harnessResult.isCompilationFailed();
     }
 
     public boolean isDiff() {
@@ -97,7 +98,7 @@ public class TestResult {
         } else if (list.size() > 1) {
             kind = TestResultKind.DIFF;
         } else {
-            this.jtregResult = results.values().stream().findFirst().orElse(null);
+            this.harnessResult = results.values().stream().findFirst().orElse(null);
             kind = AdapterRegistry.get().classifyExitValue(list.get(0));
         }
         compilationFailed = results.values().stream().anyMatch(TestOutput::isCompilationFailed);
@@ -120,8 +121,8 @@ public class TestResult {
         return execResults;
     }
 
-    public TestOutput getJtregResult() {
-        return jtregResult;
+    public TestOutput getHarnessResult() {
+        return harnessResult;
     }
 
     public boolean getCompilationFailed() {
@@ -136,7 +137,7 @@ public class TestResult {
             }
             return sb.toString();
         }
-        return String.valueOf(jtregResult);
+        return String.valueOf(harnessResult);
     }
 
     /**
@@ -170,9 +171,9 @@ public class TestResult {
         if (output != null) {
             return output;
         }
-        // 如果没有设置输出，尝试从jtregResult或其他结果中获取
-        if (jtregResult != null) {
-            return jtregResult.toString();
+        // 如果没有设置输出，尝试从harnessResult或其他结果中获取
+        if (harnessResult != null) {
+            return harnessResult.toString();
         }
         return toString();
     }

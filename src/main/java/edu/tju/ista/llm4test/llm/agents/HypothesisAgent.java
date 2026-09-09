@@ -236,8 +236,8 @@ public class HypothesisAgent extends Agent {
         // 检查是否为jtreg风格的测试
         if (code.contains("@test")) {
             LoggerUtil.logExec(Level.INFO, "使用 jtreg 执行测试: " + hypothesisId);
-            ToolResponse<TestResult> jtregResult = jtregTool.execute(code);
-            return jtregResult.getResult();
+            ToolResponse<TestResult> harnessResult = jtregTool.execute(code);
+            return harnessResult.getResult();
         }
         
         // 编译并执行普通Java测试

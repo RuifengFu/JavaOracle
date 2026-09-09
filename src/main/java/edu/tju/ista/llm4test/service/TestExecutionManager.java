@@ -233,8 +233,8 @@ public class TestExecutionManager {
         if (testCase.getResult() != null && testCase.getResult().getCompilationFailed()) {
             logMessage += " COMPILE_FAILED";
         }
-        if (testCase.getResult() != null && testCase.getResult().getJtregResult() != null) {
-            logMessage += " " + testCase.getResult().getJtregResult().exitValue;
+        if (testCase.getResult() != null && testCase.getResult().getHarnessResult() != null) {
+            logMessage += " " + testCase.getResult().getHarnessResult().exitValue;
         }
         LoggerUtil.logResult(Level.INFO, logMessage);
         
