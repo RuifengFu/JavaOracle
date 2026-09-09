@@ -107,18 +107,10 @@ class PromptGenHarnessTextTest {
     }
 
     @Test
-    void applyChangeRenders() throws Exception {
-        String prompt = PromptGen.generatePrompt("ApplyChange", baseModel());
-        assertNotNull(prompt);
-        assertTrue(prompt.contains("public class T { }"));
-        assertTrue(prompt.contains("public class T2 { }"));
-    }
-
-    @Test
     void allTemplatesLoadable() {
         // 核心模板注册完整性（防止模板文件被误删/改名）
         for (String name : new String[]{
-                "SpecTest", "EnhanceTestCase", "ApiTest", "FixTestCase", "ApplyChange", "RootCause",
+                "SpecTest", "EnhanceTestCase", "ApiTest", "FixTestCase", "RootCause",
                 "BugVerifyInitialAnalysis", "BugVerifyFormHypotheses", "BugVerifyBugReport",
                 "BugVerifyJsonExtract", "InstantiateTestCase", "BugVerifyObservePrompt",
                 "BugVerifyRefineAnalysis", "TestCaseMinimizationPlan", "TestCaseMinimizationReduce",

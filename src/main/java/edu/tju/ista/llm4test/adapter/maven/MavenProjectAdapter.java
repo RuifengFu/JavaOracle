@@ -193,9 +193,13 @@ public class MavenProjectAdapter implements ProjectAdapter {
 
         Path tmpOut = null;
         try {
-            // 2. 编译增强用例
+            // 2. 编译增强用例（含多文件用例的伴随文件）
             tmpOut = Files.createTempDirectory("llm4test-mvn-");
-            TestOutput compileOutput = compile(file.toPath(), tmpOut, classpath);
+            List<Path> sources = testCase.getAllSourceFiles().stream()
+                    .filter(File::exists)
+                    .map(File::toPath)
+                    .collect(Collectors.toList());
+            TestOutput compileOutput = compile(sources, tmpOut, classpath);
             if (compileOutput != null) {
                 // 编译失败：Compilation failed 语义与JDK模式对齐
                 TestResult r = new TestResult();
@@ -204,9 +208,18 @@ public class MavenProjectAdapter implements ProjectAdapter {
                 return r;
             }
 
-            // 3. junit console 执行
-            String fqn = deriveFullyQualifiedName(file.toPath());
-            TestOutput output = runJUnitConsole(fqn, tmpOut, classpath);
+            // 3. junit console 执行：只选带 @Test 的类，辅助类仅参与编译
+            List<String> fqns = new ArrayList<>();
+            for (Path source : sources) {
+                if (declaresTests(source)) {
+                    fqns.add(deriveFullyQualifiedName(source));
+                }
+            }
+            if (fqns.isEmpty()) {
+                // 一个 @Test 都没有：仍按主文件选择，让 --fail-if-no-tests 给出明确失败
+                fqns.add(deriveFullyQualifiedName(file.toPath()));
+            }
+            TestOutput output = runJUnitConsole(fqns, tmpOut, classpath);
 
             TestResult result = new TestResult();
             result.mergeResults(Map.of("maven", output));
@@ -226,12 +239,13 @@ public class MavenProjectAdapter implements ProjectAdapter {
     /**
      * 编译测试源码；失败返回携带 "Compilation failed" 语义的 TestOutput，成功返回null
      */
-    private TestOutput compile(Path source, Path outputDir, String classpath) throws Exception {
-        List<String> command = List.of(
+    private TestOutput compile(List<Path> sources, Path outputDir, String classpath) throws Exception {
+        List<String> command = new ArrayList<>(List.of(
                 javacBinary(), "-encoding", "UTF-8", "-parameters",
                 "-cp", classpath,
-                "-d", outputDir.toString(),
-                source.toString());
+                "-d", outputDir.toString()));
+        // 多文件用例：主文件与伴随文件一起编译，互相引用才能解析
+        sources.forEach(source -> command.add(source.toString()));
         ProcessOutput po = runProcess(command, EXECUTION_TIMEOUT_MS);
         if (po.exitValue() != 0) {
             return new TestOutput("Compilation failed\n" + po.stdout() + po.stderr(),
@@ -240,15 +254,20 @@ public class MavenProjectAdapter implements ProjectAdapter {
         return null;
     }
 
-    private TestOutput runJUnitConsole(String fqn, Path compiledClasses, String classpath)
+    private TestOutput runJUnitConsole(List<String> fqns, Path compiledClasses, String classpath)
             throws Exception {
-        List<String> command = List.of(
-                javaBinary(), "-jar", junitConsoleJar,
-                "--select-class", fqn,
+        List<String> command = new ArrayList<>(List.of(
+                javaBinary(), "-jar", junitConsoleJar));
+        // 多文件用例可能有多个测试类；辅助类没有 @Test，不进选择列表
+        for (String fqn : fqns) {
+            command.add("--select-class");
+            command.add(fqn);
+        }
+        command.addAll(List.of(
                 "-cp", compiledClasses + File.pathSeparator + classpath,
                 "--disable-ansi-colors",
                 "--fail-if-no-tests",
-                "--details=tree");
+                "--details=tree"));
         ProcessOutput po = runProcess(command, EXECUTION_TIMEOUT_MS);
         String stdout = po.stdout();
         String stderr = po.stderr();
@@ -257,6 +276,15 @@ public class MavenProjectAdapter implements ProjectAdapter {
             stderr = stderr + "\n[TIMEOUT after " + EXECUTION_TIMEOUT_MS + " ms]";
         }
         return new TestOutput(stdout, stderr, exit, this);
+    }
+
+    /** 该源文件是否声明了 JUnit 测试（决定它进不进 --select-class） */
+    private static boolean declaresTests(Path source) {
+        try {
+            return Files.readString(source, StandardCharsets.UTF_8).contains("@Test");
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     /**

@@ -106,7 +106,16 @@ You are encouraged to:
 2. Think about how this API interacts with Java's standard features
 3. Consider common programming patterns and potential misuse
 4. Suggest tests for API interaction scenarios you think are valuable
-5. You should contains full testcase in the last java code block.
+5. Emit the result by calling the `write_test_file` tool. Do NOT put the code in a markdown
+   code block: only tool calls are read, and prose is ignored.
+   - Call it once with the complete enhanced test class (whole file, including package and imports).
+   - The file name is derived from the top-level type you declare, so declare it exactly as you
+     want it saved. Keep the original test class name unless you have a reason to change it.
+   - Call it MORE THAN ONCE to produce a multi-file test case: put helper classes, fixtures or
+     additional test classes in their own files. Every class that declares @Test methods will be
+     executed; classes without @Test are compiled as helpers only.
+   - Prefer a helper file over cramming unrelated scaffolding into the test class when the
+     scaffolding is substantial (custom types used to probe generics, serialization fixtures, ...).
 </Note> 
 
 

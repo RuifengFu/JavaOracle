@@ -2,6 +2,7 @@ package edu.tju.ista.llm4test.pilot;
 
 import edu.tju.ista.llm4test.adapter.maven.MavenProjectAdapter;
 import edu.tju.ista.llm4test.config.ConfigUtil;
+import edu.tju.ista.llm4test.execute.TestCase;
 import edu.tju.ista.llm4test.execute.TestResult;
 import edu.tju.ista.llm4test.execute.TestResultKind;
 import edu.tju.ista.llm4test.llm.tools.TestExecuteTool;
@@ -10,6 +11,7 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -34,6 +36,9 @@ class MavenModeTenCasesTest {
 
     private static final String CONSOLE_JAR = "Dependency/junit-platform-console-standalone-1.11.4.jar";
     private static final String DEFAULT_PILOT_REPO = "../commons-lang";
+
+    @TempDir
+    Path tempDir;
 
     private static MavenProjectAdapter adapter;
     private static TestExecuteTool tool;
@@ -154,6 +159,95 @@ class MavenModeTenCasesTest {
         assertTrue(result.isFail(), "--fail-if-no-tests 应判失败: " + result.getKind());
         assertTrue(result.getOutput().contains("COMPILE_FAIL_OR_NO_TESTS"),
                 "退出码 2 的标签应指出可能是编译失败或没有用例: " + result.getOutput());
+    }
+
+    // ==================== 5. 多文件用例 ====================
+
+    /**
+     * 多文件用例：主测试类 + 辅助类分别成文件，两者一起编译，只有带 @Test 的被选中执行。
+     * 模拟 {@code write_test_file} 被调用两次的产物。
+     */
+    @Test
+    void multiFileTestCaseCompilesHelperAndRunsOnlyTestClass() throws Exception {
+        Path caseDir = tempDir.resolve("org/apache/commons/lang3");
+        Files.createDirectories(caseDir);
+
+        Path mainTest = caseDir.resolve("MultiFileProbeTest.java");
+        Files.writeString(mainTest, """
+                package org.apache.commons.lang3;
+
+                import org.junit.jupiter.api.Test;
+                import static org.junit.jupiter.api.Assertions.assertEquals;
+
+                public class MultiFileProbeTest {
+                    @Test
+                    void usesHelperToProbeStringUtils() {
+                        // 断言依据仍是 StringUtils.strip 的 javadoc 契约
+                        assertEquals("abc", StringUtils.strip(ProbeFixture.padded()));
+                        assertEquals(ProbeFixture.expected(), StringUtils.strip("  abc  "));
+                    }
+                }
+                """);
+
+        Path helper = caseDir.resolve("ProbeFixture.java");
+        Files.writeString(helper, """
+                package org.apache.commons.lang3;
+
+                /** 辅助类：没有 @Test，只应参与编译 */
+                public class ProbeFixture {
+                    public static String padded() { return "   abc   "; }
+                    public static String expected() { return "abc"; }
+                }
+                """);
+
+        TestCase tc = new TestCase(mainTest.toFile());
+        tc.recordWrittenFiles(java.util.List.of(mainTest.toFile(), helper.toFile()));
+        assertEquals(1, tc.getCompanionFiles().size(), "辅助类应记为伴随文件");
+        assertEquals(2, tc.getAllSourceFiles().size());
+
+        TestResult result = adapter.executeTest(tc);
+
+        assertEquals(TestResultKind.SUCCESS, result.getKind(),
+                "主类引用辅助类应能编译并通过。输出:\n" + result.getOutput());
+        assertFalse(result.getCompilationFailed(), "辅助类应被一起编译，不该编译失败");
+    }
+
+    /** 伴随文件里也可以有测试类：两个类的 @Test 都要跑到 */
+    @Test
+    void multiFileTestCaseRunsTestsFromEveryFile() throws Exception {
+        Path caseDir = tempDir.resolve("org/apache/commons/lang3");
+        Files.createDirectories(caseDir);
+
+        Path first = caseDir.resolve("PairOneTest.java");
+        Files.writeString(first, """
+                package org.apache.commons.lang3;
+                import org.junit.jupiter.api.Test;
+                import static org.junit.jupiter.api.Assertions.assertTrue;
+                public class PairOneTest {
+                    @Test
+                    void isEmptyContract() { assertTrue(StringUtils.isEmpty("")); }
+                }
+                """);
+        Path second = caseDir.resolve("PairTwoTest.java");
+        Files.writeString(second, """
+                package org.apache.commons.lang3;
+                import org.junit.jupiter.api.Test;
+                import static org.junit.jupiter.api.Assertions.assertFalse;
+                public class PairTwoTest {
+                    @Test
+                    void isEmptyIsFalseForBlank() { assertFalse(StringUtils.isEmpty(" ")); }
+                }
+                """);
+
+        TestCase tc = new TestCase(first.toFile());
+        tc.recordWrittenFiles(java.util.List.of(first.toFile(), second.toFile()));
+
+        TestResult result = adapter.executeTest(tc);
+
+        assertEquals(TestResultKind.SUCCESS, result.getKind(), result.getOutput());
+        // --details=tree 会把两个类都列出来
+        assertTrue(result.getOutput().contains("PairOneTest"), "应执行第一个测试类: " + result.getOutput());
+        assertTrue(result.getOutput().contains("PairTwoTest"), "伴随文件里的测试类也应被执行: " + result.getOutput());
     }
 
     private TestResult runSource(String source) {
