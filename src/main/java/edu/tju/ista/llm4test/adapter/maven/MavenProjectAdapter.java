@@ -327,6 +327,13 @@ public class MavenProjectAdapter implements ProjectAdapter {
     private record ProcessOutput(String stdout, String stderr, int exitValue, boolean timedOut) {
     }
 
+    /**
+     * 同步执行外部进程并收集输出。
+     * <p>
+     * 已知限制：流在进程退出（或被终止）之后才读取，子进程输出超过管道缓冲
+     * （Linux 默认 64KB）时写端阻塞，会表现为假超时。JdkProjectAdapter 有同样的模式，
+     * 二者将一起迁移到共享的并发消费流 ProcessRunner（见 issue #15）。
+     */
     private ProcessOutput runProcess(List<String> command, long timeoutMs) throws Exception {
         LoggerUtil.logExec(Level.INFO, "执行进程: " + String.join(" ", command));
         ProcessBuilder pb = new ProcessBuilder(command);
@@ -335,14 +342,24 @@ public class MavenProjectAdapter implements ProjectAdapter {
 
         boolean finished = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS);
         if (!finished) {
+            // 必须先终止再读流：readAllBytes() 等到 EOF 才返回，对仍存活的子进程
+            // 会无限阻塞，使“超时”形同虚设。终止后写端关闭，读取拿到已缓冲的部分输出。
+            // 子孙进程也要杀：mvn 是包装脚本，真正的 java 进程继承了同一个管道写端，
+            // 只杀直接子进程的话 EOF 永远不会到来。
+            terminate(process);
             String partialOut = readStream(process.getInputStream());
             String partialErr = readStream(process.getErrorStream());
-            process.destroy();
-            process.destroyForcibly();
             return new ProcessOutput(partialOut, partialErr, -1, true);
         }
         return new ProcessOutput(readStream(process.getInputStream()),
                 readStream(process.getErrorStream()), process.exitValue(), false);
+    }
+
+    /** 终止进程树：先子孙后自身，确保管道写端全部关闭。 */
+    private static void terminate(Process process) {
+        process.descendants().forEach(ProcessHandle::destroyForcibly);
+        process.destroy();
+        process.destroyForcibly();
     }
 
     private String readStream(java.io.InputStream stream) {
