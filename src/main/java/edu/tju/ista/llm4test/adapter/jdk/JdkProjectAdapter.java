@@ -138,7 +138,23 @@ public class JdkProjectAdapter implements ProjectAdapter {
     @Override
     public File resolveTestFile(String relativeTestPath) {
         // 自 TestSuite.getTestFiles 迁移：jdkTestPath + "/jdk/" + 相对路径
-        return new File(GlobalConfig.getJdkTestPath() + "/jdk/" + relativeTestPath);
+        // （等价于 resolveSuitePath：suiteBasePath 默认与配置值均为 jdk17u-dev/test/jdk/）
+        return new File(resolveSuitePath(relativeTestPath));
+    }
+
+    /** 套件根：jdk17u-dev/test/jdk/（发现结果与通过列表都相对于它） */
+    @Override
+    public String suiteRoot() {
+        return GlobalConfig.getSuiteBasePath();
+    }
+
+    /**
+     * 复制根比套件根高一层：整个 jdk17u-dev/test 被复制进 testDir，
+     * 因此工作区里的路径形如 test/jdk/java/lang/Byte/Decode.java。
+     */
+    @Override
+    public String workspaceSourceRoot() {
+        return GlobalConfig.getJdkTestPath();
     }
 
     // ==================== 测试执行（自 TestExecutor 迁移） ====================

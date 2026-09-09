@@ -94,6 +94,12 @@ public class MavenProjectAdapter implements ProjectAdapter {
         return testSourceRoot.resolve(relativeTestPath).toFile();
     }
 
+    /** 套件根即测试源根：src/test/java（发现结果与通过列表都相对于它） */
+    @Override
+    public String suiteRoot() {
+        return testSourceRoot.toString();
+    }
+
     private Path resolveScanBase(String rootPath) {
         if (rootPath == null || rootPath.isBlank() || ".".equals(rootPath.trim())) {
             return testSourceRoot;

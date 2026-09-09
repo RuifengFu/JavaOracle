@@ -130,7 +130,7 @@ public class TestSuite {
                     .filter(line -> !line.isEmpty() && !line.startsWith("#"))
                     // 将每个路径处理任务提交到TestTask线程池中并行执行
                     .map(testCasePath -> concurrentManager.submitTestTask(() -> {
-                        File testFile = new File(GlobalConfig.getJdkTestPath() + "/jdk/" + testCasePath);
+                        File testFile = adapter.resolveTestFile(testCasePath);
                         if (isValidTestFile(testFile)) {
                             TestCase testCase = testCaseFactory.apply(testFile);
                             // 关键：在缓存加载模式下，我们假设它已经成功，直接设置结果
@@ -210,14 +210,13 @@ public class TestSuite {
      */
     public void saveSuccessfulTestCasesToCache(List<TestCase> successfulTestCases) {
         try {
-            String jdkTestPath = GlobalConfig.getJdkTestPath() + "/jdk/";
-            Path jdkTestRoot = Paths.get(jdkTestPath).toAbsolutePath().normalize();
+            Path suiteRootPath = Paths.get(adapter.suiteRoot()).toAbsolutePath().normalize();
             List<String> testCasePaths = successfulTestCases.stream()
                     .map(testCase -> {
                         Path fullPath = testCase.getOriginFile().toPath().toAbsolutePath().normalize();
                         Path relPath;
                         try {
-                            relPath = jdkTestRoot.relativize(fullPath);
+                            relPath = suiteRootPath.relativize(fullPath);
                         } catch (Exception e) {
                             relPath = fullPath.getFileName();
                         }
@@ -238,12 +237,11 @@ public class TestSuite {
      */
     public synchronized void appendTestCaseToCache(TestCase testCase) {
         try {
-            String jdkTestPath = GlobalConfig.getJdkTestPath() + "/jdk/";
-            Path jdkTestRoot = Paths.get(jdkTestPath).toAbsolutePath().normalize();
+            Path suiteRootPath = Paths.get(adapter.suiteRoot()).toAbsolutePath().normalize();
             Path fullPath = testCase.getOriginFile().toPath().toAbsolutePath().normalize();
             Path relPath;
             try {
-                relPath = jdkTestRoot.relativize(fullPath);
+                relPath = suiteRootPath.relativize(fullPath);
             } catch (Exception e) {
                 relPath = fullPath.getFileName();
             }
@@ -282,15 +280,14 @@ public class TestSuite {
      */
     public void deduplicateAndSaveCache(List<TestCase> newSuccessfulCases) {
         try {
-            String jdkTestPath = GlobalConfig.getJdkTestPath() + "/jdk/";
-            Path jdkTestRoot = Paths.get(jdkTestPath).toAbsolutePath().normalize();
+            Path suiteRootPath = Paths.get(adapter.suiteRoot()).toAbsolutePath().normalize();
             Set<String> allPaths = new HashSet<>(loadCachedTestCasePaths());
 
             for (TestCase tc : newSuccessfulCases) {
                 Path fullPath = tc.getOriginFile().toPath().toAbsolutePath().normalize();
                 Path relPath;
                 try {
-                    relPath = jdkTestRoot.relativize(fullPath);
+                    relPath = suiteRootPath.relativize(fullPath);
                 } catch (Exception e) {
                     relPath = fullPath.getFileName();
                 }

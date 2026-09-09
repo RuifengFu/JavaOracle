@@ -51,6 +51,74 @@ public interface ProjectAdapter {
         }
     }
 
+    // ==================== 工作区与路径模型 ====================
+
+    /**
+     * 套件根：{@link #discoverTests} 返回的相对路径、以及通过列表（缓存文件）中的条目
+     * 都相对于它；{@code CommandHandler} 也用它给用户输入的路径加前缀。
+     * <p>
+     * JDK: {@code jdk17u-dev/test/jdk/}；Maven: {@code <repo>/src/test/java}。
+     */
+    String suiteRoot();
+
+    /**
+     * 把用户输入的目标路径（execute/generate 的参数）拼到套件根之下。
+     * <p>
+     * join 逻辑集中在这里：各适配器的 {@link #suiteRoot} 是否带尾斜杠不一致
+     * （JDK 的 {@code suiteBasePath} 带、Maven 的测试源根不带），调用方不该关心。
+     * 绝对路径与空输入原样透传。
+     */
+    default String resolveSuitePath(String userPath) {
+        if (userPath == null || userPath.isBlank()) {
+            return suiteRoot();
+        }
+        java.nio.file.Path p = java.nio.file.Path.of(userPath);
+        if (p.isAbsolute()) {
+            return userPath;
+        }
+        return java.nio.file.Path.of(suiteRoot()).resolve(userPath).toString();
+    }
+
+    /**
+     * 工作区源根：整棵被复制到 {@code testDir} 的树。
+     * 增强/修复流程会改写用例，因此执行的是可写副本而不是上游检出。
+     * <p>
+     * 默认与 {@link #suiteRoot} 相同；JDK 的复制根比套件根高一层（{@code jdk17u-dev/test}，
+     * 含 {@code jdk/} 子目录），故单独覆盖。
+     */
+    default String workspaceSourceRoot() {
+        return suiteRoot();
+    }
+
+    /**
+     * 准备可写工作区：把 {@link #workspaceSourceRoot} 整棵复制到 {@code resultDir}。
+     * 无需副本的适配器可覆盖为空实现。
+     */
+    default void prepareWorkspace(File resultDir) {
+        new edu.tju.ista.llm4test.utils.FileProcessor(resultDir)
+                .copyTestFiles(java.nio.file.Path.of(workspaceSourceRoot()));
+    }
+
+    /**
+     * 原始用例文件 → 工作区副本路径。
+     * 不在 {@link #workspaceSourceRoot} 之下时原样返回（与历史的字符串替换语义一致）。
+     */
+    default File toWorkspaceFile(File originFile) {
+        try {
+            java.nio.file.Path srcRoot = java.nio.file.Path.of(workspaceSourceRoot())
+                    .toAbsolutePath().normalize();
+            java.nio.file.Path origin = originFile.toPath().toAbsolutePath().normalize();
+            java.nio.file.Path rel = srcRoot.relativize(origin);
+            if (rel.toString().isEmpty() || rel.startsWith("..")) {
+                return originFile;
+            }
+            return java.nio.file.Path.of(GlobalConfig.getTestDir())
+                    .toAbsolutePath().normalize().resolve(rel).toFile();
+        } catch (Exception e) {
+            return originFile;
+        }
+    }
+
     // ==================== 测试执行 ====================
 
     /**
