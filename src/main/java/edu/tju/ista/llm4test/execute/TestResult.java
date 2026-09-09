@@ -35,11 +35,7 @@ public class TestResult {
         this.jtregResult = jtregResult;
         // 分类码表由当前 harness 提供（JDK 模式取值与迁移前逐字一致）
         kind = AdapterRegistry.get().classifyExitValue(jtregResult.exitValue);
-        if (jtregResult.toString().contains("Compilation failed")) {
-            compilationFailed = true;
-        } else {
-            compilationFailed = false;
-        }
+        compilationFailed = jtregResult.isCompilationFailed();
     }
 
     public boolean isDiff() {
@@ -104,7 +100,7 @@ public class TestResult {
             this.jtregResult = results.values().stream().findFirst().orElse(null);
             kind = AdapterRegistry.get().classifyExitValue(list.get(0));
         }
-        compilationFailed = results.values().stream().anyMatch(result -> result.toString().contains("Compilation failed"));
+        compilationFailed = results.values().stream().anyMatch(TestOutput::isCompilationFailed);
     }
 
     public void setKind(TestResultKind kind) {

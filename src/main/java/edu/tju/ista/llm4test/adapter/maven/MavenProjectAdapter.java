@@ -43,12 +43,13 @@ public class MavenProjectAdapter implements ProjectAdapter {
 
     private static final long EXECUTION_TIMEOUT_MS = 600_000;   // 单次测试执行上限
     private static final long BUILD_TIMEOUT_MS = 600_000;       // mvn 构建上限
-    private static final String WORKSPACE_DIR = ".llm4test";
 
     private final String projectRoot;
     private final Path testSourceRoot;
     private final String junitConsoleJar;
     private volatile String cachedClasspath;
+    /** 缓存对应的 pom 修改时间：进程内也要能感知 pom 变更（适配器是单例缓存的） */
+    private volatile long cachedPomModified;
 
     /** JUnit5/JUnit4 测试注解标记（发现用，足够识别测试类） */
     private static final List<String> TEST_MARKERS = List.of(
@@ -270,12 +271,16 @@ public class MavenProjectAdapter implements ProjectAdapter {
      * test-compile 失败（仓库自带测试编译不过）时降级为 compile，仅用主代码classpath。
      */
     String ensureWorkspace() throws Exception {
-        if (cachedClasspath != null) {
-            return cachedClasspath;
-        }
         Path root = Paths.get(projectRoot).toAbsolutePath().normalize();
         Path pom = root.resolve("pom.xml");
-        Path marker = root.resolve(WORKSPACE_DIR).resolve("classpath.txt");
+        long pomModified = Files.exists(pom) ? Files.getLastModifiedTime(pom).toMillis() : 0L;
+
+        String cached = cachedClasspath;
+        if (cached != null && pomModified == cachedPomModified) {
+            return cached;
+        }
+
+        Path marker = workspaceDir().resolve("classpath.txt");
         Path classes = root.resolve("target/classes");
         Path testClasses = root.resolve("target/test-classes");
 
@@ -284,7 +289,7 @@ public class MavenProjectAdapter implements ProjectAdapter {
                 || Files.getLastModifiedTime(pom).toMillis() > Files.getLastModifiedTime(marker).toMillis();
         if (stale) {
             LoggerUtil.logExec(Level.INFO, "Maven workspace构建: mvn test-compile + dependency:build-classpath");
-            Files.createDirectories(root.resolve(WORKSPACE_DIR));
+            Files.createDirectories(marker.getParent());
             List<String> baseCommand = List.of(
                     "mvn", "-q", "-f", pom.toString(),
                     "dependency:build-classpath",
@@ -314,8 +319,24 @@ public class MavenProjectAdapter implements ProjectAdapter {
         if (!deps.isEmpty()) cp.append(File.pathSeparator).append(deps);
 
         cachedClasspath = cp.toString();
+        cachedPomModified = pomModified;
         LoggerUtil.logExec(Level.INFO, "Maven workspace就绪: classpath=" + cachedClasspath);
         return cachedClasspath;
+    }
+
+    /**
+     * 本仓库的工作区目录：{@code <maven.workspaceDir>/<仓库名>-<路径hash>}。
+     * <p>
+     * 落在本项目工作目录下（而不是被测仓库里）——往别人的检出写文件会污染其
+     * 工作树；按路径 hash 隔离则保证同时对多个仓库工作时缓存不串。
+     */
+    private Path workspaceDir() {
+        Path root = Paths.get(projectRoot).toAbsolutePath().normalize();
+        Path name = root.getFileName();
+        String repoName = name != null ? name.toString() : "repo";
+        String hash = Integer.toHexString(root.toString().hashCode());
+        return Paths.get(GlobalConfig.getMavenWorkspaceDir(), repoName + "-" + hash)
+                .toAbsolutePath().normalize();
     }
 
     private static String truncate(String s, int max) {

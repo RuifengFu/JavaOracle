@@ -18,6 +18,15 @@ public class TestOutput {
     private String env;
 
     /**
+     * 是否编译失败。
+     * <p>
+     * 判定文本与历史一致（{@link #getSimpleOutput()}），但结果在构造时算一次并
+     * 作为显式字段暴露：原先由 {@code TestResult} 对 {@code toString()} 做子串
+     * 匹配，依赖「testout 为空 → 回退原始 stdout」这个副作用才能保住标记。
+     */
+    private final boolean compilationFailed;
+
+    /**
      * 用当前适配器的解析器构造。
      * <p>
      * 原先这里写死 {@code new JtregOutputParser()}，核心层因此反向依赖
@@ -40,6 +49,12 @@ public class TestOutput {
         var parsed = parser.parse(stdout, stderr);
         this.testout = parsed.testout();
         this.testerr = parsed.testerr();
+        this.compilationFailed = getSimpleOutput().contains("Compilation failed");
+    }
+
+    /** 是否编译失败（构造时判定，见字段注释） */
+    public boolean isCompilationFailed() {
+        return compilationFailed;
     }
 
     public String getEnv() {

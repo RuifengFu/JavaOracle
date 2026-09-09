@@ -35,6 +35,7 @@ public class GlobalConfig {
     private static final String DEFAULT_TEST_DIR = "test";
     private static final String DEFAULT_BASE_DOC_PATH = "JavaDoc/docs/api/java.base";
     private static final String DEFAULT_JDK_TEST_PATH = "jdk17u-dev/test";
+    private static final String DEFAULT_MAVEN_WORKSPACE_DIR = ".llm4test";
     private static final String DEFAULT_JDK_SOURCE_PATH = "jdk17u-dev/src";
     private static final String DEFAULT_BUG_REPORT_DIR = "BugReport";
     private static final String DEFAULT_LOG_FILE = "result.log";
@@ -120,6 +121,14 @@ public class GlobalConfig {
         return ConfigUtil.getOrDefault("baseDocPath", DEFAULT_BASE_DOC_PATH);
     }
     
+    /**
+     * Maven模式的工作区根目录（classpath 缓存等）。
+     * 放在本项目工作目录下而不是被测仓库里，避免污染别人的检出。
+     */
+    public static String getMavenWorkspaceDir() {
+        return ConfigUtil.getOrDefault("maven.workspaceDir", DEFAULT_MAVEN_WORKSPACE_DIR);
+    }
+
     /**
      * 获取JDK测试路径
      */
