@@ -30,6 +30,11 @@ public final class SourceTreeIndex {
     private final Map<String, List<Path>> packageDirs = new HashMap<>();
     private volatile boolean built = false;
     private final Path root;
+    /**
+     * 是否 JDK 模块布局（{@code <module>/<platform>/classes/<包路径>}）。
+     * 平铺布局（Maven 仓库的 src/main/java）下根目录本身就是包根。
+     */
+    private boolean jdkLayout = false;
 
     private SourceTreeIndex(Path root) {
         this.root = root;
@@ -62,16 +67,12 @@ public final class SourceTreeIndex {
             return;
         }
         long start = System.currentTimeMillis();
+        jdkLayout = detectJdkLayout(root);
         try {
             Files.walkFileTree(root, new SimpleFileVisitor<>() {
                 @Override
                 public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-                    String name = dir.getFileName() == null ? "" : dir.getFileName().toString();
-                    if (name.equals(".git") || name.equals("test") || name.equals("doc")
-                            || name.equals("target") || name.equals("build")) {
-                        return FileVisitResult.SKIP_SUBTREE;
-                    }
-                    return FileVisitResult.CONTINUE;
+                    return shouldSkip(dir) ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
                 }
 
                 @Override
@@ -113,25 +114,91 @@ public final class SourceTreeIndex {
     }
 
     /**
+     * 目录过滤。
+     * <p>
+     * 只跳过 {@code .git}；{@code test}/{@code doc}/{@code target}/{@code build}
+     * 仅在 JDK 布局的**包根之外**（相对深度 ≤2，即模块/平台层）才跳过。
+     * <p>
+     * 历史实现按名字无条件跳过，两种布局都受害：JDK 侧
+     * {@code jdk.compiler/share/classes/jdk/internal/shellsupport/doc} 与
+     * {@code jdk.jfr/share/classes/jdk/jfr/internal/test} 是真实包，被整棵丢掉；
+     * 平铺布局下任何名为 test/doc 的包同样会消失。
+     */
+    private boolean shouldSkip(Path dir) {
+        Path fileName = dir.getFileName();
+        if (fileName == null) {
+            return false;
+        }
+        String name = fileName.toString();
+        if (name.equals(".git")) {
+            return true;
+        }
+        if (!jdkLayout) {
+            // 平铺布局：根目录即包根，任何子目录都是包，不能按名字丢
+            return false;
+        }
+        boolean nonApiDirName = name.equals("test") || name.equals("doc")
+                || name.equals("target") || name.equals("build");
+        return nonApiDirName && relativeDepth(dir) <= 2;
+    }
+
+    /** 相对索引根的层数（根本身为 0） */
+    private int relativeDepth(Path dir) {
+        try {
+            return root.relativize(dir.toAbsolutePath().normalize()).getNameCount();
+        } catch (Exception e) {
+            return Integer.MAX_VALUE;
+        }
+    }
+
+    /**
+     * 探测 JDK 模块布局：根下存在 {@code <模块>/<平台>/classes} 这样的目录，
+     * 且模块名带点（{@code java.base}、{@code jdk.compiler}、{@code jdk.jfr}）。
+     * <p>
+     * 「带点」是关键判据：Java 包名不允许含点，因此平铺布局的包根永远不会被
+     * 误判成 JDK 布局。只要求「任意两层之下有 classes 目录」是不够的——平铺仓库里
+     * {@code com/example/classes/} 完全合法，会把包名叫 classes 的情况又带回来。
+     */
+    private static boolean detectJdkLayout(Path root) {
+        try (java.util.stream.Stream<Path> modules = Files.list(root)) {
+            return modules
+                    .filter(Files::isDirectory)
+                    .filter(module -> isModuleName(module.getFileName()))
+                    .anyMatch(module -> {
+                        try (java.util.stream.Stream<Path> platforms = Files.list(module)) {
+                            return platforms.filter(Files::isDirectory)
+                                    .anyMatch(platform -> Files.isDirectory(platform.resolve("classes")));
+                        } catch (IOException e) {
+                            return false;
+                        }
+                    });
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    /** JDK 模块目录名带点，普通包目录名不可能带点 */
+    private static boolean isModuleName(Path name) {
+        return name != null && name.toString().contains(".");
+    }
+
+    /**
      * 计算文件的索引键：
-     * JDK布局（src/&lt;module&gt;/&lt;platform&gt;/classes/&lt;包路径&gt;）取 classes 后的包相对路径；
-     * 平铺布局（Maven等仓库的 src/main/java 根即包根）取相对根路径。
+     * JDK布局取 {@code classes} 之后的包相对路径；平铺布局取相对根路径。
+     * <p>
+     * 不再用 {@code lastIndexOf("/classes/")}：包目录本身叫 {@code classes}
+     * （如 {@code com/example/classes/Foo.java}）时会把包路径截错。改为只认
+     * 相对深度 3 上的 {@code classes} 段，与 JDK 的实际布局一一对应。
      */
     private String keyOf(Path file) {
-        String s = file.toString();
-        int idx = s.lastIndexOf("/classes/");
-        if (idx >= 0) {
-            return s.substring(idx + "/classes/".length());
-        }
-        // Windows风格兜底
-        idx = s.lastIndexOf("\\classes\\");
-        if (idx >= 0) {
-            return s.substring(idx + "\\classes\\".length()).replace('\\', '/');
-        }
-        // 平铺布局：相对根目录
         try {
-            String rel = root.relativize(file.toAbsolutePath().normalize()).toString();
-            return rel.replace('\\', '/');
+            Path rel = root.relativize(file.toAbsolutePath().normalize());
+            if (jdkLayout && rel.getNameCount() > 3
+                    && isModuleName(rel.getName(0))
+                    && rel.getName(2).toString().equals("classes")) {
+                return rel.subpath(3, rel.getNameCount()).toString().replace('\\', '/');
+            }
+            return rel.toString().replace('\\', '/');
         } catch (Exception e) {
             return null;
         }

@@ -59,6 +59,50 @@ class SourceTreeIndexTest {
     }
 
     @Test
+    void realPackagesNamedTestOrDocAreIndexed() throws Exception {
+        // JDK 里真有这样的包：jdk.internal.shellsupport.doc、jdk.jfr.internal.test
+        Path root = tempDir.resolve("src-with-doc-pkgs");
+        Path docPkg = root.resolve("jdk.compiler/share/classes/jdk/internal/shellsupport/doc/JavadocHelper.java");
+        Path testPkg = root.resolve("jdk.jfr/share/classes/jdk/jfr/internal/test/WhiteBox.java");
+        // 模块层的非API目录，仍应跳过
+        Path moduleTest = root.resolve("jdk.hotspot.agent/test/Sanity.java");
+        for (Path f : List.of(docPkg, testPkg, moduleTest)) {
+            Files.createDirectories(f.getParent());
+            Files.writeString(f, "public class X {}");
+        }
+
+        SourceTreeIndex idx = SourceTreeIndex.getInstance(root.toString());
+
+        assertNotNull(idx.find("jdk/internal/shellsupport/doc/JavadocHelper.java"),
+                "包名恰好叫 doc 的真实包不该被整棵丢掉");
+        assertNotNull(idx.find("jdk/jfr/internal/test/WhiteBox.java"),
+                "包名恰好叫 test 的真实包不该被整棵丢掉");
+        assertNull(idx.find("jdk.hotspot.agent/test/Sanity.java"),
+                "模块层的 test 目录（包根之外）仍应跳过");
+    }
+
+    @Test
+    void flatRootIndexesPackagesNamedTestAndClasses() throws Exception {
+        // 平铺布局下根即包根：任何名字都是合法包名，不能按名字过滤
+        Path root = tempDir.resolve("flat-java");
+        Path testPkg = root.resolve("com/example/test/Fixtures.java");
+        Path classesPkg = root.resolve("com/example/classes/Loader.java");
+        for (Path f : List.of(testPkg, classesPkg)) {
+            Files.createDirectories(f.getParent());
+            Files.writeString(f, "public class X {}");
+        }
+
+        SourceTreeIndex idx = SourceTreeIndex.getInstance(root.toString());
+
+        assertNotNull(idx.find("com/example/test/Fixtures.java"), "名为 test 的包应被索引");
+        // 关键：历史实现用 lastIndexOf("/classes/") 截键，会把这个键错算成 Loader.java
+        assertEquals(classesPkg.toAbsolutePath(),
+                idx.find("com/example/classes/Loader.java").toAbsolutePath(),
+                "包目录恰好叫 classes 时，键不能被截断");
+        assertNull(idx.find("Loader.java"), "不应产生被截断的错误键");
+    }
+
+    @Test
     void shareClassesPreferredOverPlatform() throws Exception {
         Path root = tempDir.resolve("src");
         Path share = root.resolve("java.base/share/classes/java/lang/Dup.java");
