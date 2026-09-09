@@ -13,7 +13,7 @@ ${hypothesis}
 <Requirement>
 1. Please ensure the correctness of the test case, including all import statements, and avoid common syntax errors.
 2. Please put the complete test case in the last Java code block.
-3. You must add Jtreg-style comment to make this testcase can be executed by Jtreg, main is the default entry of test case.
+3. You must add ${harness.name}-style comment to make this testcase can be executed by ${harness.name}, main is the default entry of test case.
 4. Note that the class name is the name of the hypothesis, such as H1, H2, etc.
 5. The test case should be designed to validate the hypothesis. If the behavior described in the hypothesis is observed, the test should pass. If the behavior is not observed, the test should fail explicitly, for example by throwing an exception with a clear failure message (e.g., throw new RuntimeException("Hypothesis was not confirmed.")).
 6. You should not use any external libraries or frameworks, such as JUnit, TestNG, etc. You can't use any testing framework, just use plain Java code.

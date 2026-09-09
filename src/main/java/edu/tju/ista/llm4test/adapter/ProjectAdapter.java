@@ -6,6 +6,7 @@ import edu.tju.ista.llm4test.execute.TestResult;
 
 import java.io.File;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 目标项目适配器（SPI）：封装与"被测项目形态"相关的全部细节——
@@ -57,6 +58,36 @@ public interface ProjectAdapter {
      * JDK实现为多JDK差分执行；其他实现为单环境执行。
      */
     TestResult executeTest(TestCase testCase);
+
+    // ==================== harness 说明（注入prompt模板） ====================
+
+    /**
+     * harness 指令片段：由 {@code PromptGen} 自动注入模板的 {@code ${harness.*}} 变量，
+     * 使增强/修复/最小化等提示词与具体测试框架解耦。
+     * <p>
+     * 约定键：
+     * <ul>
+     *   <li>{@code name} —— 框架名（如 jtreg / JUnit 5）</li>
+     *   <li>{@code tagList} —— 必须保留的标记列表文案</li>
+     *   <li>{@code tagExample} —— 标记示例代码块</li>
+     *   <li>{@code executeToolName} —— 执行工具名（LLM工具调用）</li>
+     * </ul>
+     */
+    default Map<String, String> harnessDirectives() {
+        // 默认按 JUnit 5 约定
+        Map<String, String> directives = new java.util.HashMap<>();
+        directives.put("name", "JUnit 5");
+        directives.put("tagList", "(`@Test`, `@BeforeEach`, `@DisplayName`, ...)");
+        directives.put("tagExample", """
+                ```
+                @Test
+                void enhancedBehavior() {
+                    // assertions
+                }
+                ```""");
+        directives.put("executeToolName", "execute_test");
+        return directives;
+    }
 
     // ==================== 环境 ====================
 

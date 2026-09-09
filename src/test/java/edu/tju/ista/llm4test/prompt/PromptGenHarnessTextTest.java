@@ -66,6 +66,31 @@ class PromptGenHarnessTextTest {
     }
 
     @Test
+    void harnessVariablesInjectedFromAdapter() throws Exception {
+        // P1参数化后：harness.* 变量由适配器注入，JDK模式下渲染出原始文案
+        String specTest = PromptGen.generatePrompt("SpecTest", baseModel());
+        assertTrue(specTest.contains("4. **jtreg Format**"), "应渲染harness.name标题");
+        assertTrue(specTest.contains("@bug 4160406 4705734 4707389 6358355 7032154"),
+                "应渲染harness.tagExample: " + preview(specTest));
+
+        String fix = PromptGen.generatePrompt("FixTestCase", baseModel());
+        assertTrue(fix.contains("Preserve the `jtreg` format comments"));
+
+        String plan = PromptGen.generatePrompt("TestCaseMinimizationPlan", baseModel());
+        assertTrue(plan.contains("`jtreg_execute`"), "应渲染harness.executeToolName");
+        assertTrue(plan.contains("\"tool\": \"jtreg_execute\","));
+
+        String reduce = PromptGen.generatePrompt("TestCaseMinimizationReduce", baseModel());
+        assertTrue(reduce.contains("jtreg tags(`@test`, `@bug`, `@summary`, `@run`, `@build`, `@library`, ...)"),
+                "应渲染harness.name+tagList");
+
+        String enhance = PromptGen.generatePrompt("EnhanceTestCase", baseModel());
+        assertTrue(enhance.contains("`${harness.name}` tags".replace("${harness.name}", "jtreg"))
+                || enhance.contains("`jtreg` tags"));
+        assertFalse(enhance.contains("${harness."), "不应残留未替换变量");
+    }
+
+    @Test
     void fixTestCaseContainsJtregConstraints() throws Exception {
         String prompt = PromptGen.generatePrompt("FixTestCase", baseModel());
         assertNotNull(prompt);
@@ -101,5 +126,9 @@ class PromptGenHarnessTextTest {
             assertDoesNotThrow(() -> PromptGen.generatePrompt(name, baseModel()),
                     "模板应可渲染: " + name);
         }
+    }
+
+    private static String preview(String s) {
+        return s.substring(0, Math.min(400, s.length()));
     }
 }

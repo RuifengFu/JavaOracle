@@ -50,6 +50,26 @@ public class JdkProjectAdapter implements ProjectAdapter {
         return "jdk";
     }
 
+    /**
+     * jtreg harness 指令片段（与历史模板硬编码文案一致）
+     */
+    @Override
+    public Map<String, String> harnessDirectives() {
+        Map<String, String> directives = new HashMap<>();
+        directives.put("name", "jtreg");
+        directives.put("tagList", "(`@test`, `@bug`, `@summary`, `@run`, `@build`, `@library`, ...)");
+        directives.put("tagExample", """
+                ```
+                /*
+                 * @test
+                 * @bug 4160406 4705734 4707389 6358355 7032154
+                 * @summary Tests for Float.parseFloat method
+                 */
+                ```""");
+        directives.put("executeToolName", "jtreg_execute");
+        return directives;
+    }
+
     // ==================== 测试发现（自 TestSuite 迁移） ====================
 
     @Override

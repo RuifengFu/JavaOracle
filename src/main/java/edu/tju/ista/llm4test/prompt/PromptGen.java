@@ -121,6 +121,8 @@ public class PromptGen {
         dataModel.put("THINKING_CLAUDE_PROMPT", THINKING_CLAUDE_PROMPT);
         dataModel.put("THINKING_PROMPT", THINKING_PROMPT);
         dataModel.put("JMLExample", JMLExample);
+        // 注入当前适配器的harness指令（${harness.name}等），使模板与测试框架解耦
+        dataModel.put("harness", edu.tju.ista.llm4test.adapter.AdapterRegistry.get().harnessDirectives());
 
         // Fallback to simple string replacement if FreeMarker is not available
         if (CONFIGURATION == null) {

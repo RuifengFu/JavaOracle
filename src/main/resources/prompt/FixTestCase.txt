@@ -36,12 +36,8 @@ ${rootCause}
 3. You may add minimal debug output to gather more information, but keep it concise and relevant.
 4. Mark all modifications with the comment `// Fix`.
 5. If the issue is genuinely a JDK bug, respond with "JDK BUG" and no code.
-6. Preserve the `jtreg` format comments in the code:
-   /*
-    * @test
-    * @bug 4160406 4705734 4707389 6358355 7032154
-    * @summary Tests for Float.parseFloat method
-    */
+6. Preserve the `${harness.name}` format comments in the code:
+${harness.tagExample}
 7. Ensure the enhanced test case maintains its original purpose while being corrected.
 8. Return the entire modified test case in the code block, don't omit or collapse any part of the test case.
 </Requirements> 
