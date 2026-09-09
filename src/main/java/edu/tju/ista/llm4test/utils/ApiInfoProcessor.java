@@ -95,8 +95,8 @@ public class ApiInfoProcessor {
     }
 
     public ApiInfoProcessor(String baseDocPath) {
-        this.baseDocPath = baseDocPath;
-        this.docRootPath = baseDocPath != null ? Path.of(baseDocPath).getParent().toString() : null;
+        this.baseDocPath = blankToNull(baseDocPath);
+        this.docRootPath = docRootOf(baseDocPath);
         this.jdkSourcePath = null;
         this.defaultSourcePrefix = null;
         this.extractor = new APISignatureExtractor();
@@ -106,11 +106,29 @@ public class ApiInfoProcessor {
      * 支持JDK源码查找的构造函数
      */
     public ApiInfoProcessor(String baseDocPath, String jdkSourcePath, String defaultSourcePrefix) {
-        this.baseDocPath = baseDocPath;
-        this.docRootPath = baseDocPath != null ? Path.of(baseDocPath).getParent().toString() : null;
+        this.baseDocPath = blankToNull(baseDocPath);
+        this.docRootPath = docRootOf(baseDocPath);
         this.jdkSourcePath = jdkSourcePath;
         this.defaultSourcePrefix = defaultSourcePrefix;
         this.extractor = new APISignatureExtractor();
+    }
+
+    /**
+     * 推导文档搜索根目录（baseDocPath 的父目录）。
+     * baseDocPath 是可选配置（可留空），且可能是单段相对路径——两种情况下
+     * {@code Path.getParent()} 均为 null，此时返回 null，由调用方跳过 find 回退。
+     */
+    private static String docRootOf(String baseDocPath) {
+        if (baseDocPath == null || baseDocPath.isBlank()) {
+            return null;
+        }
+        Path parent = Path.of(baseDocPath).getParent();
+        return parent != null ? parent.toString() : null;
+    }
+
+    /** 空白配置值视为“未配置”（baseDocPath 为可选项）。 */
+    private static String blankToNull(String value) {
+        return (value == null || value.isBlank()) ? null : value;
     }
 
     /**
