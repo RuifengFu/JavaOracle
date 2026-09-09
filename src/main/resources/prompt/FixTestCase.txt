@@ -39,6 +39,10 @@ ${rootCause}
 6. Preserve the `${harness.name}` format comments in the code:
 ${harness.tagExample}
 7. Ensure the enhanced test case maintains its original purpose while being corrected.
-8. Emit the fixed test case by calling the `write_test_file` tool with the ENTIRE file (package, imports, every test method) - do not omit or collapse any part, and do not put the code in a markdown code block: only tool calls are read.
+8. Emit the fix by calling tools; do not put code in a markdown code block, only tool calls are
+   read. PREFER `edit_test_file`: a fix is usually a small, local change, and editing keeps the
+   rest of the file (license header, passing tests) untouched. old_str must be copied verbatim
+   and occur exactly once. Fall back to `write_test_file` with the ENTIRE file only if the change
+   is genuinely wholesale - then do not omit or collapse any part.
 9. Call the tool once per file. If the fix needs a helper or fixture class, put it in its own file with an additional call; classes without @Test are compiled as helpers only.
 </Requirements> 

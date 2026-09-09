@@ -7,6 +7,7 @@ import edu.tju.ista.llm4test.llm.OpenAI;
 import edu.tju.ista.llm4test.llm.TokenUsagePhase;
 import edu.tju.ista.llm4test.llm.TokenUsageTracker;
 import edu.tju.ista.llm4test.llm.tools.RootCauseOutputTool;
+import edu.tju.ista.llm4test.llm.tools.EditTestFileTool;
 import edu.tju.ista.llm4test.llm.tools.Tool;
 import edu.tju.ista.llm4test.llm.tools.WriteTestFileTool;
 import edu.tju.ista.llm4test.llm.tools.ToolResponse;
@@ -522,29 +523,40 @@ public class TestCase {
     private boolean writeFilesViaToolCall(String prompt, String stage) {
         java.nio.file.Path caseDir = file.toPath().toAbsolutePath().getParent();
         WriteTestFileTool writer = new WriteTestFileTool(caseDir);
+        EditTestFileTool editor = new EditTestFileTool(caseDir, file.getName());
 
+        // 两个工具都给：改一处就 edit（省额度、不动 license 头与无关用例），
+        // 整份重写或新建文件才 write。由模型自己选。
         OpenAI.ToolCallResult result = executeWithTokenContext(TokenUsagePhase.GENERATION,
                 () -> OpenAI.ThinkingModel.toolCallWithContent(
-                        prompt, List.of(writer), OpenAI.ToolCallRequirement.REQUIRED));
+                        prompt, List.of(editor, writer), OpenAI.ToolCallRequirement.REQUIRED));
 
         List<ToolCall> calls = result.toolCalls();
         if (calls == null || calls.isEmpty()) {
             return false;
         }
         for (ToolCall call : calls) {
-            if (!WriteTestFileTool.TOOL_NAME.equals(call.toolName)) {
+            ToolResponse<String> response;
+            if (WriteTestFileTool.TOOL_NAME.equals(call.toolName)) {
+                response = writer.execute(call.arguments);
+            } else if (EditTestFileTool.TOOL_NAME.equals(call.toolName)) {
+                response = editor.execute(call.arguments);
+            } else {
                 LoggerUtil.logExec(Level.WARNING, stage + " 收到未知工具调用，已忽略: " + call.toolName);
                 continue;
             }
-            ToolResponse<String> response = writer.execute(call.arguments);
             if (!response.isSuccess()) {
-                LoggerUtil.logExec(Level.WARNING, stage + " 写测试文件失败: " + response.getResult());
+                // 编辑失败（old_str 没命中/不唯一）不改文件，原样保留，交给下一轮
+                // 失败原因在 getMessage()；getResult() 在 failure 时是 null
+                LoggerUtil.logExec(Level.WARNING, stage + " 工具调用失败: " + response.getFailMessage());
             }
         }
-        if (!writer.wroteAnything()) {
+        if (!writer.wroteAnything() && !editor.editedAnything()) {
             return false;
         }
-        recordWrittenFiles(writer.getWrittenFiles());
+        if (writer.wroteAnything()) {
+            recordWrittenFiles(writer.getWrittenFiles());
+        }
         return true;
     }
 

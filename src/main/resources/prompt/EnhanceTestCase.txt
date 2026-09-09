@@ -106,8 +106,13 @@ You are encouraged to:
 2. Think about how this API interacts with Java's standard features
 3. Consider common programming patterns and potential misuse
 4. Suggest tests for API interaction scenarios you think are valuable
-5. Emit the result by calling the `write_test_file` tool. Do NOT put the code in a markdown
-   code block: only tool calls are read, and prose is ignored.
+5. Emit the result by calling tools. Do NOT put code in a markdown code block: only tool calls
+   are read, and prose is ignored.
+   - PREFER `edit_test_file` to splice your new tests into the existing file: it keeps the license
+     header and every untouched test byte-for-byte intact and costs far fewer output tokens than
+     restating the whole file. Call it once per edit.
+   - Use `write_test_file` when you are creating a NEW file (a helper/fixture class, or an extra
+     test class), or when the rewrite really is wholesale.
    - Call it once with the complete enhanced test class (whole file, including package and imports).
    - The file name is derived from the top-level type you declare, so declare it exactly as you
      want it saved. Keep the original test class name unless you have a reason to change it.
