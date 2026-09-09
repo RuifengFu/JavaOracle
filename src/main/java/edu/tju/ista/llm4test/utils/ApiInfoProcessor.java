@@ -111,6 +111,40 @@ public class ApiInfoProcessor {
         this.jdkSourcePath = jdkSourcePath;
         this.defaultSourcePrefix = defaultSourcePrefix;
         this.extractor = new APISignatureExtractor();
+        registerTargetSourceRoot(this.extractor, jdkSourcePath, defaultSourcePrefix);
+    }
+
+    /**
+     * 把被测项目的包根注册进符号解析器。
+     * <p>
+     * {@code APISignatureExtractor} 默认只有 {@code ReflectionTypeSolver}，它按
+     * <b>本进程自身的 classpath</b> 解析类型——因此 JDK 的 API 天然能解析，而第三方库
+     * （如 commons-lang 的 {@code StringUtils}）不在我们的 classpath 上，符号解析失败，
+     * 这些调用会被 {@code extractSignatures} 静默丢弃，整条「提取被测库 API」的链路失效。
+     * 注册源码根后可从源码解析这些类型。
+     * <p>
+     * 顺序上 {@code ReflectionTypeSolver} 在前，JDK 类型仍走反射，JDK 模式行为不变。
+     */
+    private static void registerTargetSourceRoot(APISignatureExtractor extractor,
+                                                 String sourcePath, String sourcePrefix) {
+        if (sourcePath == null || sourcePath.isBlank()) {
+            return;
+        }
+        // 包根 = 源码路径 + 布局前缀（JDK: java.base/share/classes；Maven 仓库: 空）
+        Path packageRoot = sourcePrefix == null || sourcePrefix.isBlank()
+                ? Path.of(sourcePath)
+                : Path.of(sourcePath, sourcePrefix);
+        if (!Files.isDirectory(packageRoot)) {
+            LoggerUtil.logExec(Level.FINE, "跳过符号解析源码根（不存在）: " + packageRoot);
+            return;
+        }
+        try {
+            extractor.addSourcePath(packageRoot.toString());
+            LoggerUtil.logExec(Level.FINE, "符号解析源码根已注册: " + packageRoot);
+        } catch (Exception e) {
+            // 解析器缺失只会退化为「解析不到该库的类型」，不应影响主流程
+            LoggerUtil.logExec(Level.WARNING, "注册符号解析源码根失败: " + packageRoot + " - " + e.getMessage());
+        }
     }
 
     /**
