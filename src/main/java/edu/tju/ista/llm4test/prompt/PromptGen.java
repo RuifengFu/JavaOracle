@@ -55,7 +55,6 @@ public class PromptGen {
             TEMPLATE_MAP.put("EnhanceTestCase", loadResourceAsString("/prompt/EnhanceTestCaseV3.txt"));
             TEMPLATE_MAP.put("ApiTest", loadResourceAsString("/prompt/ApiTest.txt"));
             TEMPLATE_MAP.put("FixTestCase", loadResourceAsString("/prompt/FixTestCase.txt"));
-            TEMPLATE_MAP.put("ApplyChange", loadResourceAsString("/prompt/ApplyChange.txt"));
             TEMPLATE_MAP.put("RootCause", loadResourceAsString("/prompt/RootCauseV1.txt"));
             TEMPLATE_MAP.put("jdk_doc_conformance_check", loadResourceAsString("/prompt/jdkDocConformanceCheck.txt"));
             
@@ -121,6 +120,8 @@ public class PromptGen {
         dataModel.put("THINKING_CLAUDE_PROMPT", THINKING_CLAUDE_PROMPT);
         dataModel.put("THINKING_PROMPT", THINKING_PROMPT);
         dataModel.put("JMLExample", JMLExample);
+        // 注入当前适配器的harness指令（${harness.name}等），使模板与测试框架解耦
+        dataModel.put("harness", edu.tju.ista.llm4test.adapter.AdapterRegistry.get().harnessDirectives());
 
         // Fallback to simple string replacement if FreeMarker is not available
         if (CONFIGURATION == null) {

@@ -36,12 +36,13 @@ ${rootCause}
 3. You may add minimal debug output to gather more information, but keep it concise and relevant.
 4. Mark all modifications with the comment `// Fix`.
 5. If the issue is genuinely a JDK bug, respond with "JDK BUG" and no code.
-6. Preserve the `jtreg` format comments in the code:
-   /*
-    * @test
-    * @bug 4160406 4705734 4707389 6358355 7032154
-    * @summary Tests for Float.parseFloat method
-    */
+6. Preserve the `${harness.name}` format comments in the code:
+${harness.tagExample}
 7. Ensure the enhanced test case maintains its original purpose while being corrected.
-8. Return the entire modified test case in the code block, don't omit or collapse any part of the test case.
+8. Emit the fix by calling tools; do not put code in a markdown code block, only tool calls are
+   read. PREFER `edit_test_file`: a fix is usually a small, local change, and editing keeps the
+   rest of the file (license header, passing tests) untouched. old_str must be copied verbatim
+   and occur exactly once. Fall back to `write_test_file` with the ENTIRE file only if the change
+   is genuinely wholesale - then do not omit or collapse any part.
+9. Call the tool once per file. If the fix needs a helper or fixture class, put it in its own file with an additional call; classes without @Test are compiled as helpers only.
 </Requirements> 

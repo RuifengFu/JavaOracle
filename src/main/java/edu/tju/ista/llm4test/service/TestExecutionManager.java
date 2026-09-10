@@ -1,5 +1,7 @@
 package edu.tju.ista.llm4test.service;
 
+import edu.tju.ista.llm4test.adapter.AdapterRegistry;
+import edu.tju.ista.llm4test.adapter.ProjectAdapter;
 import edu.tju.ista.llm4test.config.GlobalConfig;
 import edu.tju.ista.llm4test.execute.*;
 import edu.tju.ista.llm4test.llm.TokenUsageTracker;
@@ -33,6 +35,7 @@ public class TestExecutionManager {
     private final ApiInfoProcessor apiInfoProcessor;
     private final FileProcessor fileProcessor;
     private final TestSuite testSuite;
+    private final ProjectAdapter adapter;
 
 
     public TestExecutionManager(String jarPath, File resultDir, String baseDocPath, String suitePath) {
@@ -41,10 +44,11 @@ public class TestExecutionManager {
         // 使用配置文件创建支持多模块的ApiDocProcessor
         this.apiInfoProcessor = ApiInfoProcessor.fromConfig();
         this.fileProcessor = new FileProcessor(resultDir);
+        this.adapter = AdapterRegistry.get();
         this.testSuite = new TestSuite(suitePath);
-        
-        // 复制测试文件
-        fileProcessor.copyTestFiles(Path.of(GlobalConfig.getJdkTestPath()));
+
+        // 准备可写工作区（JDK: 复制 jdk17u-dev/test 整棵树；由适配器决定复制根）
+        adapter.prepareWorkspace(resultDir);
     }
 
     /**
@@ -93,12 +97,11 @@ public class TestExecutionManager {
         if (cachedPaths.isEmpty()) {
             remainingTestCases = allTestCases;
         } else {
-            String jdkTestPath = GlobalConfig.getJdkTestPath() + "/jdk/";
-            Path jdkTestRoot = Paths.get(jdkTestPath).toAbsolutePath().normalize();
+            Path suiteRoot = Paths.get(adapter.suiteRoot()).toAbsolutePath().normalize();
             remainingTestCases = allTestCases.stream()
                     .filter(tc -> {
                         try {
-                            String relPath = jdkTestRoot.relativize(tc.getOriginFile().toPath().toAbsolutePath().normalize())
+                            String relPath = suiteRoot.relativize(tc.getOriginFile().toPath().toAbsolutePath().normalize())
                                     .toString().replace('\\', '/');
                             boolean skip = cachedPaths.contains(relPath);
                             if (skip) {
@@ -230,8 +233,8 @@ public class TestExecutionManager {
         if (testCase.getResult() != null && testCase.getResult().getCompilationFailed()) {
             logMessage += " COMPILE_FAILED";
         }
-        if (testCase.getResult() != null && testCase.getResult().getJtregResult() != null) {
-            logMessage += " " + testCase.getResult().getJtregResult().exitValue;
+        if (testCase.getResult() != null && testCase.getResult().getHarnessResult() != null) {
+            logMessage += " " + testCase.getResult().getHarnessResult().exitValue;
         }
         LoggerUtil.logResult(Level.INFO, logMessage);
         
@@ -279,10 +282,10 @@ public class TestExecutionManager {
 
     /**
      * 将源文件路径转换为目标测试目录中的对应路径
-     * 例如：jdk17u-dev/test/java/lang/String/Test.java -> test/java/lang/String/Test.java
+     * 例如：jdk17u-dev/test/jdk/java/lang/Byte/Decode.java -> test/jdk/java/lang/Byte/Decode.java
      */
     private File getTargetFilePath(File originFile) {
-        return new File(originFile.getAbsolutePath().replace(GlobalConfig.getJdkTestPath(), GlobalConfig.getTestDir()));
+        return adapter.toWorkspaceFile(originFile);
     }
     
     /**

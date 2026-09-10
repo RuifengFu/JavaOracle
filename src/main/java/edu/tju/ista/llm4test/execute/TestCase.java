@@ -7,7 +7,11 @@ import edu.tju.ista.llm4test.llm.OpenAI;
 import edu.tju.ista.llm4test.llm.TokenUsagePhase;
 import edu.tju.ista.llm4test.llm.TokenUsageTracker;
 import edu.tju.ista.llm4test.llm.tools.RootCauseOutputTool;
+import edu.tju.ista.llm4test.llm.tools.EditTestFileTool;
 import edu.tju.ista.llm4test.llm.tools.Tool;
+import edu.tju.ista.llm4test.llm.tools.WriteTestFileTool;
+import edu.tju.ista.llm4test.llm.tools.ToolResponse;
+import edu.tju.ista.llm4test.llm.tools.ToolCall;
 import edu.tju.ista.llm4test.prompt.PromptGen;
 import edu.tju.ista.llm4test.utils.CodeExtractor;
 import edu.tju.ista.llm4test.utils.DebugUtils;
@@ -36,6 +40,11 @@ public class TestCase {
     private String apiDoc;
 
     public File file;
+    /**
+     * 同一用例的伴随文件（多文件用例）：辅助类、夹具、以及额外的测试类。
+     * 由 {@code write_test_file} 工具在增强/修复时记录，执行时与主文件一起编译。
+     */
+    private final List<File> companionFiles = new ArrayList<>();
     public TestResult result;
 
     public String verifyMessage = "";
@@ -255,11 +264,6 @@ public class TestCase {
     /**
      * 异步应用更改（LLM调用）
      */
-    public CompletableFuture<Void> applyChangeAsync(String change) {
-        return concurrentManager.submitLLMTask(() -> {
-            applyChange(change);
-        });
-    }
 
     private <T> T executeWithTokenContext(TokenUsagePhase phase, java.util.function.Supplier<T> action) {
         TokenUsageTracker.getInstance().setContext(this.name, phase);
@@ -438,6 +442,67 @@ public class TestCase {
         return testcase;
     }
 
+    /**
+     * 只有看起来是 Java 源码时才写回用例文件，否则保留原文件并返回 false。
+     * <p>
+     * LLM 的回复有两种会毁掉用例的情况，历史实现都直接写回、且无备份：
+     * <ul>
+     *   <li><b>正文为空</b>：推理模型把 completion 额度全花在 reasoning 上
+     *       （实测 deepseek-v4-flash 出现 19 次 completion=reasoning=8192、正文 0 字），
+     *       于是把**空串**写进 .java，用例直接消失</li>
+     *   <li><b>返回解释性文字</b>：拿到空用例的后续修复轮会回一段
+     *       「No original test case was supplied」之类的散文，又被原样写进 .java</li>
+     * </ul>
+     * 一旦发生，用例不可恢复，后面每一轮都在放大破坏。
+     */
+    /** 用例的全部源文件：主文件 + 伴随文件（多文件用例） */
+    public List<File> getAllSourceFiles() {
+        List<File> all = new ArrayList<>();
+        all.add(file);
+        for (File companion : companionFiles) {
+            if (!companion.equals(file)) {
+                all.add(companion);
+            }
+        }
+        return all;
+    }
+
+    /** 记录本轮 LLM 写出的文件；主文件之外的都算伴随文件 */
+    public void recordWrittenFiles(List<File> written) {
+        companionFiles.clear();
+        for (File f : written) {
+            if (!f.equals(file)) {
+                companionFiles.add(f);
+            }
+        }
+        if (!companionFiles.isEmpty()) {
+            LoggerUtil.logExec(Level.INFO, "多文件用例 " + name + " 伴随文件: " + companionFiles);
+        }
+    }
+
+    public List<File> getCompanionFiles() {
+        return List.copyOf(companionFiles);
+    }
+
+    public boolean writeSourceIfValid(String candidate, String stage) {
+        if (candidate == null || candidate.isBlank()) {
+            LoggerUtil.logExec(Level.WARNING, stage + " 返回空内容，保留原用例不改写: " + file);
+            return false;
+        }
+        // Java 测试文件必然含类型声明；只有解释性文字时不会有
+        boolean hasTypeDeclaration = candidate.contains("class ")
+                || candidate.contains("interface ")
+                || candidate.contains("enum ")
+                || candidate.contains("record ");
+        if (!hasTypeDeclaration) {
+            LoggerUtil.logExec(Level.WARNING, stage + " 返回的不是 Java 源码，保留原用例不改写: " + file
+                    + "\n内容前 200 字: " + candidate.substring(0, Math.min(200, candidate.length())));
+            return false;
+        }
+        writeTestCaseToFile(candidate);
+        return true;
+    }
+
     public void writeTestCaseToFile(String content) {
         try {
             Files.writeString(file.toPath(), content);
@@ -445,6 +510,54 @@ public class TestCase {
             LoggerUtil.logExec(Level.SEVERE, "Writing test case to file failed: " + file + "\n" + e.getMessage());
             e.printStackTrace();
         }
+    }
+
+    /**
+     * 用 tool call 让模型直接把文件写出来，返回是否真的写了东西。enhance 与 fix 共用。
+     * <p>
+     * 相比旧的「把完整用例放最后一个 java 代码块里」约定：参数是结构化的，要么带着
+     * content 到达、要么没到达，不存在「抠出空串/散文再写进 .java」的中间态；
+     * {@code REQUIRED} 会在模型没发工具调用时自动重试。模型在一次回复里调多次就是
+     * 多文件用例——辅助类只参与编译，带 {@code @Test} 的都会被执行。
+     */
+    private boolean writeFilesViaToolCall(String prompt, String stage) {
+        java.nio.file.Path caseDir = file.toPath().toAbsolutePath().getParent();
+        WriteTestFileTool writer = new WriteTestFileTool(caseDir);
+        EditTestFileTool editor = new EditTestFileTool(caseDir, file.getName());
+
+        // 两个工具都给：改一处就 edit（省额度、不动 license 头与无关用例），
+        // 整份重写或新建文件才 write。由模型自己选。
+        OpenAI.ToolCallResult result = executeWithTokenContext(TokenUsagePhase.GENERATION,
+                () -> OpenAI.ThinkingModel.toolCallWithContent(
+                        prompt, List.of(editor, writer), OpenAI.ToolCallRequirement.REQUIRED));
+
+        List<ToolCall> calls = result.toolCalls();
+        if (calls == null || calls.isEmpty()) {
+            return false;
+        }
+        for (ToolCall call : calls) {
+            ToolResponse<String> response;
+            if (WriteTestFileTool.TOOL_NAME.equals(call.toolName)) {
+                response = writer.execute(call.arguments);
+            } else if (EditTestFileTool.TOOL_NAME.equals(call.toolName)) {
+                response = editor.execute(call.arguments);
+            } else {
+                LoggerUtil.logExec(Level.WARNING, stage + " 收到未知工具调用，已忽略: " + call.toolName);
+                continue;
+            }
+            if (!response.isSuccess()) {
+                // 编辑失败（old_str 没命中/不唯一）不改文件，原样保留，交给下一轮
+                // 失败原因在 getMessage()；getResult() 在 failure 时是 null
+                LoggerUtil.logExec(Level.WARNING, stage + " 工具调用失败: " + response.getFailMessage());
+            }
+        }
+        if (!writer.wroteAnything() && !editor.editedAnything()) {
+            return false;
+        }
+        if (writer.wroteAnything()) {
+            recordWrittenFiles(writer.getWrittenFiles());
+        }
+        return true;
     }
 
     public void fix() {
@@ -463,17 +576,14 @@ public class TestCase {
             dataModel.put("apiDocs", apiDoc);
             dataModel.put("rootCause", verifyMessage);
             String prompt = PromptGen.generatePrompt("FixTestCase", dataModel);
-            String text = executeWithTokenContext(TokenUsagePhase.GENERATION, () -> OpenAI.ThinkingModel.messageCompletion(prompt, 0.3, false));
-            ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
-            if (codeBlocks.isEmpty()) {
-                applyChange(text);
+            // 与 enhance 同一条 tool call 路径：模型直接写整份文件。
+            // 原先是「生成修复 → 再调一次 ApplyChange 把它合并回原文件」，
+            // 那第二次往返正是「两段都是空的」这类失败的来源
+            if (writeFilesViaToolCall(prompt, "修复(fix)")) {
+                recalculateApiDocs();
             } else {
-                String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
-                applyChange(generatedCode);
+                LoggerUtil.logExec(Level.WARNING, "修复未产出任何文件，保留原用例: " + file);
             }
-
-            // 修复后重新计算API文档，因为可能引入了新的API调用
-            recalculateApiDocs();
 
         } catch (Exception e) {
             LoggerUtil.logExec(Level.WARNING, "Fixing test case failed: " + file + "\n" + e.getMessage());
@@ -495,18 +605,21 @@ public class TestCase {
                 dataModel.put("testcase", getTestcaseWithLineNumber());
                 dataModel.put("apiDocs", apiDoc);
                 String prompt = PromptGen.generatePrompt("EnhanceTestCase", dataModel);
-                text = executeWithTokenContext(TokenUsagePhase.GENERATION, () -> OpenAI.ThinkingModel.messageCompletion(prompt, 0.3, false));
+                // 走 tool call，不再用「把代码放最后一个 java 代码块里」再做 markdown 解析：
+                // 空正文/散文回复不会再变成写进 .java 的内容，且一次回复调多次即多文件用例
+                if (writeFilesViaToolCall(prompt, "增强(enhance)")) {
+                    recalculateApiDocs();
+                } else {
+                    LoggerUtil.logExec(Level.WARNING, "增强未产出任何文件，保留原用例: " + file);
+                }
+                return;
             }
 
-            // 统一处理所有模式的输出
+            // Fuzz4All 基线仍是纯文本输出，沿用代码块抽取
             ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
 
-            if (codeBlocks.isEmpty()) {
-                writeTestCaseToFile(text);
-            } else {
-                String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
-                writeTestCaseToFile(generatedCode);
-            }
+            String candidate = codeBlocks.isEmpty() ? text : codeBlocks.get(codeBlocks.size() - 1);
+            writeSourceIfValid(candidate, "增强(enhance)");
 
             if (isFuzz4AllMode) {
                 LoggerUtil.logExec(Level.INFO, "Applied Fuzz4All result directly to test case: " + file);
@@ -520,25 +633,6 @@ public class TestCase {
         }
     }
 
-    public void applyChange(String change){
-        try {
-            String testcase = getSourceCode();
-            Map<String, Object> dataModel = new HashMap<>();
-            dataModel.put("originTestcase", testcase);
-            dataModel.put("modified", change);
-            String prompt = PromptGen.generatePrompt("ApplyChange", dataModel);
-            String text = executeWithTokenContext(TokenUsagePhase.GENERATION, () -> OpenAI.FlashModel.messageCompletion(prompt));
-            ArrayList<String> codeBlocks = CodeExtractor.extractCode(text);
-            if (codeBlocks.isEmpty() && !text.contains("```")) {
-                writeTestCaseToFile(text);
-            } else {
-                String generatedCode = codeBlocks.get(codeBlocks.size() - 1);
-                writeTestCaseToFile(generatedCode);
-            }
-        } catch (Exception e) {
-            LoggerUtil.logExec(Level.WARNING, "Applying change failed: " + file + "\n" + e.getMessage());
-        }
-    }
 
     /**
      * 为指定JDK创建独立的临时目录

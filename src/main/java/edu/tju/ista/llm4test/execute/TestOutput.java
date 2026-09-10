@@ -1,5 +1,10 @@
 package edu.tju.ista.llm4test.execute;
 
+import edu.tju.ista.llm4test.adapter.AdapterRegistry;
+import edu.tju.ista.llm4test.adapter.HarnessExitSemantics;
+import edu.tju.ista.llm4test.adapter.HarnessOutputParser;
+import edu.tju.ista.llm4test.adapter.ProjectAdapter;
+
 public class TestOutput {
 
     public final String stdout;
@@ -14,121 +19,68 @@ public class TestOutput {
     // 环境信息
     private String env;
 
+    /**
+     * 是否编译失败。
+     * <p>
+     * 判定文本与历史一致（{@link #getSimpleOutput()}），但结果在构造时算一次并
+     * 作为显式字段暴露：原先由 {@code TestResult} 对 {@code toString()} 做子串
+     * 匹配，依赖「testout 为空 → 回退原始 stdout」这个副作用才能保住标记。
+     */
+    private final boolean compilationFailed;
+
+    /** 产出这份输出的 harness 的退出码语义（不是「当前配置的」适配器的） */
+    private final HarnessExitSemantics exitSemantics;
+
+    /**
+     * 用当前适配器的解析器构造。
+     * <p>
+     * 原先这里写死 {@code new JtregOutputParser()}，核心层因此反向依赖
+     * {@code adapter.jdk}，且 Maven 模式下 core 路径会静默拿到 jtreg 解析。
+     * 改由 {@link AdapterRegistry} 提供当前 harness 的解析器：JDK 模式取值不变。
+     */
     public TestOutput(String stdout, String stderr, int exitValue) {
-        this.stdout = stdout;
-        this.stderr = stderr;
-        this.exitValue = exitValue;
-        parseJtregOutput();
+        this(stdout, stderr, exitValue, AdapterRegistry.get());
     }
 
     /**
-     * 解析JTreg输出，提取关键信息
+     * 解析器与退出码码表都取自同一个适配器——适配器构造自己的输出时用这个。
+     * <p>
+     * 只传解析器的重载会把码表回落到「当前配置的」适配器：直接使用某个适配器
+     * 而配置指向另一个时（测试与 pilot 就是这样），分类和标签都会拿错表。
      */
-    private void parseJtregOutput() {
-        if (stdout == null || stdout.isEmpty()) {
-            this.testout = "";
-            this.testerr = stderr != null ? stderr : "";
-            return;
-        }
+    public TestOutput(String stdout, String stderr, int exitValue, ProjectAdapter adapter) {
+        this(stdout, stderr, exitValue, adapter.outputParser(), adapter);
+    }
 
-        StringBuilder testOutput = new StringBuilder();
-        StringBuilder testError = new StringBuilder();
+    /**
+     * 指定harness解析器构造（供各ProjectAdapter使用）
+     * @param parser 与执行框架匹配的输出解析器
+     */
+    public TestOutput(String stdout, String stderr, int exitValue,
+                      HarnessOutputParser parser) {
+        this(stdout, stderr, exitValue, parser, AdapterRegistry.get());
+    }
 
-        // 使用保留尾部空元素的 split，避免丢失末尾空行
-        String[] lines = stdout.split("\n", -1);
-        boolean inStderr = false;
-        boolean inStdout = false;
+    public TestOutput(String stdout, String stderr, int exitValue,
+                      HarnessOutputParser parser, HarnessExitSemantics exitSemantics) {
+        this.exitSemantics = exitSemantics;
+        this.stdout = stdout;
+        this.stderr = stderr;
+        this.exitValue = exitValue;
+        var parsed = parser.parse(stdout, stderr);
+        this.testout = parsed.testout();
+        this.testerr = parsed.testerr();
+        this.compilationFailed = getSimpleOutput().contains("Compilation failed");
+    }
 
-        for (String rawLine : lines) {
-            String trimmed = rawLine.trim();
+    /** 按产出它的 harness 的码表分类 */
+    public TestResultKind classify() {
+        return exitSemantics.classifyExitValue(exitValue);
+    }
 
-            // 先处理区块切换标记（使用trimmed判断）
-            if ("STDOUT:".equals(trimmed)) {
-                inStdout = true;
-                inStderr = false;
-                continue;
-            }
-            if ("STDERR:".equals(trimmed)) {
-                inStdout = false;
-                inStderr = true;
-                continue;
-            }
-
-            // 在 STDOUT/STDERR 区块内保留原始行（含空行与空白）
-            if (inStdout) {
-                testOutput.append(rawLine).append("\n");
-                continue;
-            }
-            if (inStderr) {
-                // 遇到新的段落标记则结束 STDERR 捕获
-                if (trimmed.startsWith("ACTION:") || trimmed.startsWith("JavaTest Message:")) {
-                    inStderr = false;
-                    // 不 return，下面的通用逻辑会正常处理 ACTION 等行
-                } else {
-                    testError.append(rawLine).append("\n");
-                    continue;
-                }
-            }
-
-            // 区块外逻辑：此处可以使用 trimmed 并跳过无意义的空行与分隔线
-            if (trimmed.contains("Compilation failed")) {
-                testOutput.append(trimmed).append("\n");
-                continue;
-            }
-            // 跳过空行和分隔线（仅限区块外）
-            if (trimmed.isEmpty() || trimmed.startsWith("---")) {
-                continue;
-            }
-
-            // 提取测试名称和JDK信息
-            if (trimmed.startsWith("TEST:")) {
-                testOutput.append(trimmed).append("\n");
-                continue;
-            }
-
-            if (trimmed.startsWith("TEST JDK:")) {
-                testOutput.append(trimmed).append("\n");
-                continue;
-            }
-
-            // 提取最终测试结果
-            if (trimmed.startsWith("TEST RESULT:")) {
-                testOutput.append(trimmed).append("\n");
-                continue;
-            }
-
-            // 提取测试结果摘要
-            if (trimmed.startsWith("Test results:")) {
-                testOutput.append(trimmed).append("\n");
-                continue;
-            }
-
-            if (trimmed.startsWith("ACTION:")) {
-                testOutput.append(trimmed).append("\n");
-                continue;
-            }
-        }
-
-        this.testout = testOutput.toString().trim();
-        this.testerr = testError.toString().trim();
-
-        // 如果没有解析到测试错误，但有stderr，则提取stderr中的关键错误信息
-        if (this.testerr.isEmpty() && stderr != null && !stderr.isEmpty()) {
-            String[] stderrLines = stderr.split("\n");
-            StringBuilder stderrBuilder = new StringBuilder();
-
-            for (String line : stderrLines) {
-                line = line.trim();
-                // 只保留异常、错误消息，跳过WARNING
-                if (line.startsWith("java.lang.") || line.startsWith("\tat ") ||
-                    line.startsWith("Exception") || line.startsWith("Error:") ||
-                    line.startsWith("JavaTest Message:")) {
-                    stderrBuilder.append(line).append("\n");
-                }
-            }
-
-            this.testerr = stderrBuilder.toString().trim();
-        }
+    /** 是否编译失败（构造时判定，见字段注释） */
+    public boolean isCompilationFailed() {
+        return compilationFailed;
     }
 
     public String getEnv() {
@@ -179,26 +131,10 @@ public class TestOutput {
     public String getSimpleOutput() {
         StringBuilder sb = new StringBuilder();
 
-        // 添加退出码和含义
-        sb.append("exitValue: ").append(exitValue);
-        switch (exitValue) {
-            case 0:
-                sb.append(" (SUCCESS)");
-                break;
-            case 2:
-                sb.append(" (TEST_FAIL)");
-                break;
-            case 3:
-                sb.append(" (ENV_ERROR)");
-                break;
-            case 124:
-                sb.append(" (TIMEOUT)");
-                break;
-            default:
-                sb.append(" (UNKNOWN)");
-                break;
-        }
-        sb.append("\n");
+        // 退出码含义由当前 harness 解释（这段文本会进 prompt）
+        sb.append("exitValue: ").append(exitValue)
+                .append(" (").append(exitSemantics.describeExitValue(exitValue)).append(")")
+                .append("\n");
 
         // 添加解析后的测试输出
         if (testout != null && !testout.isEmpty()) {

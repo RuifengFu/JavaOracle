@@ -1,5 +1,6 @@
 package edu.tju.ista.llm4test.service;
 
+import edu.tju.ista.llm4test.adapter.AdapterRegistry;
 import edu.tju.ista.llm4test.config.GlobalConfig;
 import edu.tju.ista.llm4test.execute.TestExecutor;
 import edu.tju.ista.llm4test.execute.TestSuite;
@@ -26,7 +27,7 @@ public class CommandHandler {
     public static void handleExecuteCommand(String testPath) {
         File resultDir = GlobalConfig.ensureDirectoryExists(GlobalConfig.getTestDir());
         String baseDocPath = GlobalConfig.getBaseDocPath();
-        String suitePath = GlobalConfig.getSuiteBasePath() + testPath;
+        String suitePath = AdapterRegistry.get().resolveSuitePath(testPath);
         
         TestExecutionManager manager = new TestExecutionManager(
             GlobalConfig.getJarPath(),
@@ -50,7 +51,7 @@ public class CommandHandler {
     public static void handleGenerateCommand(String testPath) {
         File resultDir = GlobalConfig.ensureDirectoryExists(GlobalConfig.getTestDir());
         String baseDocPath = GlobalConfig.getBaseDocPath();
-        String suitePath = GlobalConfig.getJdkTestPath() + "/jdk/" + testPath;
+        String suitePath = AdapterRegistry.get().resolveSuitePath(testPath);
         
         TestExecutionManager manager = new TestExecutionManager(
             GlobalConfig.getJarPath(),
@@ -91,7 +92,7 @@ public class CommandHandler {
      * 处理getClass命令
      */
     public static void handleGetClassCommand(String testPath) {
-        String suitePath = GlobalConfig.getSuiteBasePath() + testPath;
+        String suitePath = AdapterRegistry.get().resolveSuitePath(testPath);
         TestSuite suite = new TestSuite(suitePath);
         JavaBaseClassCollector collector = new JavaBaseClassCollector();
 

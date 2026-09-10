@@ -1,5 +1,6 @@
 package edu.tju.ista.llm4test.llm.tools;
 
+import edu.tju.ista.llm4test.utils.ProcessRunner;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
@@ -63,26 +64,16 @@ public class JavaExecuteTool implements Tool<String> {
             // 添加类名
             command.add(trimmedClassName);
             
-            // 创建进程
-            ProcessBuilder pb = new ProcessBuilder(command);
-            pb.redirectErrorStream(true); // 合并标准输出和错误输出
-            
-            // 启动进程
-            Process process = pb.start();
-            
-            // 读取输出
-            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-            String output = reader.lines().collect(Collectors.joining("\n"));
-            
-            // 等待进程完成，设置超时
-            boolean finished = process.waitFor(600, TimeUnit.SECONDS);
-            if (!finished) {
-                process.destroy();
-                process.destroyForcibly();
+            // 走 ProcessRunner：原先是先把流读到 EOF 再 waitFor(600s)，
+            // 被测代码一旦挂住（或输出量大）就永远停在 lines() 上，超时形同虚设
+            ProcessRunner.Result run = ProcessRunner.run(command, TimeUnit.SECONDS.toMillis(600));
+            String output = run.stdout() + run.stderr();
+
+            if (run.timedOut()) {
                 return ToolResponse.failure("执行超时");
             }
-            
-            int exitCode = process.exitValue();
+
+            int exitCode = run.exitValue();
             if (exitCode == 0) {
                 return ToolResponse.success(output);
             } else {

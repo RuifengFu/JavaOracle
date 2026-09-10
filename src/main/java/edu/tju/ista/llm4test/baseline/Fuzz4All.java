@@ -213,7 +213,7 @@ public class Fuzz4All {
         }
         
         Process process = processBuilder.start();
-        boolean finished = process.waitFor(600, TimeUnit.SECONDS); // 10分钟超时
+        boolean finished = process.waitFor(600, TimeUnit.SECONDS); // 10分钟超时（见下方 readStream 说明）
         
         if (!finished) {
             process.destroyForcibly();

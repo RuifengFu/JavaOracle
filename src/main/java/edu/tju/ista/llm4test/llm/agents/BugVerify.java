@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.tju.ista.llm4test.concurrent.ConcurrentExecutionManager;
 import edu.tju.ista.llm4test.execute.TestCase;
+import edu.tju.ista.llm4test.adapter.AdapterRegistry;
 import edu.tju.ista.llm4test.execute.TestResult;
 import edu.tju.ista.llm4test.utils.ApiInfoProcessor;
 import edu.tju.ista.llm4test.utils.LoggerUtil;
@@ -36,7 +37,8 @@ import java.util.Date;
 public class BugVerify extends Agent {
 
     // 可用的工具
-    private final JtregExecuteTool jtregTool;
+    /** 由适配器提供：JDK 模式是 jtreg，Maven 模式是 junit console */
+    private final TestExecuteTool jtregTool;
     
     // 新增的信息收集Agent
     private final InformationCollectionAgent infoCollectionAgent;
@@ -295,7 +297,7 @@ public class BugVerify extends Agent {
      * @param sourcePath 源码路径
      */
     public BugVerify(String javadocPath, String sourcePath) {
-        this.jtregTool = new JtregExecuteTool();
+        this.jtregTool = AdapterRegistry.get().createExecuteTool();
         this.minimizationAgent = new TestCaseAgent();
         this.infoCollectionAgent = new InformationCollectionAgent(sourcePath, javadocPath);
         this.hypothesisAgent = new HypothesisAgent();
@@ -2195,7 +2197,7 @@ public class BugVerify extends Agent {
                         LoggerUtil.logExec(Level.INFO, "正在分析bug: " + testCaseName);
 
                         // 运行测试获取输出
-                        JtregExecuteTool jtregTool = new JtregExecuteTool();
+                        TestExecuteTool jtregTool = AdapterRegistry.get().createExecuteTool();
                         ToolResponse<TestResult> response = jtregTool.execute(testcase.getFile().toPath(), testCaseName);
 
                         if (response.isSuccess()) {

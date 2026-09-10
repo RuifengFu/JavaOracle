@@ -2,6 +2,8 @@ package edu.tju.ista.llm4test.llm.agents;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import edu.tju.ista.llm4test.adapter.AdapterRegistry;
+import edu.tju.ista.llm4test.utils.ProcessRunner;
 import edu.tju.ista.llm4test.execute.TestResult;
 import edu.tju.ista.llm4test.llm.OpenAI;
 import edu.tju.ista.llm4test.llm.tools.*;
@@ -33,7 +35,8 @@ public class HypothesisAgent extends Agent {
     
     private final OpenAI llm;
     private final JavaExecuteTool executeTool;
-    private final JtregExecuteTool jtregTool;
+    /** 由适配器提供：JDK 模式是 jtreg，Maven 模式是 junit console */
+    private final TestExecuteTool jtregTool;
     
     // 假设相关状态
     private List<String> hypotheses = new ArrayList<>();
@@ -49,7 +52,7 @@ public class HypothesisAgent extends Agent {
     public HypothesisAgent() {
         this.llm = OpenAI.DoubaoThinking;
         this.executeTool = new JavaExecuteTool();
-        this.jtregTool = new JtregExecuteTool();
+        this.jtregTool = AdapterRegistry.get().createExecuteTool();
         // 获取项目根目录
         this.projectRoot = System.getProperty("user.dir");
         LoggerUtil.logExec(Level.INFO, "项目根目录: " + projectRoot);
@@ -231,11 +234,11 @@ public class HypothesisAgent extends Agent {
     private TestResult executeTestCase(String code, String hypothesisId, String hypothesisJson) {
         TestResult result = new TestResult();
         
-        // 检查是否为jtreg风格的测试
-        if (code.contains("@test")) {
-            LoggerUtil.logExec(Level.INFO, "使用 jtreg 执行测试: " + hypothesisId);
-            ToolResponse<TestResult> jtregResult = jtregTool.execute(code);
-            return jtregResult.getResult();
+        // 能交给当前 harness 的执行工具就直接交给它（jtreg 认 @test，JUnit 认 @Test）
+        if (AdapterRegistry.get().looksLikeHarnessTest(code)) {
+            LoggerUtil.logExec(Level.INFO, "使用 harness 执行工具执行测试: " + hypothesisId);
+            ToolResponse<TestResult> harnessResult = jtregTool.execute(code);
+            return harnessResult.getResult();
         }
         
         // 编译并执行普通Java测试
@@ -271,24 +274,20 @@ public class HypothesisAgent extends Agent {
 
                 LoggerUtil.logExec(Level.INFO, "编译命令: " + String.join(" ", compileCommand));
 
-                ProcessBuilder compilePb = new ProcessBuilder(compileCommand);
-                compilePb.directory(new File(projectRoot));
-                compilePb.redirectErrorStream(true);
-                Process compileProcess = compilePb.start();
-
-                BufferedReader compileReader = new BufferedReader(new InputStreamReader(compileProcess.getInputStream()));
-                String compileOutput = compileReader.lines().collect(Collectors.joining("\n"));
+                // 走 ProcessRunner：原先是先 lines() 读到 EOF 再 waitFor(30s)，
+                // 一旦 javac 卡住就永远停在 lines() 上，那个 30s 上限根本触发不了
+                ProcessRunner.Result compileRun = ProcessRunner.run(
+                        compileCommand, TimeUnit.SECONDS.toMillis(30));
+                String compileOutput = compileRun.stdout() + compileRun.stderr();
                 lastCompileOutput = compileOutput;
 
-                boolean compileFinished = compileProcess.waitFor(30, TimeUnit.SECONDS);
-                if (!compileFinished) {
-                    compileProcess.destroyForcibly();
+                if (compileRun.timedOut()) {
                     result.setSuccess(false);
                     result.setOutput("编译超时 (尝试 " + attempt + ")");
                     return result;
                 }
 
-                int compileExitCode = compileProcess.exitValue();
+                int compileExitCode = compileRun.exitValue();
                 if (compileExitCode == 0) {
                     compiledSuccessfully = true;
                     LoggerUtil.logExec(Level.INFO, "✓ 编译成功 (尝试 " + attempt + ")");
@@ -572,21 +571,16 @@ public class HypothesisAgent extends Agent {
         LoggerUtil.logExec(Level.INFO, "classes目录存在: " + Files.exists(classesDir));
         LoggerUtil.logExec(Level.INFO, "test-classes目录存在: " + Files.exists(testClassesDir));
         
-        // 检查javac和java命令
-        try {
-            Process javacProcess = new ProcessBuilder("javac", "-version").start();
-            javacProcess.waitFor(5, TimeUnit.SECONDS);
-            LoggerUtil.logExec(Level.INFO, "javac命令可用: " + (javacProcess.exitValue() == 0));
-        } catch (Exception e) {
-            LoggerUtil.logExec(Level.WARNING, "javac命令检查失败: " + e.getMessage());
-        }
-        
-        try {
-            Process javaProcess = new ProcessBuilder("java", "-version").start();
-            javaProcess.waitFor(5, TimeUnit.SECONDS);
-            LoggerUtil.logExec(Level.INFO, "java命令可用: " + (javaProcess.exitValue() == 0));
-        } catch (Exception e) {
-            LoggerUtil.logExec(Level.WARNING, "java命令检查失败: " + e.getMessage());
+        // 检查javac和java命令（不读流就 waitFor 会在输出稍大时挂住，统一走 ProcessRunner）
+        for (String cmd : List.of("javac", "java")) {
+            try {
+                ProcessRunner.Result probe = ProcessRunner.run(
+                        List.of(cmd, "-version"), TimeUnit.SECONDS.toMillis(5));
+                LoggerUtil.logExec(Level.INFO,
+                        cmd + "命令可用: " + (!probe.timedOut() && probe.exitValue() == 0));
+            } catch (Exception e) {
+                LoggerUtil.logExec(Level.WARNING, cmd + "命令检查失败: " + e.getMessage());
+            }
         }
         
         LoggerUtil.logExec(Level.INFO, "=== 诊断完成 ===");

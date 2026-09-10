@@ -1,15 +1,20 @@
 package edu.tju.ista.llm4test.execute;
 
+import edu.tju.ista.llm4test.adapter.AdapterRegistry;
+import edu.tju.ista.llm4test.utils.LoggerUtil;
+
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Level;
 import java.util.stream.Collectors;
 
 public class TestResult {
 
     private TestResultKind kind;
     private TestOutput compileResult;
-    private TestOutput jtregResult;
+    /** 单环境执行的那一份输出（JDK 差分模式下是任取其一）；原名 jtregResult */
+    private TestOutput harnessResult;
     private HashMap<String, TestOutput> execResults = new HashMap<>();
     private String output;
     private boolean compilationFailed;
@@ -27,26 +32,11 @@ public class TestResult {
     }
 
 
-    public TestResult(TestOutput jtregResult) {
-        this.jtregResult = jtregResult;
-        if (jtregResult.exitValue != 0) {
-            if (jtregResult.exitValue == 124) {
-                kind = TestResultKind.EXECUTE_TIMEOUT;
-            } else if (jtregResult.exitValue == 3) {
-                kind = TestResultKind.EXECUTE_ERROR;
-            } else if (jtregResult.exitValue == 5) {
-                kind = TestResultKind.WRONG_FORMAT;
-            } else {
-                kind = TestResultKind.TEST_FAIL;
-            }
-        } else {
-            kind = TestResultKind.SUCCESS;
-        }
-        if (jtregResult.toString().contains("Compilation failed")) {
-            compilationFailed = true;
-        } else {
-            compilationFailed = false;
-        }
+    public TestResult(TestOutput harnessResult) {
+        this.harnessResult = harnessResult;
+        // 码表由产出这份输出的 harness 自带（JDK 模式取值与迁移前逐字一致）
+        kind = harnessResult.classify();
+        compilationFailed = harnessResult.isCompilationFailed();
     }
 
     public boolean isDiff() {
@@ -101,24 +91,19 @@ public class TestResult {
     public void mergeResults(Map<String, TestOutput> results) {
         execResults.putAll(results);
         List<Integer> list = execResults.values().stream().map(TestOutput::getExitValue).distinct().collect(Collectors.toList());
-        if (list.size() > 1) {
+        if (list.isEmpty()) {
+            // 空结果集：历史实现会在 list.get(0) 抛 IndexOutOfBounds
+            kind = TestResultKind.EXECUTE_ERROR;
+            LoggerUtil.logExec(Level.WARNING, "合并测试结果时没有任何执行输出，按执行错误处理");
+        } else if (list.size() > 1) {
             kind = TestResultKind.DIFF;
         } else {
-            int value = list.get(0);
-            this.jtregResult = results.values().stream().findFirst().orElse(null);
-            if (value == 124) {
-                kind = TestResultKind.EXECUTE_TIMEOUT;
-            } else if (value == 3) {
-                kind = TestResultKind.EXECUTE_ERROR;
-            } else if (value == 5) {
-                kind = TestResultKind.WRONG_FORMAT;
-            } else if (value != 0) {
-                kind = TestResultKind.TEST_FAIL;
-            } else {
-                kind = TestResultKind.SUCCESS;
-            }
+            this.harnessResult = results.values().stream().findFirst().orElse(null);
+            kind = harnessResult != null
+                    ? harnessResult.classify()
+                    : AdapterRegistry.get().classifyExitValue(list.get(0));
         }
-        compilationFailed = results.values().stream().anyMatch(result -> result.toString().contains("Compilation failed"));
+        compilationFailed = results.values().stream().anyMatch(TestOutput::isCompilationFailed);
     }
 
     public void setKind(TestResultKind kind) {
@@ -138,8 +123,8 @@ public class TestResult {
         return execResults;
     }
 
-    public TestOutput getJtregResult() {
-        return jtregResult;
+    public TestOutput getHarnessResult() {
+        return harnessResult;
     }
 
     public boolean getCompilationFailed() {
@@ -154,7 +139,7 @@ public class TestResult {
             }
             return sb.toString();
         }
-        return String.valueOf(jtregResult);
+        return String.valueOf(harnessResult);
     }
 
     /**
@@ -188,9 +173,9 @@ public class TestResult {
         if (output != null) {
             return output;
         }
-        // 如果没有设置输出，尝试从jtregResult或其他结果中获取
-        if (jtregResult != null) {
-            return jtregResult.toString();
+        // 如果没有设置输出，尝试从harnessResult或其他结果中获取
+        if (harnessResult != null) {
+            return harnessResult.toString();
         }
         return toString();
     }

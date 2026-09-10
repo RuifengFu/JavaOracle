@@ -14,7 +14,7 @@ ${source_code}
 **Available Tools:**
 - `copy_file`: Copies a file from a source to a destination.
 - `write_file`: Writes content to a file.
-- `jtreg_execute`: Executes a jtreg test.
+- `${harness.executeToolName}`: Executes a ${harness.name} test.
 - `start_reduction_loop`: A special command to begin the iterative reduction process.
 
 **Your Task & Plan Requirements:**
@@ -26,7 +26,7 @@ ${source_code}
 2.  **Create Setup Plan**: Your output must be a valid JSON array of action objects. The plan should perform the following actions in order:
     a.  A `write_file` action to write the `${source_code}` to a file in the `${working_directory}` (e.g., `Test.java`).
     b.  One or more `copy_file` actions to copy each identified dependency from its original location (`${original_test_directory}`) to the `${working_directory}`.
-    c.  A `jtreg_execute` action to run the test in the new environment and verify the failure is reproducible.
+    c.  A `${harness.executeToolName}` action to run the test in the new environment and verify the failure is reproducible.
     d.  A `start_reduction_loop` action to signal that the setup is complete.
 3.  **Reasoning**: You can add a `thought` field to each action to explain your reasoning.
 
@@ -60,7 +60,7 @@ Let's say the source code contains `TestUtil.setup()` and reads `"data.txt"`.
   },
   {
     "thought": "Now, I will run the test to confirm it still fails as expected.",
-    "tool": "jtreg_execute",
+    "tool": "${harness.executeToolName}",
     "parameters": {
       "file_path": "${working_directory}/MyTest.java"
     }

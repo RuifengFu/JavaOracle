@@ -1,17 +1,41 @@
 package edu.tju.ista.llm4test.config;
 
 import java.io.File;
+import java.nio.file.Path;
 
 /**
  * 应用程序配置管理类
  * 从config.properties文件读取所有配置项
  */
 public class GlobalConfig {
+
+    /**
+     * 获取目标项目类型（适配器选择）：jdk（默认，JDK/jtreg场景）/ maven（第三方Maven仓库）
+     */
+    public static String getProjectType() {
+        return ConfigUtil.getOrDefault("project.type", "jdk");
+    }
+
+    /**
+     * Maven模式：目标项目仓库根目录
+     */
+    public static String getProjectRoot() {
+        return ConfigUtil.getOrDefault("project.root", ".");
+    }
+
+    /**
+     * Maven模式：junit-platform-console-standalone 执行器jar路径
+     */
+    public static String getJUnitConsoleJar() {
+        return ConfigUtil.getOrDefault("maven.junitConsoleJar",
+                "Dependency/junit-platform-console-standalone-1.11.4.jar");
+    }
     
     // 默认值常量（当配置文件中没有对应配置时使用）
     private static final String DEFAULT_TEST_DIR = "test";
     private static final String DEFAULT_BASE_DOC_PATH = "JavaDoc/docs/api/java.base";
     private static final String DEFAULT_JDK_TEST_PATH = "jdk17u-dev/test";
+    private static final String DEFAULT_MAVEN_WORKSPACE_DIR = ".llm4test";
     private static final String DEFAULT_JDK_SOURCE_PATH = "jdk17u-dev/src";
     private static final String DEFAULT_BUG_REPORT_DIR = "BugReport";
     private static final String DEFAULT_LOG_FILE = "result.log";
@@ -22,7 +46,7 @@ public class GlobalConfig {
         "Dependency/junit-jupiter-engine-5.11.4.jar",
         "Dependency/junit-4.13.1.jar"
     };
-    private static final long DEFAULT_MAX_FILE_SIZE = 10000;
+    private static final long DEFAULT_MAX_FILE_SIZE = 512L * 1024;   // 512KiB：仅作兜底护栏
     private static final double DEFAULT_THREAD_MULTIPLIER_GENERATE = 3.0;
     private static final double DEFAULT_THREAD_MULTIPLIER_EXECUTE = 2.0;
     private static final int DEFAULT_EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS = 30;
@@ -97,6 +121,42 @@ public class GlobalConfig {
         return ConfigUtil.getOrDefault("baseDocPath", DEFAULT_BASE_DOC_PATH);
     }
     
+    /**
+     * 各角色使用的模型名（对应 models.json 里的条目名）。
+     * <p>
+     * 原先在 {@code OpenAI} 的静态块里写死成 deepseek-reasoner / doubao-flash / k2
+     * 这些**供应商专属名字**，换一家模型就得改代码。默认值保持现状，配置即可覆盖。
+     */
+    public static String getThinkingModelName() {
+        return ConfigUtil.getOrDefault("llm.thinkingModel", "deepseek-reasoner");
+    }
+
+    public static String getV3ModelName() {
+        return ConfigUtil.getOrDefault("llm.v3Model", "deepseek-chat");
+    }
+
+    public static String getFlashModelName() {
+        return ConfigUtil.getOrDefault("llm.flashModel", "doubao-flash");
+    }
+
+    /** HypothesisAgent 等使用的"更强"模型 */
+    public static String getVerifyModelName() {
+        return ConfigUtil.getOrDefault("llm.verifyModel", "doubao-thinking");
+    }
+
+    /** TestCaseAgent 使用的 agent 模型 */
+    public static String getAgentModelName() {
+        return ConfigUtil.getOrDefault("llm.agentModel", "k2");
+    }
+
+    /**
+     * Maven模式的工作区根目录（classpath 缓存等）。
+     * 放在本项目工作目录下而不是被测仓库里，避免污染别人的检出。
+     */
+    public static String getMavenWorkspaceDir() {
+        return ConfigUtil.getOrDefault("maven.workspaceDir", DEFAULT_MAVEN_WORKSPACE_DIR);
+    }
+
     /**
      * 获取JDK测试路径
      */
@@ -293,12 +353,60 @@ public class GlobalConfig {
         String cacheDir = getValidTestCasesDir();
         ensureDirectoryExists(cacheDir);
         
-        // 将rootPath转换为文件名安全的格式
-        String fileName = rootPath.replace("/", "_").replace("\\", "_").replace(":", "_");
-        if (fileName.isEmpty()) {
-            fileName = "default";
+        return cacheDir + "/" + toCacheKey(rootPath) + ".txt";
+    }
+
+    /**
+     * 把套件路径转成通过列表的文件名键。
+     * <p>
+     * 先相对化到工作目录再替换分隔符：否则绝对配置（CI 的 $GITHUB_WORKSPACE、
+     * Maven 模式的 project.root）会把机器路径写进文件名，换机器或换检出目录后
+     * 缓存直接失效。工作目录之外的仓库丢掉 {@code ../} 前缀，保留可辨识的尾部。
+     */
+    private static String toCacheKey(String rootPath) {
+        if (rootPath == null || rootPath.isBlank()) {
+            return "default";
         }
-        return cacheDir + "/" + fileName + ".txt";
+        try {
+            Path cwd = Path.of("").toAbsolutePath().normalize();
+            Path relative = cwd.relativize(Path.of(rootPath).toAbsolutePath().normalize());
+            StringBuilder key = new StringBuilder();
+            boolean escapedWorkdir = false;
+            for (Path segment : relative) {
+                String name = segment.toString();
+                if (name.isEmpty()) {
+                    continue;
+                }
+                if ("..".equals(name)) {
+                    // 丢掉 ../ 前缀以免文件名难读，但必须记下「曾经上跳」
+                    escapedWorkdir = true;
+                    continue;
+                }
+                if (key.length() > 0) {
+                    key.append('_');
+                }
+                key.append(name);
+            }
+            if (escapedWorkdir) {
+                // 否则 ../commons-lang/... 、<cwd>/commons-lang/... 、
+                // ../../别处/commons-lang/... 会撞成同一个文件名，
+                // 一个仓库的通过列表被静默套用到另一个仓库上
+                key.append('_').append(shortHash(relative.toString()));
+            }
+            if (key.length() > 0) {
+                return key.toString();
+            }
+            // 相对化后为空（rootPath 就是工作目录本身）
+            return "default";
+        } catch (Exception e) {
+            // 无法相对化（如 Windows 跨盘符）：用 hash 而不是把机器绝对路径写进文件名
+            return "suite_" + shortHash(rootPath);
+        }
+    }
+
+    /** 稳定的短摘要，用于消歧文件名 */
+    private static String shortHash(String value) {
+        return String.format("%08x", value.hashCode());
     }
     
     /**

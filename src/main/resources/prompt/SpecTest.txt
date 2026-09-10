@@ -18,7 +18,7 @@ ${apiDocs}
    - No assertion causes a false positive.
    - Original assertions are preserved.
    - New assertions are marked with the comment "Enhance Test Oracle by LLM".
-   - The test case remains in jtreg format and includes all necessary import statements to avoid compile errors.
+   - The test case remains in ${harness.name} format and includes all necessary import statements to avoid compile errors.
 </Tasks>
 
 <Requirements>
@@ -32,13 +32,7 @@ ${apiDocs}
 3. **Assertions**:
    - Ensure all assertions are contextually correct, even if the JML specification is not.
    - Mark all modifications with the comment "Enhance Test Oracle by LLM".
-4. **jtreg Format**:
-   - Retain jtreg format comments in the code, including test metadata such as:
-     ```
-     /*
-      * @test
-      * @bug 4160406 4705734 4707389 6358355 7032154
-      * @summary Tests for Float.parseFloat method
-      */
-     ```
+4. **${harness.name} Format**:
+   - Retain ${harness.name} format comments in the code, including test metadata such as:
+${harness.tagExample}
 </Requirements> 
